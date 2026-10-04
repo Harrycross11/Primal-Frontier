@@ -38,7 +38,7 @@ try {
     );
   };
 
-  const spot = (await pf('findClearSpot', 15)) as { x: number; z: number };
+  const spot = (await pf('findClearSpot', 12)) as { x: number; z: number };
   await walkTo(spot.x, spot.z);
   const [px, py, pz] = ((await pf('state')) as any).position;
   const i = Math.floor(px / 3) + 1;
