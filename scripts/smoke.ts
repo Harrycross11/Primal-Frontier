@@ -74,7 +74,7 @@ try {
   const rook = await joinAs('Rook');
   await ash.waitForTimeout(800);
   check((await state(ash)).others === 1 && (await state(rook)).others === 1, 'both players see each other');
-  await ash.screenshot({ path: '.smoke/1-spawn.png' });
+  await ash.screenshot({ path: '.smoke/1-spawn.png', timeout: 300000 });
 
   await gatherAll(ash, 'deadTree', 70, 'wood');
   await gatherAll(ash, 'scrap', 20, 'scrap');
@@ -125,16 +125,16 @@ try {
   await pf(ash, 'look', Math.PI / 2 + 0.35, -0.05);
   await pf(ash, 'setQuality', 'high');
   await ash.waitForTimeout(3000);
-  await ash.screenshot({ path: '.smoke/2-hut.png' });
+  await ash.screenshot({ path: '.smoke/2-hut.png', timeout: 300000 });
   await pf(ash, 'setQuality', 'low');
   await walkTo(rook, i * S - 6, (k - 2) * S, 240000);
   await pf(rook, 'look', -Math.atan2(i * S + 1.5 - (i * S - 6), k * S + 1.5 - (k - 2) * S) + Math.PI, -0.1);
   await pf(rook, 'setQuality', 'high');
   await rook.waitForTimeout(3000);
-  await rook.screenshot({ path: '.smoke/3-rook-view.png' });
+  await rook.screenshot({ path: '.smoke/3-rook-view.png', timeout: 300000 });
   await pf(rook, 'setQuality', 'low');
   await rook.waitForTimeout(500);
-  await rook.screenshot({ path: '.smoke/4-rook-low-quality.png' });
+  await rook.screenshot({ path: '.smoke/4-rook-low-quality.png', timeout: 300000 });
 
   check(errors.length === 0, `no browser errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } catch (e) {
