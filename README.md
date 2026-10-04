@@ -2,16 +2,18 @@
 
 A survival sandbox set in a world after a nuclear apocalypse. Players join a server, scavenge a barren map for scarce wood and scrap, and build with blocks together. The full vision is Rust-style survival with ARK-style creatures, Minecraft-style building and Fortnite-style characters on servers that wipe every 30 days.
 
-This repository is the **browser prototype**, built step by step. The current milestone is **walk, gather, build**.
+This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build** and **better graphics with Fortnite-style building**.
 
 ![Two survivors next to a scrap block tower](docs/screenshots/two-players.png)
 
 ## What works now
 
-- A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, rusted wrecks and one small pocket of living trees.
+- A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, burnt-out cars, ruined concrete houses, leaning power poles, boulders and one small pocket of living trees.
+- Graphics: a hazy low-sun sky with matching lighting and reflections, textured ground, shadows, dry grass, drifting ash, ambient occlusion, bloom and a warm colour grade. Press **O** to switch to low graphics on slower computers.
 - Up to 8 players per server, each with a bright stylized survivor and a name tag.
 - Gathering: hit trees for wood and wrecks for scrap. Trees never regrow; scrap respawns after 2 minutes.
-- Building: wood and scrap blocks on a 1 m grid, costing 2 materials each. Blocks must touch the ground or another block. Breaking one refunds half.
+- Fortnite-style building on a 3 m grid: walls, floors and stairs in wood or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; scrap is twice as tough as wood.
+- Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
 - The server checks every action (reach, cost, cooldowns, movement speed), so players can't cheat by editing the client.
 
 ## Controls
@@ -20,9 +22,11 @@ This repository is the **browser prototype**, built step by step. The current mi
 | --- | --- |
 | Look around | Click the game, then move the mouse |
 | Move / sprint / jump | WASD / Shift / Space |
-| Gather or break | Left click or E |
-| Build | Right click or F |
-| Pick block type | 1 wood, 2 scrap |
+| Hands, wall, floor, stairs | 1, 2, 3, 4 (or scroll; Q jumps to wall) |
+| Gather, hit, or place the selected piece | Left click |
+| Swap building material (wood or scrap) | R |
+| Edit the wall you look at (window, door, half wall, solid) | G |
+| Graphics high or low | O |
 | Hide help | H |
 
 ## Play it on your computer
@@ -49,9 +53,9 @@ The repo includes a `render.yaml`. On [Render](https://render.com), choose **New
 | --- | --- |
 | `shared/` | Rules both sides use: terrain generation, resources, block costs, message types |
 | `server/` | The authoritative game server (`game.ts` is pure logic, `index.ts` is networking) |
-| `client/` | The Three.js game: world, character, controls and screen layout |
+| `client/` | The Three.js game: graphics, world, character, building controls and screen layout |
 | `tests/` | Unit tests for the game rules |
-| `scripts/smoke.ts` | A two-player browser test that gathers, builds and checks both players see it |
+| `scripts/smoke.ts` | A two-player browser test that gathers, builds a hut with a door and window, walks up the stairs, and checks both players see it |
 
 Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 

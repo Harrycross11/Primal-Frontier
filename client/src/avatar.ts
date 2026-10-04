@@ -1,19 +1,12 @@
-// Stylized survivor: chunky proportions, big head, bright jacket, toon shading.
+// Stylized survivor: chunky proportions, big head, bright jacket.
 // Bright characters against a grey world is the game's art rule.
 
 import * as THREE from 'three';
 
-const toonRamp = (() => {
-  const data = new Uint8Array([90, 170, 255]);
-  const tex = new THREE.DataTexture(data, 3, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.needsUpdate = true;
-  return tex;
-})();
-
-function toon(color: number) {
-  return new THREE.MeshToonMaterial({ color, gradientMap: toonRamp });
+// Clean, slightly glossy materials: the characters stay bright and stylized like Fortnite,
+// while still picking up the world's sunlight and sky reflections.
+function toon(color: number, roughness = 0.6) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
 }
 
 export class Avatar {
@@ -28,10 +21,10 @@ export class Avatar {
 
   constructor(color: number, name?: string) {
     const jacket = toon(color);
-    const pants = toon(0x2b2f3a);
+    const pants = toon(0x2b2f3a, 0.85);
     const skin = toon(0xf2c29b);
-    const boots = toon(0x3b2a20);
-    const pack = toon(0x8a6a3c);
+    const boots = toon(0x3b2a20, 0.9);
+    const pack = toon(0x8a6a3c, 0.85);
 
     const body = new THREE.Group();
     this.body = body;

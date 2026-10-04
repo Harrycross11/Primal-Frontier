@@ -1,11 +1,10 @@
 // Resources and blocks: the parts of the world that players change.
 
-import { HALF_WORLD, MAX_BUILD_HEIGHT } from './constants.ts';
+import { HALF_WORLD } from './constants.ts';
 import { mulberry32, terrainHeight } from './terrain.ts';
 
 export type ResourceKind = 'tree' | 'deadTree' | 'scrap';
 export type Material = 'wood' | 'scrap';
-export type BlockType = 'wood' | 'scrap';
 
 export interface ResourceNode {
   id: number;
@@ -21,14 +20,9 @@ export interface ResourceNode {
 }
 
 export const RESOURCE_INFO: Record<ResourceKind, { material: Material; amount: number; perHit: number; radius: number }> = {
-  tree: { material: 'wood', amount: 12, perHit: 2, radius: 0.45 },
-  deadTree: { material: 'wood', amount: 5, perHit: 1, radius: 0.3 },
-  scrap: { material: 'scrap', amount: 8, perHit: 1, radius: 0.9 },
-};
-
-export const BLOCK_COST: Record<BlockType, { material: Material; amount: number }> = {
-  wood: { material: 'wood', amount: 2 },
-  scrap: { material: 'scrap', amount: 2 },
+  tree: { material: 'wood', amount: 60, perHit: 6, radius: 0.45 },
+  deadTree: { material: 'wood', amount: 24, perHit: 4, radius: 0.3 },
+  scrap: { material: 'scrap', amount: 40, perHit: 4, radius: 0.9 },
 };
 
 export type Inventory = Record<Material, number>;
@@ -70,47 +64,36 @@ export function generateResources(seed: number): ResourceNode[] {
   return nodes;
 }
 
-export function blockKey(x: number, y: number, z: number): string {
-  return `${x},${y},${z}`;
-}
+export type DecorKind = 'ruin' | 'pole' | 'rock' | 'barrel';
 
-export interface Block {
+export interface Decor {
+  kind: DecorKind;
   x: number;
   y: number;
   z: number;
-  type: BlockType;
+  rot: number;
+  scale: number;
+  /** Variety seed for the shape. */
+  variant: number;
 }
 
-/** Blocks sit on a 1 m grid; cell (x, y, z) covers [x, x+1) x [y, y+1) x [z, z+1). */
-export function cellInBounds(x: number, y: number, z: number): boolean {
-  return (
-    Number.isInteger(x) &&
-    Number.isInteger(y) &&
-    Number.isInteger(z) &&
-    Math.abs(x + 0.5) < HALF_WORLD * 0.9 &&
-    Math.abs(z + 0.5) < HALF_WORLD * 0.9 &&
-    y >= -10 &&
-    y < MAX_BUILD_HEIGHT
-  );
-}
-
-/** A block must touch the ground or another block, so nobody builds floating sky bases. */
-export function cellIsSupported(seed: number, blocks: Map<string, Block>, x: number, y: number, z: number): boolean {
-  const ground = Math.max(
-    terrainHeight(seed, x, z),
-    terrainHeight(seed, x + 1, z),
-    terrainHeight(seed, x, z + 1),
-    terrainHeight(seed, x + 1, z + 1),
-    terrainHeight(seed, x + 0.5, z + 0.5),
-  );
-  if (y <= ground + 0.25) return true;
-  const n: [number, number, number][] = [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1],
-  ];
-  return n.some(([dx, dy, dz]) => blocks.has(blockKey(x + dx, y + dy, z + dz)));
+/**
+ * Scenery that tells the story of the world: ruined concrete buildings, leaning power poles,
+ * boulders and rusted barrels. Purely visual, plus collision for the big pieces on the client.
+ */
+export function generateDecor(seed: number): Decor[] {
+  const rand = mulberry32(seed ^ 0x1b873593);
+  const span = HALF_WORLD * 0.8;
+  const list: Decor[] = [];
+  const add = (kind: DecorKind, x: number, z: number, scale = 1) =>
+    list.push({ kind, x, y: terrainHeight(seed, x, z), z, rot: rand() * Math.PI * 2, scale, variant: Math.floor(rand() * 1000) });
+  for (let i = 0; i < 7; i++) add('ruin', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  // A line of power poles crossing the map, like an old road.
+  const angle = rand() * Math.PI;
+  for (let d = -span; d <= span; d += 18) {
+    add('pole', Math.cos(angle) * d + (rand() - 0.5) * 2, Math.sin(angle) * d + (rand() - 0.5) * 2);
+  }
+  for (let i = 0; i < 60; i++) add('rock', (rand() - 0.5) * 2 * span * 1.1, (rand() - 0.5) * 2 * span * 1.1, 0.4 + rand() * rand() * 2.2);
+  for (let i = 0; i < 18; i++) add('barrel', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  return list;
 }

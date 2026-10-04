@@ -1,5 +1,5 @@
-// Local player: keyboard and mouse input, simple physics against terrain and blocks,
-// and an over-the-shoulder third-person camera.
+// Local player: keyboard and mouse input, physics against terrain, scenery and building
+// pieces (including walking up stairs), and an over-the-shoulder third-person camera.
 
 import * as THREE from 'three';
 import {
@@ -11,18 +11,23 @@ import {
   PLAYER_SPEED,
   PLAYER_SPRINT,
 } from '../../shared/constants.ts';
+import { pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, type ResourceNode } from '../../shared/world.ts';
 import type { World } from './world.ts';
 
+/** Ledges up to this height are stepped onto automatically. */
+const STEP = 0.55;
+
 export class Controller {
   readonly position = new THREE.Vector3();
   yaw = 0;
-  pitch = -0.15;
+  pitch = -0.12;
   moving = false;
   private vy = 0;
   private onGround = false;
   private keys = new Set<string>();
+  private raycaster = new THREE.Raycaster();
   /** Used by automated tests to walk somewhere without a keyboard. */
   autoWalk: { x: number; z: number } | null = null;
 
@@ -37,7 +42,7 @@ export class Controller {
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
       this.yaw -= e.movementX * 0.0025;
-      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025, -1.2, 0.9);
+      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025, -1.3, 1.1);
     });
   }
 
@@ -53,7 +58,6 @@ export class Controller {
     if (this.keys.has('KeyA')) fx -= 1;
     if (this.keys.has('KeyD')) fx += 1;
 
-    // Camera-relative directions: forward is where the camera looks.
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(-forward.z, 0, forward.x);
     const dir = forward.multiplyScalar(fz).add(right.multiplyScalar(fx));
@@ -61,20 +65,24 @@ export class Controller {
     if (this.autoWalk) {
       const dx = this.autoWalk.x - this.position.x;
       const dz = this.autoWalk.z - this.position.z;
-      if (Math.hypot(dx, dz) < 0.5) this.autoWalk = null;
+      if (Math.hypot(dx, dz) < 0.4) this.autoWalk = null;
       else {
         dir.set(dx, 0, dz);
         this.yaw = Math.atan2(-dx, -dz);
       }
     }
 
+    const colliders = this.nearbyColliders();
     this.moving = dir.lengthSq() > 0;
     if (this.moving) {
       const speed = this.keys.has('ShiftLeft') ? PLAYER_SPRINT : PLAYER_SPEED;
       dir.normalize().multiplyScalar(speed * dt);
-      this.tryMove(dir.x, 0);
-      this.tryMove(0, dir.z);
-      this.autoStep();
+      // Sub-steps stop fast movement from tunnelling through thin walls.
+      const steps = Math.ceil(dir.length() / 0.1);
+      for (let s = 0; s < steps; s++) {
+        this.tryMove(dir.x / steps, 0, colliders);
+        this.tryMove(0, dir.z / steps, colliders);
+      }
     }
 
     if (this.keys.has('Space') && this.onGround) {
@@ -82,10 +90,10 @@ export class Controller {
       this.onGround = false;
     }
     this.vy -= GRAVITY * dt;
-    this.moveVertical(this.vy * dt);
+    this.moveVertical(this.vy * dt, colliders);
   }
 
-  /** Puts the camera behind and slightly right of the player, kept above the ground. */
+  /** Camera behind and slightly right of the player; pulled in if a wall is in the way. */
   updateCamera(camera: THREE.PerspectiveCamera) {
     const dist = 4.2;
     const back = new THREE.Vector3(
@@ -95,8 +103,12 @@ export class Controller {
     );
     const shoulder = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).multiplyScalar(0.55);
     const pivot = this.position.clone().add(new THREE.Vector3(0, 1.65, 0)).add(shoulder);
-    const cam = pivot.clone().addScaledVector(back, dist);
-    cam.y = Math.max(cam.y, terrainHeight(this.world.seed, cam.x, cam.z) + 0.4);
+    this.raycaster.set(pivot, back);
+    this.raycaster.far = dist;
+    const hit = this.raycaster.intersectObjects(this.world.cameraBlockers, true)[0];
+    const d = hit ? Math.max(hit.distance - 0.25, 0.4) : dist;
+    const cam = pivot.clone().addScaledVector(back, d);
+    cam.y = Math.max(cam.y, terrainHeight(this.world.seed, cam.x, cam.z) + 0.3);
     camera.position.copy(cam);
     camera.lookAt(pivot.clone().addScaledVector(back, -10));
   }
@@ -106,36 +118,75 @@ export class Controller {
     this.vy = 0;
   }
 
-  private tryMove(dx: number, dz: number) {
+  /** Building pieces and scenery within a few metres of the player. */
+  private nearbyColliders(): Box[] {
+    const p = this.position;
+    const near = (b: Box) =>
+      b.max[0] > p.x - 4 && b.min[0] < p.x + 4 && b.max[2] > p.z - 4 && b.min[2] < p.z + 4;
+    const out = this.world.decorColliders.filter(near);
+    for (const piece of this.world.pieces.values()) {
+      if (piece.kind === 'stairs') continue; // stairs are ramps, handled in groundHeight
+      for (const b of pieceBoxes(piece)) if (near(b)) out.push(b);
+    }
+    return out;
+  }
+
+  /** True if the player's body (above knee height) at (x, y, z) overlaps a collider. */
+  private blocked(x: number, y: number, z: number, colliders: Box[]): boolean {
+    const r = PLAYER_RADIUS;
+    const y0 = y + STEP;
+    const y1 = y + PLAYER_HEIGHT;
+    for (const b of colliders) {
+      if (x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && y1 > b.min[1] && y0 < b.max[1]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The highest surface under the player that they can stand on from height y. */
+  private groundHeight(x: number, y: number, z: number, colliders: Box[]): number {
+    let ground = terrainHeight(this.world.seed, x, z);
+    const r = PLAYER_RADIUS * 0.8;
+    for (const b of colliders) {
+      if (x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && b.max[1] <= y + STEP) {
+        ground = Math.max(ground, b.max[1]);
+      }
+    }
+    for (const piece of this.world.pieces.values()) {
+      if (piece.kind !== 'stairs') continue;
+      const h = stairsHeight(piece, x, z);
+      if (h !== null && h <= y + STEP + 0.2) ground = Math.max(ground, h);
+    }
+    return ground;
+  }
+
+  private tryMove(dx: number, dz: number, colliders: Box[]) {
     const nx = THREE.MathUtils.clamp(this.position.x + dx, -HALF_WORLD + 1, HALF_WORLD - 1);
     const nz = THREE.MathUtils.clamp(this.position.z + dz, -HALF_WORLD + 1, HALF_WORLD - 1);
-    if (this.hitsBlock(nx, this.position.y, nz) || this.hitsResource(nx, nz)) return;
+    if (this.blocked(nx, this.position.y, nz, colliders) || this.hitsResource(nx, nz)) return;
     this.position.x = nx;
     this.position.z = nz;
   }
 
-  /** Walking into a block shorter than knee height steps onto it, like a stair. */
-  private autoStep() {
-    if (!this.onGround) return;
+  private moveVertical(dy: number, colliders: Box[]) {
     const p = this.position;
-    if (this.hitsBlock(p.x, p.y + 0.01, p.z) && !this.hitsBlock(p.x, Math.floor(p.y) + 1, p.z)) {
-      p.y = Math.floor(p.y) + 1;
-    }
-  }
-
-  private moveVertical(dy: number) {
-    const p = this.position;
-    const ny = p.y + dy;
-    const ground = terrainHeight(this.world.seed, p.x, p.z);
-    if (this.hitsBlock(p.x, ny, p.z)) {
-      if (dy < 0) {
-        p.y = Math.floor(ny) + 1; // land on top of the block below
-        this.onGround = true;
-      } else {
-        p.y = Math.ceil(ny + PLAYER_HEIGHT) - 1 - PLAYER_HEIGHT; // bump head on the block above
+    const ground = this.groundHeight(p.x, p.y, p.z, colliders);
+    let ny = p.y + dy;
+    if (dy > 0) {
+      // Bump the head on a ceiling.
+      const r = PLAYER_RADIUS;
+      for (const b of colliders) {
+        const over = p.x + r > b.min[0] && p.x - r < b.max[0] && p.z + r > b.min[2] && p.z - r < b.max[2];
+        if (over && b.min[1] >= p.y + PLAYER_HEIGHT - 0.05 && b.min[1] < ny + PLAYER_HEIGHT) {
+          ny = b.min[1] - PLAYER_HEIGHT;
+          this.vy = 0;
+        }
       }
-      this.vy = 0;
-    } else if (ny <= ground) {
+    }
+    // Stay glued to the ground when walking down stairs or slopes instead of hopping.
+    const snap = this.onGround && dy <= 0 && p.y - ground < STEP;
+    if (ny <= ground || snap) {
       p.y = ground;
       this.vy = 0;
       this.onGround = true;
@@ -143,19 +194,6 @@ export class Controller {
       p.y = ny;
       this.onGround = false;
     }
-  }
-
-  private hitsBlock(x: number, y: number, z: number): boolean {
-    const r = PLAYER_RADIUS;
-    const e = 0.001;
-    for (let bx = Math.floor(x - r); bx <= Math.floor(x + r); bx++) {
-      for (let bz = Math.floor(z - r); bz <= Math.floor(z + r); bz++) {
-        for (let by = Math.floor(y + e); by <= Math.floor(y + PLAYER_HEIGHT - e); by++) {
-          if (this.world.hasBlock(bx, by, bz)) return true;
-        }
-      }
-    }
-    return false;
   }
 
   private hitsResource(x: number, z: number): boolean {

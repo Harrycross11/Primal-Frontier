@@ -35,7 +35,7 @@
       #hud[hidden] { display: none; }
       #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
         border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.5); pointer-events: none; }
-      #target { position: fixed; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); padding: 6px 12px;
+      #target { position: fixed; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); padding: 6px 12px; min-width: 140px; text-align: center;
         background: var(--panel); border-radius: 8px; font-size: 14px; white-space: nowrap; pointer-events: none; }
       #target[hidden] { display: none; }
       #top-left { position: fixed; left: 16px; top: 16px; padding: 10px 14px; background: var(--panel);
@@ -48,11 +48,22 @@
       .chip { width: 18px; height: 18px; border-radius: 4px; }
       .chip.wood { background: #9a6b3f; } .chip.scrap { background: linear-gradient(135deg,#6b6f75 50%,#a35d32 50%); }
       #hotbar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
-      .slot { width: 92px; padding: 8px; background: var(--panel); border: 3px solid transparent; border-radius: 12px;
-        text-align: center; font-size: 12px; }
-      .slot.active { border-color: var(--accent); }
-      .slot .swatch { width: 34px; height: 34px; margin: 0 auto 6px; border-radius: 6px; }
-      .slot .key { float: left; font-weight: 800; opacity: .7; }
+      .slot { position: relative; width: 74px; padding: 8px 6px 6px; background: var(--panel); border: 3px solid transparent;
+        border-radius: 12px; text-align: center; font-size: 12px; font-weight: 700; color: #4fb3ff; }
+      .slot svg { display: block; width: 34px; height: 34px; margin: 0 auto 4px; }
+      .slot { color: var(--ink); } .slot svg { color: #4fb3ff; }
+      .slot.active { border-color: #4fb3ff; background: rgba(20, 50, 80, 0.7); }
+      .slot .key { position: absolute; left: 6px; top: 3px; font-size: 11px; opacity: .7; }
+      #material { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        min-width: 92px; padding: 6px 10px; background: var(--panel); border-radius: 12px; font-weight: 800; }
+      #material small { font-weight: 500; font-size: 10px; opacity: .75; }
+      #material .chip { width: 22px; height: 22px; }
+      #material[data-material="wood"] .chip { background: #9a6b3f; }
+      #material[data-material="scrap"] .chip { background: linear-gradient(135deg,#6b6f75 50%,#a35d32 50%); }
+      body:not(.building) #material { opacity: .5; }
+      #target-health { margin-top: 5px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
+      #target-health[hidden] { display: none; }
+      #target-health-fill { height: 100%; background: #7cff6b; }
       #notice { position: fixed; left: 50%; top: 22%; transform: translate(-50%, -6px); padding: 10px 18px;
         background: var(--panel); border-radius: 10px; font-weight: 700; opacity: 0; transition: .2s; pointer-events: none; }
       #notice.show { opacity: 1; transform: translate(-50%, 0); }
@@ -77,30 +88,36 @@
         <button id="play">Enter the wasteland</button>
         <div id="join-error"></div>
         <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
-          Left click gather / break · Right click build · 1–2 pick block</div>
+          Left click gather or build · 1–4 hands, wall, floor, stairs · G edit</div>
       </div>
     </div>
 
     <div id="hud" hidden>
       <div id="crosshair"></div>
-      <div id="target" hidden></div>
+      <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
       <div id="top-left"><div id="player-count"></div><div id="player-list"></div></div>
       <div id="inventory">
         <div class="res"><span class="chip wood"></span><span id="inv-wood">0</span></div>
         <div class="res"><span class="chip scrap"></span><span id="inv-scrap">0</span></div>
       </div>
       <div id="hotbar">
-        <div class="slot" data-block="wood"><span class="key">1</span>
-          <div class="swatch" style="background:#9a6b3f"></div>Wood block<br />2 wood</div>
-        <div class="slot" data-block="scrap"><span class="key">2</span>
-          <div class="swatch" style="background:linear-gradient(135deg,#6b6f75 50%,#a35d32 50%)"></div>Scrap block<br />2 scrap</div>
+        <div class="slot" data-slot="hands"><span class="key">1</span>
+          <svg viewBox="0 0 40 40"><path d="M10 30 L26 14" stroke="#c9b28a" stroke-width="4" stroke-linecap="round"/><path d="M18 8 Q30 6 34 16 L28 18 Q26 12 18 12 Z" fill="#9aa3ad"/></svg>Hands</div>
+        <div class="slot" data-slot="wall"><span class="key">2</span>
+          <svg viewBox="0 0 40 40"><rect x="9" y="8" width="22" height="26" rx="2" fill="currentColor"/></svg>Wall</div>
+        <div class="slot" data-slot="floor"><span class="key">3</span>
+          <svg viewBox="0 0 40 40"><path d="M4 26 L20 18 L36 26 L20 34 Z" fill="currentColor"/></svg>Floor</div>
+        <div class="slot" data-slot="stairs"><span class="key">4</span>
+          <svg viewBox="0 0 40 40"><path d="M6 34 V28 H14 V22 H22 V16 H30 V10 H36 V34 Z" fill="currentColor"/></svg>Stairs</div>
+        <div id="material" data-material="wood"><span class="chip"></span><span id="material-name">Wood</span><small>R to swap · 10 each</small></div>
       </div>
       <div id="notice"></div>
       <div id="help">
-        Click the game to look around · <kbd>H</kbd> hide help<br />
+        Click the game to look around · <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
-        Left click / <kbd>E</kbd> gather or break · Right click / <kbd>F</kbd> build<br />
-        <kbd>1</kbd> wood block · <kbd>2</kbd> scrap block
+        <kbd>1</kbd> hands · <kbd>2</kbd> wall · <kbd>3</kbd> floor · <kbd>4</kbd> stairs · or scroll<br />
+        Left click gather, hit or build · <kbd>R</kbd> wood or scrap<br />
+        <kbd>G</kbd> edit a wall: window, door, half wall
       </div>
       <div id="disconnected" hidden>Lost connection to the server. Refresh to rejoin.</div>
     </div>

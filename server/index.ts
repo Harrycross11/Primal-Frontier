@@ -99,10 +99,13 @@ wss.on('connection', (ws) => {
         deliver(game.gather(id, msg.id, now));
         break;
       case 'place':
-        deliver(game.place(id, msg.x, msg.y, msg.z, msg.block));
+        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
         break;
-      case 'break':
-        deliver(game.break(id, msg.x, msg.y, msg.z));
+      case 'hit':
+        deliver(game.hit(id, String(msg.key), now));
+        break;
+      case 'edit':
+        deliver(game.edit(id, String(msg.key), msg.edit));
         break;
     }
   });

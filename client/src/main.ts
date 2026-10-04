@@ -1,37 +1,36 @@
 // Entry point: join screen, then the game loop (input, physics, networking, rendering).
 
 import * as THREE from 'three';
-import { BUILD_RANGE, GATHER_RANGE, PLAYER_HEIGHT, PLAYER_RADIUS } from '../../shared/constants.ts';
-import type { PlayerState, ServerMessage } from '../../shared/protocol.ts';
-import { terrainHeight } from '../../shared/terrain.ts';
+import { GATHER_RANGE } from '../../shared/constants.ts';
 import {
-  BLOCK_COST,
-  RESOURCE_INFO,
-  cellInBounds,
-  type BlockType,
-  type Inventory,
-  type ResourceNode,
-} from '../../shared/world.ts';
+  MAX_HP,
+  PIECE_COST,
+  STOREY,
+  WALL_EDITS,
+  pieceKey,
+  pieceSupported,
+  type Piece,
+  type PieceKind,
+} from '../../shared/building.ts';
+import type { PlayerState, ServerMessage } from '../../shared/protocol.ts';
+import { RESOURCE_INFO, type Inventory, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
+import { inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
-import { Hud } from './hud.ts';
+import { Graphics } from './graphics.ts';
+import { Hud, type Slot } from './hud.ts';
 import { Net } from './net.ts';
-import { World } from './world.ts';
+import { World, buildPieceMesh } from './world.ts';
 
 const RESOURCE_NAMES = { tree: 'Living tree', deadTree: 'Dead tree', scrap: 'Scrap wreck' } as const;
+const PIECE_NAMES: Record<PieceKind, string> = { wall: 'wall', floor: 'floor', stairs: 'stairs' };
+const SLOTS: Slot[] = ['hands', 'wall', 'floor', 'stairs'];
 
 interface Remote {
   state: PlayerState;
   avatar: Avatar;
   target: THREE.Vector3;
 }
-
-type Target =
-  | { kind: 'resource'; node: ResourceNode; inRange: boolean }
-  | { kind: 'block'; cell: { x: number; y: number; z: number }; place: Cell | null; inRange: boolean }
-  | { kind: 'ground'; place: Cell | null; inRange: boolean }
-  | null;
-type Cell = { x: number; y: number; z: number };
 
 const hud = new Hud();
 
@@ -58,28 +57,19 @@ hud.onPlay(async (name) => {
 });
 
 function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.getElementById('game')!.appendChild(renderer.domElement);
-
-  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 400);
-  addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
-
   const world = new World(welcome.seed);
+  const gfx = new Graphics(document.getElementById('game')!, world.scene);
+  const camera = gfx.camera;
+  hud.setQuality(gfx.quality);
+
   const resources = welcome.resources;
   world.addResources(resources);
-  for (const b of welcome.blocks) world.setBlock(b);
+  for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
 
   const me = new Avatar(welcome.you.color);
   world.scene.add(me.root);
-  const controller = new Controller(world, () => resources, renderer.domElement);
+  const canvas = gfx.renderer.domElement;
+  const controller = new Controller(world, () => resources, canvas);
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
 
   const remotes = new Map<number, Remote>();
@@ -93,11 +83,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   welcome.players.forEach(addRemote);
 
   let inventory: Inventory = welcome.inventory;
-  let selected: BlockType = 'wood';
+  let slot: Slot = 'hands';
+  let material: Material = 'wood';
   hud.setInventory(inventory);
-  hud.setSelected(selected);
-  hud.setPlayers([welcome.you.name, ...welcome.players.map((p) => p.name)]);
+  hud.setSlot(slot, material);
   const refreshPlayers = () => hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => r.state.name)]);
+  refreshPlayers();
 
   net.onMessage = (m) => {
     switch (m.t) {
@@ -128,8 +119,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         inventory = m.inventory;
         hud.setInventory(inventory);
         break;
-      case 'block':
-        world.setBlock({ x: m.x, y: m.y, z: m.z, type: m.type } as never);
+      case 'piece':
+        world.setPiece(m.key, m.piece);
         if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         break;
       case 'correct':
@@ -142,54 +133,63 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   };
   net.onClose = () => hud.disconnected();
 
-  // Input: click to capture the mouse, left click to gather or break, right click (or F) to place.
-  const canvas = renderer.domElement;
+  // Input. Click captures the mouse. Left click uses the selected slot: gather and hit with
+  // hands, or place the selected piece. G edits the wall you look at. R swaps material.
   canvas.addEventListener('click', () => {
     if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('mousedown', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    if (e.button === 0) hit();
-    if (e.button === 2) place();
+    if (e.button === 0) primary();
+    if (e.button === 2) setSlot(slot === 'hands' ? 'wall' : 'hands');
+  });
+  addEventListener('wheel', (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    const n = SLOTS.indexOf(slot) + (e.deltaY > 0 ? 1 : -1);
+    setSlot(SLOTS[(n + SLOTS.length) % SLOTS.length]);
   });
   addEventListener('keydown', (e) => {
-    if (e.code === 'Digit1') selected = 'wood';
-    if (e.code === 'Digit2') selected = 'scrap';
-    if (e.code === 'Digit1' || e.code === 'Digit2') hud.setSelected(selected);
-    if (e.code === 'KeyE') hit();
-    if (e.code === 'KeyF') place();
+    const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+    if (n >= 0) setSlot(SLOTS[n]);
+    if (e.code === 'KeyQ') setSlot('wall');
+    if (e.code === 'KeyR') {
+      material = material === 'wood' ? 'scrap' : 'wood';
+      hud.setSlot(slot, material);
+    }
+    if (e.code === 'KeyE') hitTarget();
+    if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyO') {
+      gfx.setQuality(gfx.quality === 'high' ? 'low' : 'high');
+      hud.setQuality(gfx.quality);
+    }
   });
+  function setSlot(s: Slot) {
+    slot = s;
+    hud.setSlot(slot, material);
+  }
 
   const raycaster = new THREE.Raycaster();
-  let target: Target = null;
+  let aim: AimHit | null = null;
+  let aimResource: ResourceNode | null = null;
+  let proposal: Piece | null = null;
 
-  function findTarget(): Target {
+  function updateAim() {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    raycaster.far = camera.position.distanceTo(controller.eye) + BUILD_RANGE + 1;
-    const hits = raycaster.intersectObjects(world.pickables, true);
-    for (const h of hits) {
-      if (!h.object.visible || !isVisible(h.object)) continue;
+    raycaster.far = camera.position.distanceTo(controller.eye) + 10;
+    aim = null;
+    aimResource = null;
+    for (const h of raycaster.intersectObjects(world.pickables, true)) {
+      if (!isVisible(h.object)) continue;
+      // Ignore things between the camera and the player's back.
+      if (h.distance < camera.position.distanceTo(controller.eye) - 0.5) continue;
       const rid = h.object.userData.resourceId as number | undefined;
-      if (rid !== undefined) {
-        const node = resources[rid];
-        const reach = GATHER_RANGE + RESOURCE_INFO[node.kind].radius;
-        return { kind: 'resource', node, inRange: Math.hypot(node.x - controller.position.x, node.z - controller.position.z) <= reach };
-      }
-      const normal = h.face?.normal.clone().transformDirection(h.object.matrixWorld) ?? new THREE.Vector3(0, 1, 0);
-      if (h.object.userData.cell) {
-        const cell = h.object.userData.cell as Cell;
-        const place = { x: cell.x + Math.round(normal.x), y: cell.y + Math.round(normal.y), z: cell.z + Math.round(normal.z) };
-        return { kind: 'block', cell, place: validPlace(place), inRange: inReach(cell) };
-      }
-      if (h.object === world.terrain) {
-        const p = h.point;
-        const place = { x: Math.floor(p.x), y: Math.floor(p.y + 0.05), z: Math.floor(p.z) };
-        return { kind: 'ground', place: validPlace(place), inRange: inReach(place) };
-      }
+      if (rid !== undefined) aimResource = resources[rid];
+      const key = h.object.userData.pieceKey as string | undefined;
+      aim = { point: h.point.clone(), piece: key ? (world.pieces.get(key) ?? null) : null };
+      break;
     }
-    return null;
   }
 
   function isVisible(o: THREE.Object3D): boolean {
@@ -197,79 +197,110 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     return true;
   }
 
-  function inReach(c: Cell): boolean {
-    return controller.eye.distanceTo(new THREE.Vector3(c.x + 0.5, c.y + 0.5, c.z + 0.5)) <= BUILD_RANGE;
+  function resourceInRange(node: ResourceNode) {
+    return Math.hypot(node.x - controller.position.x, node.z - controller.position.z) <= GATHER_RANGE + RESOURCE_INFO[node.kind].radius;
   }
 
-  function validPlace(c: Cell): Cell | null {
-    if (!cellInBounds(c.x, c.y, c.z) || world.hasBlock(c.x, c.y, c.z)) return null;
-    const p = controller.position;
-    const overlapsMe =
-      p.x + PLAYER_RADIUS > c.x && p.x - PLAYER_RADIUS < c.x + 1 &&
-      p.z + PLAYER_RADIUS > c.z && p.z - PLAYER_RADIUS < c.z + 1 &&
-      p.y + PLAYER_HEIGHT > c.y && p.y < c.y + 1;
-    return overlapsMe ? null : c;
+  function primary() {
+    if (slot === 'hands') return hitTarget();
+    if (!proposal) return;
+    if (inventory[material] < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${material}`);
+    net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material });
+    me.swing();
   }
 
-  function hit() {
-    if (!target) return;
-    if (target.kind === 'resource') {
-      if (!target.inRange) return hud.notice('Get closer to gather');
-      net.send({ t: 'gather', id: target.node.id });
+  function hitTarget() {
+    if (aimResource) {
+      if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
+      net.send({ t: 'gather', id: aimResource.id });
       me.swing();
-    } else if (target.kind === 'block') {
-      if (!target.inRange) return hud.notice('Too far away');
-      net.send({ t: 'break', ...target.cell });
+    } else if (aim?.piece) {
+      if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
+      net.send({ t: 'hit', key: pieceKey(aim.piece) });
       me.swing();
     }
   }
 
-  function place() {
-    if (!target || target.kind === 'resource' || !target.place) return;
-    if (!inReach(target.place)) return hud.notice('Too far away');
-    const cost = BLOCK_COST[selected];
-    if (inventory[cost.material] < cost.amount) return hud.notice(`Need ${cost.amount} ${cost.material}`);
-    net.send({ t: 'place', ...target.place, block: selected });
-    me.swing();
+  function editTarget() {
+    const piece = aim?.piece;
+    if (!piece || piece.kind !== 'wall') return hud.notice('Look at a wall to edit it');
+    if (!inReach(controller.eye, piece)) return hud.notice('Too far away');
+    const next = WALL_EDITS[(WALL_EDITS.indexOf(piece.edit) + 1) % WALL_EDITS.length];
+    net.send({ t: 'edit', key: pieceKey(piece), edit: next });
   }
 
-  // Placement preview.
-  const ghost = new THREE.Mesh(
-    new THREE.BoxGeometry(1.02, 1.02, 1.02),
-    new THREE.MeshBasicMaterial({ color: 0x7cff6b, transparent: true, opacity: 0.3, depthWrite: false }),
-  );
-  ghost.visible = false;
-  world.scene.add(ghost);
+  // Blue see-through preview of the piece about to be placed, red if it can't go there.
+  const ghostMat = new THREE.MeshBasicMaterial({ color: 0x4fb3ff, transparent: true, opacity: 0.35, depthWrite: false });
+  let ghost: THREE.Group | null = null;
+  let ghostKey = '';
+  function updateGhost() {
+    proposal = null;
+    if (slot !== 'hands') {
+      const look = new THREE.Vector3();
+      camera.getWorldDirection(look);
+      proposal = proposePiece(world, slot, material, aim, controller.eye, look, controller.position.y);
+    }
+    const key = proposal ? `${pieceKey(proposal)}:${material}` : '';
+    if (key !== ghostKey) {
+      if (ghost) world.scene.remove(ghost);
+      ghost = proposal ? buildPieceMesh(proposal, ghostMat) : null;
+      if (ghost) world.scene.add(ghost);
+      ghostKey = key;
+    }
+    if (proposal) {
+      const ok = inventory[material] >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
+      ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
+    }
+  }
+
+  function describeTarget(): { text: string; health?: number } {
+    if (aimResource && aimResource.amount > 0) {
+      const info = RESOURCE_INFO[aimResource.kind];
+      const label = `${RESOURCE_NAMES[aimResource.kind]}: ${aimResource.amount} ${info.material}`;
+      return { text: resourceInRange(aimResource) ? `${label}  ·  Left click to gather` : `${label}  ·  Get closer` };
+    }
+    if (aim?.piece && (slot === 'hands' || aim.piece.kind === 'wall')) {
+      const p = aim.piece;
+      const name = `${p.material === 'wood' ? 'Wood' : 'Scrap'} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind]}`;
+      const hints = [slot === 'hands' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : ''].filter(Boolean);
+      return { text: [name, ...hints].join('  ·  '), health: p.hp / MAX_HP[p.material] };
+    }
+    if (slot !== 'hands' && proposal && inventory[material] < PIECE_COST) return { text: `Need ${PIECE_COST} ${material}` };
+    return { text: '' };
+  }
 
   // Test hooks for the automated smoke test (scripts/smoke.ts).
+  const dist = (r: { x: number; z: number }) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
   (window as unknown as { __pf: unknown }).__pf = {
     state: () => ({
       id: welcome.id,
       others: remotes.size,
       inventory,
-      blocks: world.blockMeshes.size,
+      pieces: [...world.pieces.values()],
       position: controller.position.toArray(),
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
-    nearestResource: (kind: string) =>
-      resources
-        .filter((r) => r.kind === kind && r.amount > 0)
-        .sort((a, b) => dist(a) - dist(b))[0],
-    gather: (id: number) => net.send({ t: 'gather', id }),
-    place: (x: number, y: number, z: number, block: BlockType) => net.send({ t: 'place', x, y, z, block }),
-    groundCellNear: (dx: number, dz: number) => {
-      const x = Math.floor(controller.position.x + dx);
-      const z = Math.floor(controller.position.z + dz);
-      return { x, y: Math.floor(terrainHeight(welcome.seed, x + 0.5, z + 0.5) + 0.05), z };
+    look: (yaw: number, pitch: number) => {
+      controller.yaw = yaw;
+      controller.pitch = pitch;
     },
+    nearestResource: (kind: string) => resources.filter((r) => r.kind === kind && r.amount > 0).sort((a, b) => dist(a) - dist(b))[0],
+    gather: (id: number) => net.send({ t: 'gather', id }),
+    place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) =>
+      net.send({ t: 'place', kind, i, y, k, dir, material: mat }),
+    edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
+    setQuality: (q: 'high' | 'low') => gfx.setQuality(q),
+    storey: STOREY,
   };
-  const dist = (r: ResourceNode) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
 
   // Game loop.
-  const clock = new THREE.Clock();
+  const timer = new THREE.Timer();
   let sendTimer = 0;
-  renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
+  let time = 0;
+  gfx.renderer.setAnimationLoop((now) => {
+    timer.update(now);
+    const dt = Math.min(timer.getDelta(), 0.05);
+    time += dt;
     controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
@@ -282,15 +313,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.update(dt, r.state.moving);
     }
 
-    target = findTarget();
-    hud.setTarget(describe(target, selected, inventory));
-    const showGhost = !!target && target.kind !== 'resource' && !!target.place && inReach(target.place);
-    ghost.visible = showGhost;
-    if (showGhost && target && target.kind !== 'resource' && target.place) {
-      ghost.position.set(target.place.x + 0.5, target.place.y + 0.5, target.place.z + 0.5);
-      const cost = BLOCK_COST[selected];
-      (ghost.material as THREE.MeshBasicMaterial).color.set(inventory[cost.material] >= cost.amount ? 0x7cff6b : 0xff5a36);
-    }
+    updateAim();
+    updateGhost();
+    hud.setTarget(describeTarget());
 
     sendTimer += dt;
     if (sendTimer > 1 / 15) {
@@ -299,21 +324,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       net.send({ t: 'move', x: p.x, y: p.y, z: p.z, yaw: controller.yaw, moving: controller.moving });
     }
 
-    world.update(dt, controller.position);
-    renderer.render(world.scene, camera);
+    world.update(dt, controller.position, time);
+    gfx.render();
   });
-}
-
-function describe(t: Target, selected: BlockType, inv: Inventory): string {
-  if (!t) return '';
-  if (t.kind === 'resource') {
-    const info = RESOURCE_INFO[t.node.kind];
-    const label = `${RESOURCE_NAMES[t.node.kind]}: ${t.node.amount} ${info.material} left`;
-    return t.inRange ? `${label}  ·  Left click to gather` : `${label}  ·  Get closer`;
-  }
-  const cost = BLOCK_COST[selected];
-  const canAfford = inv[cost.material] >= cost.amount;
-  const placeHint = t.place && t.inRange ? (canAfford ? 'Right click to build' : `Need ${cost.amount} ${cost.material} to build`) : '';
-  if (t.kind === 'block') return [t.inRange ? 'Left click to break' : 'Too far', placeHint].filter(Boolean).join('  ·  ');
-  return placeHint;
 }

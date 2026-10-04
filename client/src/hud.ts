@@ -1,6 +1,9 @@
-// The on-screen interface: join screen, inventory, hotbar, target hint, notices and player list.
+// The on-screen interface: join screen, inventory, hotbar, target info, notices and player list.
 
-import type { BlockType, Inventory } from '../../shared/world.ts';
+import type { Inventory, Material } from '../../shared/world.ts';
+import type { Quality } from './graphics.ts';
+
+export type Slot = 'hands' | 'wall' | 'floor' | 'stairs';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -45,21 +48,32 @@ export class Hud {
     $('inv-scrap').textContent = String(inv.scrap);
   }
 
-  setSelected(type: BlockType) {
+  setSlot(slot: Slot, material: Material) {
     for (const el of document.querySelectorAll<HTMLElement>('.slot')) {
-      el.classList.toggle('active', el.dataset.block === type);
+      el.classList.toggle('active', el.dataset.slot === slot);
     }
+    $('material').dataset.material = material;
+    $('material-name').textContent = material === 'wood' ? 'Wood' : 'Scrap';
+    document.body.classList.toggle('building', slot !== 'hands');
   }
 
-  setTarget(text: string) {
+  setTarget(t: { text: string; health?: number }) {
     const el = $('target');
-    if (el.textContent !== text) el.textContent = text;
-    el.hidden = !text;
+    const text = $('target-text');
+    if (text.textContent !== t.text) text.textContent = t.text;
+    el.hidden = !t.text;
+    const bar = $('target-health');
+    bar.hidden = t.health === undefined;
+    if (t.health !== undefined) ($('target-health-fill') as HTMLElement).style.width = `${Math.round(t.health * 100)}%`;
   }
 
   setPlayers(names: string[]) {
     $('player-count').textContent = `${names.length} survivor${names.length === 1 ? '' : 's'} online`;
     $('player-list').textContent = names.join(', ');
+  }
+
+  setQuality(q: Quality) {
+    $('quality').textContent = q === 'high' ? 'High' : 'Low';
   }
 
   notice(text: string) {
