@@ -223,7 +223,7 @@ export function concreteSurface(): Surface {
 
 /** Rough charred bark for trees and poles. */
 export function barkSurface(dark = false): Surface {
-  const base = dark ? ['#2f2924', '#3d342d', '#241f1b'] : ['#5b4334', '#6b5040', '#4a362a'];
+  const base = dark ? ['#4a4038', '#5a4d42', '#3a322c'] : ['#5b4334', '#6b5040', '#4a362a'];
   const draw: Draw = (ctx, size, rand) => {
     ctx.fillStyle = base[0];
     ctx.fillRect(0, 0, size, size);

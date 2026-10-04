@@ -281,6 +281,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
     look: (yaw: number, pitch: number) => {
+      controller.autoWalk = null;
       controller.yaw = yaw;
       controller.pitch = pitch;
     },
@@ -289,7 +290,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) =>
       net.send({ t: 'place', kind, i, y, k, dir, material: mat }),
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
-    setQuality: (q: 'high' | 'low') => gfx.setQuality(q),
+    setQuality: (q: 'high' | 'low') => {
+      gfx.setQuality(q);
+      hud.setQuality(q);
+    },
     /** Nearest open patch of ground with nothing to bump into, for building in tests. */
     findClearSpot: () => {
       const p = controller.position;

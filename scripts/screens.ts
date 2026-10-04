@@ -44,7 +44,7 @@ try {
   const i = Math.floor(px / 3) + 1;
   const k = Math.floor(pz / 3);
   const y = Math.round(py);
-  await walkTo(px - 2.5, pz + 1.5);
+  await walkTo(px - 4.5, pz - 2);
   const place = async (kind: string, ii: number, yy: number, kk: number, dir: number, mat = 'wood') => {
     await pf('place', kind, ii, yy, kk, dir, mat);
     await page.waitForTimeout(120);
@@ -71,7 +71,7 @@ try {
   await pf('edit', `wall:${i},${y + 3},${k},0`, 'half');
   await pf('edit', `wall:${i + 1},${y + 3},${k},0`, 'half');
   const pieces = ((await pf('state')) as any).pieces.length;
-  console.log('pieces built:', pieces);
+  console.log('pieces built:', pieces, 'of 13');
 
   // View from the front-left corner, looking at the hut.
   const cx = (i + 1) * 3;
