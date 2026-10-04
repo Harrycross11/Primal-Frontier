@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Primal Frontier</title>
+    <style>
+      :root {
+        --ink: #f4ead8;
+        --panel: rgba(24, 20, 16, 0.62);
+        --accent: #ff7a2f;
+        --good: #7cff6b;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #2a241e; color: var(--ink);
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      #game canvas { display: block; }
+
+      #join { position: fixed; inset: 0; display: grid; place-items: center;
+        background: radial-gradient(ellipse at 50% 30%, #6b5a46 0%, #2a241e 70%); }
+      #join[hidden] { display: none; }
+      .card { text-align: center; padding: 40px 36px; max-width: 420px; width: calc(100% - 32px); }
+      .title { font-size: 52px; font-weight: 900; letter-spacing: 2px; line-height: 1; margin: 0;
+        color: #ffd28a; text-shadow: 0 4px 0 #7a3a12, 0 8px 24px rgba(0,0,0,.5); }
+      .tagline { margin: 12px 0 28px; opacity: .8; }
+      #name { width: 100%; padding: 14px 16px; font-size: 18px; border-radius: 12px; border: 2px solid #8a7356;
+        background: rgba(0,0,0,.35); color: var(--ink); outline: none; }
+      #name:focus { border-color: var(--accent); }
+      #play { margin-top: 14px; width: 100%; padding: 14px; font-size: 20px; font-weight: 800; border: 0;
+        border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; box-shadow: 0 4px 0 #9a4614; }
+      #play:disabled { opacity: .6; cursor: wait; }
+      #join-error { min-height: 22px; margin-top: 12px; color: #ffb199; }
+      .controls { margin-top: 18px; font-size: 13px; opacity: .7; line-height: 1.6; }
+
+      #hud[hidden] { display: none; }
+      #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+        border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.5); pointer-events: none; }
+      #target { position: fixed; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); padding: 6px 12px;
+        background: var(--panel); border-radius: 8px; font-size: 14px; white-space: nowrap; pointer-events: none; }
+      #target[hidden] { display: none; }
+      #top-left { position: fixed; left: 16px; top: 16px; padding: 10px 14px; background: var(--panel);
+        border-radius: 10px; font-size: 13px; max-width: 320px; }
+      #player-count { font-weight: 700; }
+      #player-list { opacity: .75; margin-top: 2px; }
+      #inventory { position: fixed; right: 16px; top: 16px; display: flex; gap: 8px; }
+      .res { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel);
+        border-radius: 10px; font-weight: 800; font-size: 18px; }
+      .chip { width: 18px; height: 18px; border-radius: 4px; }
+      .chip.wood { background: #9a6b3f; } .chip.scrap { background: linear-gradient(135deg,#6b6f75 50%,#a35d32 50%); }
+      #hotbar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+      .slot { width: 92px; padding: 8px; background: var(--panel); border: 3px solid transparent; border-radius: 12px;
+        text-align: center; font-size: 12px; }
+      .slot.active { border-color: var(--accent); }
+      .slot .swatch { width: 34px; height: 34px; margin: 0 auto 6px; border-radius: 6px; }
+      .slot .key { float: left; font-weight: 800; opacity: .7; }
+      #notice { position: fixed; left: 50%; top: 22%; transform: translate(-50%, -6px); padding: 10px 18px;
+        background: var(--panel); border-radius: 10px; font-weight: 700; opacity: 0; transition: .2s; pointer-events: none; }
+      #notice.show { opacity: 1; transform: translate(-50%, 0); }
+      #help { position: fixed; left: 16px; bottom: 18px; padding: 10px 14px; background: var(--panel);
+        border-radius: 10px; font-size: 12px; line-height: 1.7; }
+      #help[hidden] { display: none; }
+      kbd { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 4px; background: rgba(255,255,255,.15);
+        text-align: center; font-family: inherit; font-weight: 700; }
+      #disconnected { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7);
+        font-size: 20px; font-weight: 700; }
+      #disconnected[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <div id="join">
+      <div class="card">
+        <h1 class="title">PRIMAL<br />FRONTIER</h1>
+        <p class="tagline">The world ended. Scavenge, build, survive.</p>
+        <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
+        <button id="play">Enter the wasteland</button>
+        <div id="join-error"></div>
+        <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
+          Left click gather / break · Right click build · 1–2 pick block</div>
+      </div>
+    </div>
+
+    <div id="hud" hidden>
+      <div id="crosshair"></div>
+      <div id="target" hidden></div>
+      <div id="top-left"><div id="player-count"></div><div id="player-list"></div></div>
+      <div id="inventory">
+        <div class="res"><span class="chip wood"></span><span id="inv-wood">0</span></div>
+        <div class="res"><span class="chip scrap"></span><span id="inv-scrap">0</span></div>
+      </div>
+      <div id="hotbar">
+        <div class="slot" data-block="wood"><span class="key">1</span>
+          <div class="swatch" style="background:#9a6b3f"></div>Wood block<br />2 wood</div>
+        <div class="slot" data-block="scrap"><span class="key">2</span>
+          <div class="swatch" style="background:linear-gradient(135deg,#6b6f75 50%,#a35d32 50%)"></div>Scrap block<br />2 scrap</div>
+      </div>
+      <div id="notice"></div>
+      <div id="help">
+        Click the game to look around · <kbd>H</kbd> hide help<br />
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
+        Left click / <kbd>E</kbd> gather or break · Right click / <kbd>F</kbd> build<br />
+        <kbd>1</kbd> wood block · <kbd>2</kbd> scrap block
+      </div>
+      <div id="disconnected" hidden>Lost connection to the server. Refresh to rejoin.</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

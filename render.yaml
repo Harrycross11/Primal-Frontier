@@ -1,0 +1,9 @@
+# One-click hosting on Render (render.com): New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: primal-frontier
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
