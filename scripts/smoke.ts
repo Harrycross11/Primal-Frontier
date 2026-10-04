@@ -81,7 +81,9 @@ try {
   const inv = (await state(ash)).inventory;
   check(inv.wood >= 70 && inv.scrap >= 20, `gathered wood and scrap (inventory: ${JSON.stringify(inv)})`);
 
-  // Build a hut on the tile next to Ash.
+  // Move to open ground, then build a hut on the tile next to Ash.
+  const spot = await pf<{ x: number; z: number }>(ash, 'findClearSpot');
+  await walkTo(ash, spot.x, spot.z);
   const [px, py, pz] = (await state(ash)).position;
   const i = Math.floor(px / 3) + 1;
   const k = Math.floor(pz / 3);

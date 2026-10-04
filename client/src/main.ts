@@ -290,6 +290,23 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       net.send({ t: 'place', kind, i, y, k, dir, material: mat }),
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
     setQuality: (q: 'high' | 'low') => gfx.setQuality(q),
+    /** Nearest open patch of ground with nothing to bump into, for building in tests. */
+    findClearSpot: () => {
+      const p = controller.position;
+      let best: { x: number; z: number } | null = null;
+      for (let r = 2; r < 40 && !best; r += 2) {
+        for (let a = 0; a < Math.PI * 2 && !best; a += Math.PI / 8) {
+          const x = p.x + Math.cos(a) * r;
+          const z = p.z + Math.sin(a) * r;
+          const clearOfResources = resources.every((n) => n.amount <= 0 || Math.hypot(n.x - x, n.z - z) > 9);
+          const clearOfDecor = world.decorColliders.every(
+            (b) => x < b.min[0] - 9 || x > b.max[0] + 9 || z < b.min[2] - 9 || z > b.max[2] + 9,
+          );
+          if (clearOfResources && clearOfDecor && Math.abs(x) < 60 && Math.abs(z) < 60) best = { x, z };
+        }
+      }
+      return best;
+    },
     storey: STOREY,
   };
 
