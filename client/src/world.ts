@@ -38,8 +38,8 @@ export class World {
   constructor(readonly seed: number) {
     this.scene.fog = new THREE.FogExp2(HAZE, 0.0125);
 
-    this.scene.add(new THREE.HemisphereLight(0xd8c8b0, 0x3c342c, 0.55));
-    this.sun = new THREE.DirectionalLight(0xffd9a8, 3.2);
+    this.scene.add(new THREE.HemisphereLight(0xcdbca2, 0x3c342c, 0.45));
+    this.sun = new THREE.DirectionalLight(0xffd6a0, 2.4);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0004;
@@ -92,10 +92,10 @@ export class World {
     const pos = geo.attributes.position;
     const uv = geo.attributes.uv;
     const colors = new Float32Array(pos.count * 3);
-    const ash = new THREE.Color(0xd6cfc2);
-    const scorched = new THREE.Color(0x5a534c);
-    const glass = new THREE.Color(0x8c9a86);
-    const pale = new THREE.Color(0xe8e0d0);
+    const ash = new THREE.Color(0xa49a8a);
+    const scorched = new THREE.Color(0x4a443e);
+    const glass = new THREE.Color(0x76806e);
+    const pale = new THREE.Color(0xb8ae9c);
     const list = craters(this.seed);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
@@ -146,7 +146,10 @@ export class World {
     const blade = new THREE.PlaneGeometry(0.7, 0.55);
     blade.translate(0, 0.27, 0);
     const cross = mergeCross(blade);
-    const count = 2600;
+    // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
+    const n = cross.attributes.normal;
+    for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
+    const count = 1500;
     const mesh = new THREE.InstancedMesh(cross, mat, count);
     const rand = mulberry32(this.seed ^ 0xabcdef);
     const m = new THREE.Matrix4();

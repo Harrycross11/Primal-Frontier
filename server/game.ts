@@ -32,7 +32,6 @@ import {
 } from '../shared/building.ts';
 import {
   RESOURCE_INFO,
-  emptyInventory,
   generateResources,
   type Inventory,
   type Material,
@@ -62,7 +61,11 @@ export class Game {
   private respawns: { id: number; at: number }[] = [];
   private rand: () => number;
 
-  constructor(seed: number) {
+  /** @param startKit materials each player spawns with (0 normally; handy for testing builds). */
+  constructor(
+    seed: number,
+    private startKit = 0,
+  ) {
     this.seed = seed;
     this.resources = generateResources(seed);
     this.rand = mulberry32(seed ^ 0x5bd1e995);
@@ -85,7 +88,7 @@ export class Game {
       z,
       yaw: 0,
       moving: false,
-      inventory: emptyInventory(),
+      inventory: { wood: this.startKit, scrap: this.startKit },
       lastMoveAt: now,
       lastGatherAt: 0,
     };

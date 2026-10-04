@@ -42,7 +42,7 @@ const http = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 
-const game = new Game(SEED);
+const game = new Game(SEED, Number(process.env.START_KIT ?? 0));
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
