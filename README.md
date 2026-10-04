@@ -4,7 +4,7 @@ A survival sandbox set in a world after a nuclear apocalypse. Players join a ser
 
 This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build** and **better graphics with Fortnite-style building**.
 
-![Two survivors next to a scrap block tower](docs/screenshots/two-players.png)
+![A two-storey wood hut with windows and stairs in the hazy wasteland](docs/screenshots/building.png)
 
 ## What works now
 
