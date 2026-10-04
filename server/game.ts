@@ -50,7 +50,9 @@ interface Player extends PlayerState {
   lastGatherAt: number;
 }
 
-const COLORS = [0xff5a36, 0x2ec4ff, 0xffc93c, 0x7cff6b, 0xd16bff, 0xff6bb5, 0x40e0c0, 0xff9f1c];
+// Faded dyes rather than bright team colours: they tint a survivor's scarf, armband and name
+// stripe, enough to tell players apart without breaking the wasteland look.
+const COLORS = [0xa4553a, 0x3f7f86, 0xb08c3a, 0x6f7f3e, 0x7a4f6e, 0x9a3b34, 0x4f6382, 0xb06f2e];
 
 export class Game {
   readonly seed: number;

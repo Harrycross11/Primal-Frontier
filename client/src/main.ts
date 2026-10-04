@@ -271,6 +271,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   // Test hooks for the automated smoke test (scripts/smoke.ts).
   const dist = (r: { x: number; z: number }) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
+  let portrait: { angle: number; distance: number } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
     state: () => ({
       id: welcome.id,
@@ -290,6 +291,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) =>
       net.send({ t: 'place', kind, i, y, k, dir, material: mat }),
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
+    /** Points the camera at your own survivor from the front, for character screenshots. */
+    portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
     setQuality: (q: 'high' | 'low') => {
       gfx.setQuality(q);
       hud.setQuality(q);
@@ -327,6 +330,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     me.root.rotation.y = controller.yaw + Math.PI;
     me.update(dt, controller.moving);
     controller.updateCamera(camera);
+    if (portrait) {
+      const a = controller.yaw + Math.PI + portrait.angle;
+      const p = controller.position;
+      camera.position.set(p.x + Math.sin(a) * portrait.distance, p.y + 1.45, p.z + Math.cos(a) * portrait.distance);
+      camera.lookAt(p.x, p.y + 1.05, p.z);
+    }
 
     for (const r of remotes.values()) {
       r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));

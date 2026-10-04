@@ -10,7 +10,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 
 - A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, burnt-out cars, ruined concrete houses, leaning power poles, boulders and one small pocket of living trees.
 - Graphics: a hazy low-sun sky with matching lighting and reflections, textured ground, shadows, dry grass, drifting ash, ambient occlusion, bloom and a warm colour grade. Press **O** to switch to low graphics on slower computers.
-- Up to 8 players per server, each with a bright stylized survivor and a name tag.
+- Up to 8 players per server, each a gritty hooded survivor with goggles, a respirator, a loaded backpack and a hatchet, in muted clothing with a faded colour on their scarf and armband so players stay easy to tell apart. Walking, sprinting and chopping each have their own animation.
 - Gathering: hit trees for wood and wrecks for scrap. Trees never regrow; scrap respawns after 2 minutes.
 - Fortnite-style building on a 3 m grid: walls, floors and stairs in wood or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; scrap is twice as tough as wood.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.

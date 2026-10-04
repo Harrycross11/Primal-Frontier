@@ -261,6 +261,74 @@ export function rustSurface(paint = '#5f6b5a'): Surface {
   return surface(`rust-${paint}`, 256, draw, bump, 2);
 }
 
+/**
+ * Worn woven cloth in light neutral greys, tinted by the material colour, so one texture
+ * serves every jacket, pair of trousers and scarf. Has grime, fading and stitched seams.
+ */
+export function clothSurface(): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#d8d4cc';
+    ctx.fillRect(0, 0, size, size);
+    for (let y = 0; y < size; y += 2) {
+      ctx.fillStyle = `rgba(90,84,74,${0.05 + rand() * 0.07})`;
+      ctx.fillRect(0, y, size, 1);
+    }
+    for (let x = 0; x < size; x += 2) {
+      ctx.fillStyle = `rgba(255,255,250,${0.03 + rand() * 0.05})`;
+      ctx.fillRect(x, 0, 1, size);
+    }
+    blotches(ctx, size, rand, 90, ['#9c9282', '#b5ab9a', '#efebe2', '#8a7f6e'], 6, 34, 0.28);
+    blotches(ctx, size, rand, 700, ['#6e6558', '#a49884'], 0.5, 1.8, 0.45);
+    ctx.strokeStyle = 'rgba(70,62,52,0.45)';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    for (const y of [size * 0.25, size * 0.75]) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#888';
+    ctx.fillRect(0, 0, size, size);
+    for (let y = 0; y < size; y += 2) {
+      for (let x = (y / 2) % 2; x < size; x += 2) {
+        ctx.fillStyle = rand() < 0.5 ? '#9a9a9a' : '#7a7a7a';
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    blotches(ctx, size, rand, 160, ['#707070', '#a0a0a0'], 2, 10, 0.4);
+    ctx.strokeStyle = '#555';
+    for (const y of [size * 0.25, size * 0.75]) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+  };
+  return surface('cloth', 256, draw, bump, 1.6);
+}
+
+/** Scuffed, creased leather in neutral tones, tinted by the material colour. */
+export function leatherSurface(): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#c9c0b4';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 120, ['#a99d8c', '#ddd5ca', '#8f8474'], 4, 22, 0.35);
+    blotches(ctx, size, rand, 900, ['#7d7262', '#e6dfd4'], 0.4, 1.6, 0.4);
+    cracks(ctx, size, rand, 30, 'rgba(80,70,58,0.4)', 0.8);
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#888';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 1500, ['#7a7a7a', '#999'], 0.5, 2.2, 0.6);
+    cracks(ctx, size, rand, 30, '#444', 1.2);
+  };
+  return surface('leather', 256, draw, bump, 2.5);
+}
+
 /** A dry grass tuft with transparent background, for instanced ground cover. */
 export function grassTexture(): THREE.Texture {
   const canvas = document.createElement('canvas');
