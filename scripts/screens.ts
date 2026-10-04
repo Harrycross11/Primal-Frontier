@@ -38,13 +38,13 @@ try {
     );
   };
 
-  const spot = (await pf('findClearSpot')) as { x: number; z: number };
+  const spot = (await pf('findClearSpot', 15)) as { x: number; z: number };
   await walkTo(spot.x, spot.z);
   const [px, py, pz] = ((await pf('state')) as any).position;
   const i = Math.floor(px / 3) + 1;
   const k = Math.floor(pz / 3);
   const y = Math.round(py);
-  await walkTo(px - 4.5, pz - 2);
+  await walkTo(i * 3 + 3, k * 3 - 2);
   const place = async (kind: string, ii: number, yy: number, kk: number, dir: number, mat = 'wood') => {
     await pf('place', kind, ii, yy, kk, dir, mat);
     await page.waitForTimeout(120);
@@ -76,8 +76,8 @@ try {
   // View from the front-left corner, looking at the hut.
   const cx = (i + 1) * 3;
   const cz = k * 3 + 1.5;
-  const vx = cx - 7;
-  const vz = cz - 8;
+  const vx = cx - 6;
+  const vz = cz - 10;
   await walkTo(vx, vz);
   const yaw = Math.atan2(-(cx - vx), -(cz - vz));
   await pf('look', yaw, -0.08);
