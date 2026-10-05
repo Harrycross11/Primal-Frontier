@@ -36,7 +36,7 @@ export interface Piece {
 export type Box = { min: [number, number, number]; max: [number, number, number] };
 
 export const PIECE_COST = 10;
-export const MAX_HP: Record<Material, number> = { wood: 150, scrap: 300 };
+export const MAX_HP: Record<Material, number> = { wood: 150, stone: 250, scrap: 300 };
 /** Damage a bare-handed hit does to a building piece. */
 export const HIT_DAMAGE = 50;
 
@@ -146,7 +146,7 @@ export function validPieceShape(p: Piece): boolean {
     ints &&
     dirOk &&
     ['wall', 'floor', 'stairs'].includes(p.kind) &&
-    ['wood', 'scrap'].includes(p.material) &&
+    ['wood', 'stone', 'scrap'].includes(p.material) &&
     WALL_EDITS.includes(p.edit) &&
     Math.abs(p.i * TILE) < limit &&
     Math.abs(p.k * TILE) < limit &&

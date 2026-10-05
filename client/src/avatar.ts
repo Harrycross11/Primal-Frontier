@@ -1,10 +1,12 @@
 // Wasteland survivor: one smooth, continuous body (see survivorMesh.ts) in worn clothing of
-// dusty tones, with a hood, goggles, a respirator, a loaded backpack and a hatchet attached to
-// its bones. Each player's colour shows only as a faded accent (scarf and armband) so
+// dusty tones, with a hood, goggles, a respirator, a loaded backpack and whatever they hold
+// attached to its bones. Each player's colour shows only as a faded accent (scarf and armband) so
 // characters belong in the world instead of glowing in it.
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import type { ItemId } from '../../shared/items.ts';
+import { buildHeldItem } from './props.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
@@ -68,6 +70,8 @@ export class Avatar {
   private time = Math.random() * 10;
   private swingTimer = 0;
   private last = new THREE.Vector3(NaN, 0, 0);
+  private hand: THREE.Group;
+  private held: ItemId | null | undefined = undefined;
 
   constructor(color: number, name?: string) {
     // Each survivor gets a different but always muted outfit, picked from their colour.
@@ -83,7 +87,6 @@ export class Avatar {
     const metal = plain(0x55524a, 0.45, 0.7);
     const rubber = plain(0x2a2927, 0.8);
     const glass = plain(0x1a2326, 0.12, 0.4);
-    const wood = plain(0x6b5136, 0.85);
 
     // Skeleton, in the same pose the body mesh was modelled in.
     const world = new Map<BoneName, THREE.Vector3>();
@@ -187,19 +190,14 @@ export class Avatar {
       attach('head', new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), metal, x, 1.615, 0.12).rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
     }
 
-    // A crude hatchet in the right hand, for chopping and hammering.
+    // Whatever is in their hands goes here: a rock, a tool or a building plan.
     const grip = new THREE.Group();
     grip.position.set(...HAND(1)).sub(world.get('elbowR')!);
     grip.rotation.z = ARM_REST;
     this.bones.elbowR.add(grip);
-    const hatchet = new THREE.Group();
-    hatchet.rotation.x = Math.PI / 2 - 0.2;
-    grip.add(hatchet);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.42, 8), wood);
-    handle.position.y = 0.08;
-    const blade = new THREE.Mesh(box(0.02, 0.07, 0.11, 0.006), metal);
-    blade.position.set(0, 0.26, 0.045);
-    hatchet.add(handle, blade);
+    this.hand = new THREE.Group();
+    this.hand.rotation.x = Math.PI / 2 - 0.2;
+    grip.add(this.hand);
 
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
@@ -210,6 +208,15 @@ export class Avatar {
       tag.position.y = 2.1;
       this.root.add(tag);
     }
+  }
+
+  /** Shows the item in their right hand. */
+  setHeld(item: ItemId | null) {
+    if (item === this.held) return;
+    this.held = item;
+    this.hand.clear();
+    const model = buildHeldItem(item);
+    if (model) this.hand.add(model);
   }
 
   /** Plays a chopping swing, used when gathering or building. */

@@ -1,9 +1,7 @@
-// The on-screen interface: join screen, inventory, hotbar, target info, notices and player list.
+// The on-screen interface: join screen, target info, notices and player list.
+// The belt, inventory and crafting screens live in inventory.ts.
 
-import type { Inventory, Material } from '../../shared/world.ts';
 import type { Quality } from './graphics.ts';
-
-export type Slot = 'hands' | 'wall' | 'floor' | 'stairs';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -41,20 +39,6 @@ export class Hud {
   hideJoin() {
     $('join').hidden = true;
     $('hud').hidden = false;
-  }
-
-  setInventory(inv: Inventory) {
-    $('inv-wood').textContent = String(inv.wood);
-    $('inv-scrap').textContent = String(inv.scrap);
-  }
-
-  setSlot(slot: Slot, material: Material) {
-    for (const el of document.querySelectorAll<HTMLElement>('.slot')) {
-      el.classList.toggle('active', el.dataset.slot === slot);
-    }
-    $('material').dataset.material = material;
-    $('material-name').textContent = material === 'wood' ? 'Wood' : 'Scrap';
-    document.body.classList.toggle('building', slot !== 'hands');
   }
 
   setTarget(t: { text: string; health?: number }) {

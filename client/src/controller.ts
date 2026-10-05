@@ -12,6 +12,7 @@ import {
   PLAYER_SPRINT,
 } from '../../shared/constants.ts';
 import { pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
+import { deployableBox } from '../../shared/deployables.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, type ResourceNode } from '../../shared/world.ts';
 import type { World } from './world.ts';
@@ -128,6 +129,10 @@ export class Controller {
       if (piece.kind === 'stairs') continue; // stairs are ramps, handled in groundHeight
       for (const b of pieceBoxes(piece)) if (near(b)) out.push(b);
     }
+    for (const d of this.world.deployables.values()) {
+      const b = deployableBox(d);
+      if (near(b)) out.push(b);
+    }
     return out;
   }
 
@@ -198,7 +203,7 @@ export class Controller {
 
   private hitsResource(x: number, z: number): boolean {
     for (const n of this.resources()) {
-      if (n.amount <= 0) continue;
+      if (n.amount <= 0 || n.kind === 'hemp') continue;
       const r = RESOURCE_INFO[n.kind].radius * n.scale + PLAYER_RADIUS;
       const was = Math.hypot(this.position.x - n.x, this.position.z - n.z);
       // Only block movement that goes further into the obstacle, so nobody gets stuck.

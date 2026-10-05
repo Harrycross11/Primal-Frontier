@@ -3,10 +3,12 @@
 import * as THREE from 'three';
 import { WORLD_SIZE } from '../../shared/constants.ts';
 import { MAX_HP, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
+import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
+import { buildBoulder, buildDeployable, buildHemp } from './props.ts';
 import { buildScenery } from './scenery.ts';
 import {
   barkSurface,
@@ -29,6 +31,8 @@ export class World {
   readonly resourceMeshes = new Map<number, THREE.Group>();
   readonly pieces = new Map<string, Piece>();
   readonly pieceMeshes = new Map<string, THREE.Group>();
+  readonly deployables = new Map<number, Deployable>();
+  readonly deployableMeshes = new Map<number, THREE.Group>();
   /** Objects the crosshair can target. */
   readonly pickables: THREE.Object3D[] = [];
   /** Solid boxes from scenery, for player collision. */
@@ -66,6 +70,7 @@ export class World {
       wood: std({ ...planks, roughness: 0.85 }),
       scrap: std({ ...metal, roughness: 0.55, metalness: 0.65 }),
       concrete: std({ ...concrete, roughness: 0.95 }),
+      stone: std({ ...concrete, color: 0xc2b9aa, roughness: 0.95 }),
       rebar: std({ color: 0x5a3a28, roughness: 0.7, metalness: 0.6 }),
       bark: std({ ...bark, roughness: 0.95 }),
       barkDark: std({ ...barkDark, roughness: 0.95 }),
@@ -318,7 +323,16 @@ export class World {
   addResources(nodes: ResourceNode[]) {
     for (const node of nodes) {
       const rand = mulberry32(node.id * 7 + 3);
-      const g = node.kind === 'tree' ? this.livingTree(rand) : node.kind === 'deadTree' ? this.deadTree(rand) : this.wreck(rand);
+      const g =
+        node.kind === 'tree'
+          ? this.livingTree(rand)
+          : node.kind === 'deadTree'
+            ? this.deadTree(rand)
+            : node.kind === 'scrap'
+              ? this.wreck(rand)
+              : node.kind === 'hemp'
+                ? buildHemp(rand)
+                : buildBoulder(rand, node.kind === 'metalOre');
       g.position.set(node.x, node.y, node.z);
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);
@@ -426,6 +440,35 @@ export class World {
     this.pieceMeshes.set(key, g);
     this.pickables.push(g);
     this.cameraBlockers.push(g);
+  }
+
+  /** Adds, updates or removes a workbench, furnace or box. */
+  setDeployable(id: number, d: Deployable | null) {
+    const old = this.deployableMeshes.get(id);
+    if (!d) {
+      if (old) {
+        this.scene.remove(old);
+        this.pickables.splice(this.pickables.indexOf(old), 1);
+        this.cameraBlockers.splice(this.cameraBlockers.indexOf(old), 1);
+      }
+      this.deployableMeshes.delete(id);
+      this.deployables.delete(id);
+      return;
+    }
+    this.deployables.set(id, d);
+    let g = old;
+    if (!g) {
+      g = buildDeployable(d.kind);
+      g.position.set(d.x, d.y, d.z);
+      g.rotation.y = d.rot;
+      g.traverse((o) => (o.userData.deployableId = id));
+      this.scene.add(g);
+      this.deployableMeshes.set(id, g);
+      this.pickables.push(g);
+      this.cameraBlockers.push(g);
+    }
+    g.userData.setOn?.(d.on);
+    g.userData.health = d.hp / DEPLOYABLE_INFO[d.kind].hp;
   }
 
   /** Damaged pieces get darker, so you can see a wall is about to break. */
