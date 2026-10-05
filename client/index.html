@@ -42,15 +42,50 @@
         border-radius: 10px; font-size: 13px; max-width: 320px; }
       #player-count { font-weight: 700; }
       #player-list { opacity: .75; margin-top: 2px; }
-      #resources { position: fixed; right: 16px; top: 16px; display: flex; gap: 6px; }
-      .res { display: flex; align-items: center; gap: 4px; padding: 4px 10px 4px 4px; background: var(--panel);
-        border-radius: 10px; font-weight: 800; font-size: 16px; }
-      .res svg { width: 26px; height: 26px; }
+      #resources { position: fixed; right: 16px; top: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 55%; }
+      .res { display: flex; align-items: center; gap: 3px; padding: 3px 9px 3px 3px; background: var(--panel);
+        border-radius: 10px; font-weight: 800; font-size: 15px; }
+      .res svg { width: 24px; height: 24px; }
+      #vitals { position: fixed; right: 16px; bottom: 18px; width: 230px; padding: 8px 10px; background: var(--panel); border-radius: 10px; }
+      .vital { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; }
+      .vital .bar { flex: 1; height: 16px; margin: 0; border-radius: 4px; position: relative; }
+      .vital .bar i { background: #8fbf4a; transition: width .2s; }
+      .vital .bar span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; text-shadow: 0 1px 2px #000; }
+      #ammo { position: fixed; right: 16px; bottom: 66px; padding: 6px 12px; background: var(--panel); border-radius: 10px; text-align: right; }
+      #ammo[hidden] { display: none; }
+      #ammo b { font-size: 26px; }
+      #ammo small { display: block; font-size: 11px; opacity: .75; }
+      #ammo.empty b { color: #ff8a70; }
+      #hitmarker { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; opacity: 0; pointer-events: none; }
+      #hitmarker::before, #hitmarker::after { content: ''; position: absolute; left: 10px; top: -2px; width: 2px; height: 26px; background: #fff;
+        box-shadow: 0 0 2px #000; transform: rotate(45deg); }
+      #hitmarker::after { transform: rotate(-45deg); }
+      #hitmarker.head::before, #hitmarker.head::after { background: #ff5a3c; }
+      #hitmarker.show { opacity: 1; transition: none; }
+      #hitmarker.fade { opacity: 0; transition: opacity .25s; }
+      #damage { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .5s;
+        background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 20, 10, .65) 100%); }
+      #damage.show { opacity: 1; transition: none; }
+      #scope { position: fixed; inset: 0; pointer-events: none;
+        background: radial-gradient(circle at center, transparent 0, transparent 30vh, #050505 calc(30vh + 2px)); }
+      #scope::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0,0,0,.8); }
+      #scope::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(0,0,0,.8); }
+      #scope[hidden] { display: none; }
+      #death { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(40, 6, 4, .55); }
+      #death[hidden] { display: none; }
+      #death .card { background: rgba(20, 14, 10, .85); border-radius: 16px; }
+      #death h1 { margin: 0; font-size: 44px; letter-spacing: 3px; color: #ff8a70; }
+      #death p { opacity: .85; }
+      #respawn { padding: 12px 26px; font-size: 18px; font-weight: 800; border: 0; border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; }
       #belt { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
       .slot { position: relative; width: 64px; height: 64px; background: rgba(24, 20, 16, 0.62); border: 2px solid rgba(255,255,255,.08);
         border-radius: 10px; user-select: none; }
       .slot svg { position: absolute; inset: 8px; width: 44px; height: 44px; pointer-events: none; }
       .slot .count { position: absolute; right: 5px; bottom: 2px; font-size: 12px; font-weight: 800; text-shadow: 0 1px 2px #000; pointer-events: none; }
+      .slot .count.ammo { left: 5px; right: auto; top: 2px; bottom: auto; font-size: 10px; color: #ffd28a; }
+      .slot .key ~ .count.ammo { top: auto; bottom: 7px; }
+      .stats { margin-top: 4px; color: #ffd28a; }
+      .tag.locked { background: rgba(255,120,90,.25); }
       .slot .key { position: absolute; left: 5px; top: 2px; font-size: 11px; opacity: .6; pointer-events: none; }
       .slot .wear { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0,0,0,.5); pointer-events: none; }
       .slot .wear i { display: block; height: 100%; border-radius: 2px; background: #9fd36b; }
@@ -62,7 +97,7 @@
         border-radius: 10px; font-size: 13px; text-align: center; white-space: nowrap; }
       #build-info[hidden] { display: none; }
       #build-info b { color: #ffb45e; }
-      #craft-progress { position: fixed; bottom: 96px; right: 16px; width: 210px; padding: 8px 10px; background: var(--panel);
+      #craft-progress { position: fixed; bottom: 128px; right: 16px; width: 210px; padding: 8px 10px; background: var(--panel);
         border-radius: 10px; font-size: 12px; }
       #craft-progress[hidden] { display: none; }
       .bar { height: 5px; margin-top: 5px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
@@ -84,7 +119,7 @@
       .btn:disabled { opacity: .4; cursor: not-allowed; }
       #furnace-status { margin-top: 10px; font-size: 13px; opacity: .8; }
       #crafting { width: 380px; }
-      .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+      .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
       .tabs button { padding: 5px 10px; border-radius: 8px; border: 0; background: rgba(255,255,255,.08); color: var(--ink); cursor: pointer; font-weight: 700; }
       .tabs button.on { background: #ffb45e; color: #20140a; }
       #recipes { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
@@ -135,25 +170,31 @@
         <button id="play">Enter the wasteland</button>
         <div id="join-error"></div>
         <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
-          Left click hit or build · 1–6 belt · Tab inventory and crafting · E open</div>
+          Left click hit, build or shoot · Right click aim · R reload · 1–6 belt · Tab inventory and crafting · E open</div>
       </div>
     </div>
 
     <div id="hud" hidden>
+      <div id="scope" hidden></div>
+      <div id="damage"></div>
       <div id="crosshair"></div>
+      <div id="hitmarker"></div>
       <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
       <div id="top-left"><div id="player-count"></div><div id="player-list"></div></div>
       <div id="resources"></div>
       <div id="build-info" hidden></div>
       <div id="craft-progress" hidden></div>
       <div id="belt"></div>
+      <div id="ammo" hidden></div>
+      <div id="vitals"><div class="vital">❤<div class="bar"><i id="health-fill" style="width:100%"></i><span id="health-text">100</span></div></div></div>
+      <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><button id="respawn">Respawn</button></div></div>
       <div id="notice"></div>
       <div id="help">
         Click the game to look around · <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
         <kbd>1</kbd>–<kbd>6</kbd> or scroll: pick from your belt · <kbd>Tab</kbd> inventory and crafting<br />
-        Left click: hit, gather or place · <kbd>E</kbd> open, pick up hemp<br />
-        Building plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit a wall
+        Left click: hit, gather, place or shoot · <kbd>E</kbd> open, pick up hemp<br />
+        Guns: right click aim · <kbd>R</kbd> reload · Building plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit
       </div>
       <div id="screen" hidden>
         <div class="panel" id="inventory-panel">

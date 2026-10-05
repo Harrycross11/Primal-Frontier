@@ -1,8 +1,8 @@
 # Primal Frontier
 
-A survival sandbox set in a world after a nuclear apocalypse. Players join a server, scavenge a barren map for wood, stone, scrap, ore and hemp, craft tools, and build together. The full vision is Rust-style survival with ARK-style creatures, Minecraft-style building and Fortnite-style characters on servers that wipe every 30 days.
+A survival sandbox set in a world after a nuclear apocalypse. Players join a server, scavenge a barren map for wood, stone, scrap, ores and hemp, craft tools and guns, build, and fight. The full vision is Rust-style survival with ARK-style creatures, Minecraft-style building and Fortnite-style characters on servers that wipe every 30 days.
 
-This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build**, **better graphics with Fortnite-style building** and **Rust-style crafting**.
+This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build**, **better graphics with Fortnite-style building**, **Rust-style crafting** and **Rust-style weapons**.
 
 ![A two-storey wood hut with windows and stairs in the hazy wasteland](docs/screenshots/building.png)
 
@@ -11,10 +11,12 @@ This repository is the **browser prototype**, built step by step. Milestones don
 - A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, burnt-out cars, ruined concrete houses, leaning power poles, boulders and one small pocket of living trees.
 - Graphics: a hazy low-sun sky with matching lighting and reflections, textured ground, shadows, dry grass, drifting ash, ambient occlusion, bloom and a warm colour grade. Press **O** to switch to low graphics on slower computers.
 - Up to 8 players per server, each a gritty hooded survivor with goggles, a respirator, a loaded backpack and whatever tool is on their belt, in muted clothing with a faded colour on their scarf and armband so players stay easy to tell apart. Walking, sprinting and chopping each have their own animation.
-- Gathering: hit trees for wood, wrecks for scrap, boulders for stone and metal ore, and press E on hemp for cloth. Trees never regrow; the rest respawn after a few minutes. You spawn with a rock and a building plan.
+- Gathering: hit trees for wood, wrecks for scrap, boulders for stone, metal ore, sulfur ore and rare high quality metal ore, and press E on hemp for cloth. Trees never regrow; the rest respawn after a few minutes. You spawn with a rock and a building plan.
 - Rust-style inventory: a 6-slot belt and a 24-slot backpack. Drag stacks between slots, shift-drag to split, right click to quick-move.
 - Crafting (Tab): a queue that crafts over time and refunds when cancelled. Stone hatchets and pickaxes gather much faster than the rock; salvaged tools are faster again but need a workbench nearby. Tools wear out and break.
-- Deployables: a workbench, a furnace that burns wood to smelt metal ore into metal fragments, and a 12-slot storage box. Hit one to pick it back up.
+- Deployables: workbenches (levels 1, 2 and 3), a furnace that burns wood into charcoal while smelting metal, sulfur and high quality ore, and a 12-slot storage box. Hit one to pick it back up.
+- Weapons, Rust-style: spears, a machete and a salvaged sword; the hunting bow and crossbow; the Eoka, waterpipe, revolver and double barrel; the semi-auto pistol, pump shotgun, Thompson, custom SMG and semi-auto rifle (workbench 2); the MP5, assault rifle, LR-300, bolt action rifle, L96 and M249 (workbench 3). Five ammo types are crafted from gunpowder (charcoal and sulfur). Guns have magazines, reloads, recoil, spread, damage falloff and headshots; scoped rifles zoom right in.
+- Combat: 100 health, bandages and syringes to heal. Dying drops everything in a loot bag anyone can open, and you respawn with a rock. The server traces every shot, so walls and the ground stop bullets.
 - Fortnite-style building on a 3 m grid with the building plan in hand: walls, floors and stairs in wood, stone or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
 - The server checks every action (reach, cost, cooldowns, movement speed), so players can't cheat by editing the client.
@@ -27,7 +29,9 @@ This repository is the **browser prototype**, built step by step. Milestones don
 | Move / sprint / jump | WASD / Shift / Space |
 | Pick a belt slot | 1 to 6 (or scroll) |
 | Inventory and crafting | Tab or I (Esc closes) |
-| Gather, hit, or place what you hold | Left click |
+| Gather, hit, place or shoot what you hold | Left click (hold for automatic guns) |
+| Aim down sights | Right click (with a gun) |
+| Reload | R (with a gun) |
 | Open a furnace or box, pick hemp | E |
 | Building plan: wall, floor or stairs | Right click |
 | Building plan: wood, stone or scrap | R |
@@ -67,6 +71,6 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Survival needs: hunger, thirst, radiation zones
+1. Armour, and survival needs: hunger, thirst, radiation zones
 2. The first creature: a mutated Ashhound that can be tamed and ridden
 3. Saving the world to disk and the 30-day wipe cycle

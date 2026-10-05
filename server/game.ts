@@ -33,10 +33,12 @@ import {
 import {
   DEPLOYABLE_KINDS,
   FURNACE_FUEL,
-  FURNACE_ORE,
-  FURNACE_OUTPUT,
-  FURNACE_SMELT_SECONDS,
+  FURNACE_ORE_SLOTS,
+  FURNACE_OUTPUT_SLOTS,
   FURNACE_WOOD_SECONDS,
+  LOOT_BAG_SECONDS,
+  SMELTS,
+  WORKBENCH_LEVEL,
   deployableBox,
   newDeployable,
   slotAccepts,
@@ -51,12 +53,28 @@ import {
   canAfford,
   countItem,
   emptySlots,
+  maxDurability,
   recipeFor,
   removeItem,
   roomFor,
   type ItemId,
   type Slots,
+  type Stack,
 } from '../shared/items.ts';
+import {
+  EYE_HEIGHT,
+  FIST,
+  HEADSHOT,
+  HEAL_COOLDOWN,
+  MAX_HEALTH,
+  falloff,
+  normalize,
+  rayBox,
+  rayPlayer,
+  rayTerrain,
+  spreadDir,
+  type Vec3,
+} from '../shared/combat.ts';
 import { RESOURCE_INFO, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
 
 /** Who a message goes to: one player, everyone, or everyone except one player. */
@@ -74,12 +92,18 @@ interface Player extends Omit<PlayerState, 'held'> {
   craftBlocked: boolean;
   lastMoveAt: number;
   lastGatherAt: number;
+  hp: number;
+  /** Earliest time (ms) the next shot or swing is allowed. */
+  nextAttackAt: number;
+  reloadUntil: number;
+  lastHealAt: number;
 }
 
 /** Furnace burn and smelt timers, kept off the shared deployable state. */
 interface FurnaceTimers {
   burn: number;
-  smelt: number;
+  /** Progress on the ore in each ore slot. */
+  smelt: number[];
 }
 
 // Faded dyes rather than bright team colours: they tint a survivor's scarf, armband and name
@@ -99,13 +123,18 @@ export class Game {
   private nextDeployableId = 1;
   private respawns: { id: number; at: number }[] = [];
   private furnaces = new Map<number, FurnaceTimers>();
+  /** Seconds until each loot bag disappears. */
+  private bagExpiry = new Map<number, number>();
   private lastTick = -1;
   private rand: () => number;
 
-  /** @param startKit how many of each resource players spawn with (0 normally; handy for testing). */
+  /**
+   * @param startKit what players spawn with besides the rock and plan: a count of each basic
+   * resource, or a list of items (nothing normally; handy for testing and screenshots).
+   */
   constructor(
     seed: number,
-    private startKit = 0,
+    private startKit: number | Partial<Record<ItemId, number>> = 0,
   ) {
     this.seed = seed;
     this.resources = generateResources(seed);
@@ -116,17 +145,14 @@ export class Game {
   join(name: string, now: number): { id: number; out: Outgoing[] } | null {
     if (this.players.size >= MAX_PLAYERS) return null;
     const id = this.nextId++;
-    const x = (this.rand() - 0.5) * HALF_WORLD;
-    const z = (this.rand() - 0.5) * HALF_WORLD;
+    const [x, z] = this.spawnPoint();
     const usedColors = new Set([...this.players.values()].map((p) => p.color));
     const color = COLORS.find((c) => !usedColors.has(c)) ?? COLORS[id % COLORS.length];
-    // Like Rust, everyone starts with a rock. A building plan comes free too, so you can build at once.
-    const slots = emptySlots(INVENTORY_SIZE);
-    addItem(slots, 'rock', 1);
-    addItem(slots, 'buildingPlan', 1);
-    if (this.startKit > 0) {
-      for (const item of ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'cloth'] as ItemId[]) addItem(slots, item, this.startKit);
-    }
+    const slots = starterSlots();
+    const each = this.startKit;
+    const kit: Partial<Record<ItemId, number>> =
+      typeof each === 'number' ? Object.fromEntries((['wood', 'stone', 'scrap', 'metal', 'hqm', 'cloth', 'gunpowder'] as ItemId[]).map((i) => [i, each])) : each;
+    for (const [item, n] of Object.entries(kit)) if (typeof n === 'number' && n > 0 && item in ITEMS) addItem(slots, item as ItemId, n);
     const player: Player = {
       id,
       name: cleanName(name) || `Survivor ${id}`,
@@ -136,8 +162,13 @@ export class Game {
       z,
       yaw: 0,
       moving: false,
+      dead: false,
       slots,
       active: 0,
+      hp: MAX_HEALTH,
+      nextAttackAt: 0,
+      reloadUntil: 0,
+      lastHealAt: -Infinity,
       queue: [],
       craftBlocked: false,
       lastMoveAt: now,
@@ -160,6 +191,7 @@ export class Game {
             pieces: [...this.pieces.values()],
             deployables: [...this.deployables.values()],
             slots: clone(slots),
+            hp: player.hp,
           },
         },
         { to: 'others', except: id, msg: { t: 'joined', player: pub } },
@@ -184,7 +216,7 @@ export class Game {
    * the player back otherwise. It also says which belt slot is in their hands.
    */
   move(id: number, x: number, y: number, z: number, yaw: number, moving: boolean, now: number, slot = 0): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     if (!p || ![x, y, z, yaw].every(Number.isFinite)) return [];
     if (isBeltSlot(slot)) p.active = slot;
     const dt = Math.max((now - p.lastMoveAt) / 1000, 0.05);
@@ -210,7 +242,7 @@ export class Game {
    * for what they are made for and wear down with each hit. Hemp is picked whole by hand.
    */
   gather(id: number, resourceId: number, now: number, slot = 0): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const node = this.resources[resourceId];
     if (!p || !node || node.amount <= 0) return [];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
@@ -247,7 +279,7 @@ export class Game {
   }
 
   place(id: number, kind: PieceKind, i: number, y: number, k: number, dir: number, material: Material): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     if (!p) return [];
     if (p.slots[p.active]?.item !== 'buildingPlan') return [notice(id, 'Hold a building plan to build')];
     const piece: Piece = { kind, i, y, k, dir: kind === 'floor' ? 0 : dir, material, edit: 'solid', hp: MAX_HP[material] };
@@ -277,7 +309,7 @@ export class Game {
 
   /** Hits damage a piece; at zero health it breaks and refunds a little material. */
   hit(id: number, key: string, now: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const piece = this.pieces.get(key);
     if (!p || !piece) return [];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
@@ -295,7 +327,7 @@ export class Game {
    * broke it, and its owner gets the item itself back (so this is also how you pick one up).
    */
   hitDeployable(id: number, deployableId: number, now: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const d = this.deployables.get(deployableId);
     if (!p || !d) return [];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
@@ -303,16 +335,14 @@ export class Game {
     p.lastGatherAt = now;
     d.hp -= HIT_DAMAGE;
     if (d.hp > 0) return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }];
-    this.deployables.delete(d.id);
-    this.furnaces.delete(d.id);
-    for (const s of d.slots) if (s) addItem(p.slots, s.item, s.count, s.hp);
-    if (d.owner === id) addItem(p.slots, d.kind, 1);
-    return [{ to: 'all', msg: { t: 'deployable', id: d.id, d: null, by: id } }, this.inventory(p)];
+    for (const s of d.slots) if (s) addStack(p.slots, s);
+    if (d.owner === id && DEPLOYABLE_KINDS.includes(d.kind)) addItem(p.slots, d.kind as ItemId, 1);
+    return [...this.removeDeployable(d.id, id), this.inventory(p)];
   }
 
   /** Edits turn a wall into a window, door or half wall, for free, like Fortnite. */
   edit(id: number, key: string, edit: WallEdit): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const piece = this.pieces.get(key);
     if (!p || !piece || piece.kind !== 'wall' || !WALL_EDITS.includes(edit)) return [];
     if (!this.inReach(p, pieceBounds(piece))) return [notice(id, 'Too far away')];
@@ -322,12 +352,12 @@ export class Game {
 
   /** Queues crafting jobs. Ingredients are taken now and refunded if the job is cancelled. */
   craft(id: number, item: ItemId, count: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const recipe = recipeFor(item);
     if (!p || !recipe || !Number.isInteger(count) || count < 1) return [];
     count = Math.min(count, MAX_QUEUE - p.queue.length);
     if (count <= 0) return [notice(id, 'Your crafting queue is full')];
-    if (recipe.workbench && !this.nearWorkbench(p)) return [notice(id, 'You need to be near a workbench')];
+    if (recipe.workbench && this.workbenchLevel(p) < recipe.workbench) return [notice(id, `You need to be near a level ${recipe.workbench} workbench`)];
     if (!canAfford(p.slots, recipe, count)) return [notice(id, 'Not enough resources')];
     for (const [ingredient, n] of Object.entries(recipe.cost)) removeItem(p.slots, ingredient as ItemId, n! * count);
     for (let n = 0; n < count; n++) p.queue.push({ item, left: recipe.time, total: recipe.time });
@@ -335,7 +365,7 @@ export class Game {
   }
 
   cancelCraft(id: number, index: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const job = p?.queue[index];
     if (!p || !job) return [];
     p.queue.splice(index, 1);
@@ -349,7 +379,7 @@ export class Game {
    * Moving onto the same item tops up the stack; onto a different item swaps them.
    */
   moveItem(id: number, from: SlotRef, to: SlotRef, count?: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     if (!p || !from || !to) return [];
     const src = this.container(p, from.c);
     const dst = this.container(p, to.c);
@@ -378,13 +408,18 @@ export class Game {
     }
     const out: Outgoing[] = [];
     if (src.deployable === null || dst.deployable === null) out.push(this.inventory(p));
-    for (const d of new Set([src.deployable, dst.deployable])) if (d) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } });
+    for (const d of new Set([src.deployable, dst.deployable])) {
+      if (!d) continue;
+      // An emptied loot bag goes away.
+      if (d.kind === 'lootBag' && !d.slots.some(Boolean)) out.push(...this.removeDeployable(d.id, id));
+      else out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } });
+    }
     return out;
   }
 
   /** Sets down a workbench, furnace or box from a belt slot, on the ground or on a floor. */
   deploy(id: number, slot: number, x: number, y: number, z: number, rot: number): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     if (!p || !isBeltSlot(slot) || ![x, y, z, rot].every(Number.isFinite)) return [];
     const stack = p.slots[slot];
     if (!stack || !DEPLOYABLE_KINDS.includes(stack.item as DeployableKind)) return [];
@@ -407,12 +442,212 @@ export class Game {
 
   /** Lights or puts out a furnace. */
   furnace(id: number, deployableId: number, on: boolean): Outgoing[] {
-    const p = this.players.get(id);
+    const p = this.alive(id);
     const d = this.deployables.get(deployableId);
     if (!p || !d || d.kind !== 'furnace' || !this.container(p, d.id)) return [];
     if (on && !d.slots[FURNACE_FUEL]) return [notice(id, 'Put some wood in first')];
     d.on = !!on;
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }];
+  }
+
+  /**
+   * Fires the bow or gun in a belt slot. The server rolls the spread, traces every pellet
+   * against walls, deployables, the ground and other players, and applies the damage.
+   */
+  fire(id: number, slot: number, dir: Vec3, aim: boolean, now: number): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot) || !isVec3(dir)) return [];
+    p.active = slot;
+    const stack = p.slots[slot];
+    const w = stack ? ITEMS[stack.item].weapon : undefined;
+    if (!stack || !w || w.class === 'melee') return [];
+    if (now < p.nextAttackAt || now < p.reloadUntil) return [];
+    if (!stack.ammo) return [notice(id, 'Out of ammo: press R to reload')];
+    stack.ammo -= 1;
+    p.nextAttackAt = now + w.delay * 1000 * 0.9;
+    const from: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
+    const d = normalize(dir);
+    const cone = (w.spread ?? 0) * (aim ? 0.5 : 1) * (p.moving ? 1.6 : 1);
+    const ends: Vec3[] = [];
+    const damage = new Map<Player, { amount: number; head: boolean }>();
+    for (let n = 0; n < (w.pellets ?? 1); n++) {
+      const pd = spreadDir(d, cone, this.rand);
+      const hit = this.trace(p, from, pd, w.range);
+      ends.push([from[0] + pd[0] * hit.t, from[1] + pd[1] * hit.t, from[2] + pd[2] * hit.t]);
+      if (!hit.player) continue;
+      const amount = w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1);
+      const sum = damage.get(hit.player) ?? { amount: 0, head: false };
+      sum.amount += amount;
+      sum.head ||= hit.head;
+      damage.set(hit.player, sum);
+    }
+    const out: Outgoing[] = [{ to: 'all', msg: { t: 'shot', by: id, item: stack.item, from, ends } }];
+    out.push(...this.wear(p, slot));
+    for (const [victim, { amount, head }] of damage) out.push(...this.damage(victim, amount, p, stack.item, head));
+    out.push(this.inventory(p));
+    return out;
+  }
+
+  /** Loads the magazine of the gun in a belt slot from ammo in your inventory. */
+  reload(id: number, slot: number, now: number): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot)) return [];
+    const stack = p.slots[slot];
+    const w = stack ? ITEMS[stack.item].weapon : undefined;
+    if (!stack || !w?.ammo || !w.mag) return [];
+    if (now < p.reloadUntil) return [];
+    const need = w.mag - (stack.ammo ?? 0);
+    const take = Math.min(need, countItem(p.slots, w.ammo));
+    if (need <= 0) return [];
+    if (take === 0) return [notice(id, `No ${ITEMS[w.ammo].name.toLowerCase()} left`)];
+    removeItem(p.slots, w.ammo, take);
+    stack.ammo = (stack.ammo ?? 0) + take;
+    p.reloadUntil = now + (w.reload ?? 1) * 1000 * 0.9;
+    return [this.inventory(p)];
+  }
+
+  /** Swings a melee weapon, a tool or your fists at whoever is straight ahead. */
+  melee(id: number, slot: number, dir: Vec3, now: number): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot) || !isVec3(dir)) return [];
+    p.active = slot;
+    const stack = p.slots[slot];
+    const w = stack ? ITEMS[stack.item].weapon : FIST;
+    if (!w || ('class' in w && w.class !== 'melee')) return [];
+    if (now < p.nextAttackAt) return [];
+    p.nextAttackAt = now + w.delay * 1000 * 0.9;
+    const from: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
+    // A little extra reach, since the client aims from behind the shoulder.
+    const hit = this.trace(p, from, normalize(dir), w.range + 0.6);
+    if (!hit.player) return [];
+    const out = this.wear(p, slot);
+    out.push(...this.damage(hit.player, w.damage * (hit.head ? 1.5 : 1), p, stack?.item ?? null, hit.head));
+    if (stack) out.push(this.inventory(p));
+    return out;
+  }
+
+  /** Uses a bandage or syringe from a belt slot. */
+  use(id: number, slot: number, now: number): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot)) return [];
+    const stack = p.slots[slot];
+    const heal = stack ? ITEMS[stack.item].heal : undefined;
+    if (!stack || !heal) return [];
+    if ((now - p.lastHealAt) / 1000 < HEAL_COOLDOWN) return [];
+    if (p.hp >= MAX_HEALTH) return [notice(id, 'You are already at full health')];
+    p.lastHealAt = now;
+    p.hp = Math.min(MAX_HEALTH, p.hp + heal);
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    return [this.inventory(p), { to: id, msg: { t: 'health', hp: Math.round(p.hp) } }];
+  }
+
+  /** Back to life at a random spot with a rock, a building plan and full health. */
+  respawn(id: number): Outgoing[] {
+    const p = this.players.get(id);
+    if (!p || !p.dead) return [];
+    const [x, z] = this.spawnPoint();
+    p.x = x;
+    p.z = z;
+    p.y = terrainHeight(this.seed, x, z);
+    p.dead = false;
+    p.hp = MAX_HEALTH;
+    p.slots = starterSlots();
+    p.active = 0;
+    p.reloadUntil = 0;
+    return [
+      { to: id, msg: { t: 'correct', x: p.x, y: p.y, z: p.z } },
+      { to: id, msg: { t: 'health', hp: p.hp } },
+      this.inventory(p),
+    ];
+  }
+
+  /**
+   * Follows a ray until it hits a player, or is stopped by a building piece, a deployable or
+   * the ground. Returns how far it went.
+   */
+  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; head: boolean } {
+    let t = range;
+    for (const piece of this.pieces.values()) {
+      for (const b of pieceBoxes(piece)) {
+        const hit = rayBox(o, d, b, t);
+        if (hit !== null) t = hit;
+      }
+    }
+    for (const dep of this.deployables.values()) {
+      const hit = rayBox(o, d, deployableBox(dep), t);
+      if (hit !== null) t = hit;
+    }
+    const ground = rayTerrain(this.seed, o, d, t);
+    if (ground !== null) t = ground;
+    let best: { t: number; player?: Player; head: boolean } = { t, head: false };
+    for (const other of this.players.values()) {
+      if (other === shooter || other.dead) continue;
+      const hit = rayPlayer(o, d, other, best.t);
+      if (hit) best = { t: hit.t, player: other, head: hit.head };
+    }
+    return best;
+  }
+
+  /** Wears down the weapon in a slot by one use; it breaks at zero. */
+  private wear(p: Player, slot: number): Outgoing[] {
+    const stack = p.slots[slot];
+    if (!stack || stack.hp === undefined) return [];
+    stack.hp -= 1;
+    if (stack.hp > 0) return [];
+    p.slots[slot] = null;
+    return [notice(p.id, `Your ${ITEMS[stack.item].name} broke`), this.inventory(p)];
+  }
+
+  private damage(victim: Player, amount: number, by: Player, item: ItemId | null, head: boolean): Outgoing[] {
+    victim.hp = Math.max(0, victim.hp - amount);
+    const kill = victim.hp <= 0;
+    const out: Outgoing[] = [
+      { to: by.id, msg: { t: 'hitmarker', head, kill } },
+      { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z] } },
+    ];
+    if (kill) out.push(...this.kill(victim, by, item));
+    return out;
+  }
+
+  /** Drops everything the victim carried (and their crafting refunds) into a loot bag. */
+  private kill(victim: Player, by: Player | null, item: ItemId | null): Outgoing[] {
+    for (const job of victim.queue) {
+      for (const [ingredient, n] of Object.entries(recipeFor(job.item)!.cost)) addItem(victim.slots, ingredient as ItemId, n!);
+    }
+    victim.queue = [];
+    victim.craftBlocked = false;
+    victim.dead = true;
+    victim.hp = 0;
+    const out: Outgoing[] = [];
+    if (victim.slots.some(Boolean)) {
+      const bag = newDeployable(this.nextDeployableId++, 'lootBag', victim.x, victim.y, victim.z, victim.yaw, 0);
+      bag.slots = victim.slots;
+      bag.label = victim.name;
+      this.deployables.set(bag.id, bag);
+      this.bagExpiry.set(bag.id, LOOT_BAG_SECONDS);
+      out.push({ to: 'all', msg: { t: 'deployable', id: bag.id, d: bag, by: 0 } });
+    }
+    victim.slots = emptySlots(INVENTORY_SIZE);
+    const how = item ? ` with ${ITEMS[item].name.replace(/^an? /i, '')}` : '';
+    const text = by ? `${by.name} killed ${victim.name}${how}` : `${victim.name} died`;
+    out.push(
+      { to: victim.id, msg: { t: 'died', by: by?.name ?? null, item } },
+      this.inventory(victim),
+      this.crafting(victim),
+      { to: 'all', msg: { t: 'notice', text } },
+    );
+    return out;
+  }
+
+  private spawnPoint(): [number, number] {
+    return [(this.rand() - 0.5) * HALF_WORLD, (this.rand() - 0.5) * HALF_WORLD];
+  }
+
+  /** A player who is connected and not dead. */
+  private alive(id: number): Player | undefined {
+    const p = this.players.get(id);
+    return p && !p.dead ? p : undefined;
   }
 
   /** Called every server tick: respawns nodes, runs crafting and furnaces, sends positions. */
@@ -429,6 +664,10 @@ export class Game {
     });
     for (const p of this.players.values()) out.push(...this.tickCrafting(p, dt));
     for (const d of this.deployables.values()) if (d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
+    for (const [bag, left] of this.bagExpiry) {
+      if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
+      else out.push(...this.removeDeployable(bag));
+    }
     if (this.players.size > 0) {
       out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState) } });
     }
@@ -452,43 +691,55 @@ export class Game {
     return [this.inventory(p), this.crafting(p), notice(p.id, `Crafted ${ITEMS[job.item].name}`)];
   }
 
-  /** Burns wood and turns ore into metal fragments. Returns true if anything changed. */
+  /**
+   * Burns wood (leaving charcoal) and smelts each ore slot: metal ore into metal fragments,
+   * sulfur ore into sulfur, high quality ore into high quality metal. Returns true if
+   * anything changed.
+   */
   private tickFurnace(d: Deployable, dt: number): boolean {
-    const timers = this.furnaces.get(d.id) ?? { burn: 0, smelt: 0 };
+    const timers = this.furnaces.get(d.id) ?? { burn: 0, smelt: FURNACE_ORE_SLOTS.map(() => 0) };
     this.furnaces.set(d.id, timers);
     let changed = false;
     if (timers.burn <= 0) {
       const fuel = d.slots[FURNACE_FUEL];
       if (!fuel) {
         d.on = false;
-        timers.smelt = 0;
+        timers.smelt.fill(0);
         return true;
       }
       fuel.count -= 1;
       if (fuel.count === 0) d.slots[FURNACE_FUEL] = null;
       timers.burn += FURNACE_WOOD_SECONDS;
+      furnaceOutput(d, 'charcoal');
       changed = true;
     }
     timers.burn -= dt;
-    const ore = d.slots[FURNACE_ORE];
-    const output = d.slots[FURNACE_OUTPUT];
-    const outputFull = output !== null && (output.item !== 'metal' || output.count >= ITEMS.metal.stack);
-    if (!ore || outputFull) {
-      timers.smelt = 0;
-      return changed;
-    }
-    timers.smelt += dt;
-    while (timers.smelt >= FURNACE_SMELT_SECONDS && d.slots[FURNACE_ORE]) {
-      timers.smelt -= FURNACE_SMELT_SECONDS;
-      const o = d.slots[FURNACE_ORE]!;
-      o.count -= 1;
-      if (o.count === 0) d.slots[FURNACE_ORE] = null;
-      const res = d.slots[FURNACE_OUTPUT];
-      if (res) res.count += 1;
-      else d.slots[FURNACE_OUTPUT] = { item: 'metal', count: 1 };
-      changed = true;
-    }
+    FURNACE_ORE_SLOTS.forEach((slot, n) => {
+      const ore = d.slots[slot];
+      const smelt = ore ? SMELTS[ore.item] : undefined;
+      if (!ore || !smelt || !furnaceHasRoom(d, smelt.into)) {
+        timers.smelt[n] = 0;
+        return;
+      }
+      timers.smelt[n] += dt;
+      while (timers.smelt[n] >= smelt.seconds && d.slots[slot] && furnaceHasRoom(d, smelt.into)) {
+        timers.smelt[n] -= smelt.seconds;
+        const o = d.slots[slot]!;
+        o.count -= 1;
+        if (o.count === 0) d.slots[slot] = null;
+        furnaceOutput(d, smelt.into);
+        changed = true;
+      }
+    });
     return changed;
+  }
+
+  /** Removes a deployable from the world, telling everyone. */
+  private removeDeployable(id: number, by = 0): Outgoing[] {
+    this.deployables.delete(id);
+    this.furnaces.delete(id);
+    this.bagExpiry.delete(id);
+    return [{ to: 'all', msg: { t: 'deployable', id, d: null, by } }];
   }
 
   /** Your inventory, or a furnace or box you are close enough to use. */
@@ -503,11 +754,14 @@ export class Game {
     return { slots: d.slots, deployable: d };
   }
 
-  private nearWorkbench(p: Player): boolean {
+  /** The best workbench level within reach, or 0. */
+  private workbenchLevel(p: Player): number {
+    let level = 0;
     for (const d of this.deployables.values()) {
-      if (d.kind === 'workbench' && Math.hypot(d.x - p.x, d.z - p.z) <= WORKBENCH_RANGE && Math.abs(d.y - p.y) < 3) return true;
+      const l = WORKBENCH_LEVEL[d.kind];
+      if (l && l > level && Math.hypot(d.x - p.x, d.z - p.z) <= WORKBENCH_RANGE && Math.abs(d.y - p.y) < 3) level = l;
     }
-    return false;
+    return level;
   }
 
   /** On the ground (allowing small bumps), or on top of a floor piece. */
@@ -539,7 +793,39 @@ export class Game {
 }
 
 function publicState(p: Player): PlayerState {
-  return { id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, yaw: p.yaw, moving: p.moving, held: p.slots[p.active]?.item ?? null };
+  return { id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, yaw: p.yaw, moving: p.moving, held: p.dead ? null : (p.slots[p.active]?.item ?? null), dead: p.dead };
+}
+
+/** Like Rust, everyone starts with a rock. A building plan comes free too, so you can build at once. */
+function starterSlots(): Slots {
+  const slots = emptySlots(INVENTORY_SIZE);
+  addItem(slots, 'rock', 1);
+  addItem(slots, 'buildingPlan', 1);
+  return slots;
+}
+
+/** Adds a whole stack, keeping its durability and loaded ammo. */
+function addStack(slots: Slots, s: Stack) {
+  if (ITEMS[s.item].stack > 1) return addItem(slots, s.item, s.count);
+  const free = slots.findIndex((x) => !x);
+  if (free >= 0) slots[free] = { ...s };
+}
+
+function furnaceHasRoom(d: Deployable, item: ItemId): boolean {
+  return FURNACE_OUTPUT_SLOTS.some((i) => !d.slots[i] || (d.slots[i]!.item === item && d.slots[i]!.count < ITEMS[item].stack));
+}
+
+function furnaceOutput(d: Deployable, item: ItemId) {
+  const same = FURNACE_OUTPUT_SLOTS.find((i) => d.slots[i]?.item === item && d.slots[i]!.count < ITEMS[item].stack);
+  if (same !== undefined) d.slots[same]!.count += 1;
+  else {
+    const free = FURNACE_OUTPUT_SLOTS.find((i) => !d.slots[i]);
+    if (free !== undefined) d.slots[free] = { item, count: 1 };
+  }
+}
+
+function isVec3(v: unknown): v is Vec3 {
+  return Array.isArray(v) && v.length === 3 && v.every(Number.isFinite) && v.some((n) => n !== 0);
 }
 
 function notice(id: number, text: string): Outgoing {

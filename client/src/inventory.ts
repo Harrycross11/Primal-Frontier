@@ -2,13 +2,15 @@
 // inventory grid, an open furnace or box, and the crafting menu. Items move by dragging
 // between slots, or by right-clicking to send a stack to the other side.
 
-import { FURNACE_FUEL, FURNACE_ORE, FURNACE_OUTPUT, slotAccepts, type Deployable } from '../../shared/deployables.ts';
+import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
   BELT_SIZE,
   ITEMS,
   RECIPES,
+  RECIPE_CATEGORIES,
   canAfford,
   countItem,
+  maxDurability,
   type ItemId,
   type Recipe,
   type Slots,
@@ -18,8 +20,8 @@ import type { CraftJob, SlotRef } from '../../shared/protocol.ts';
 import { iconSvg } from './icons.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
-const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'cloth'];
-const CONTAINER_NAMES = { workbench: 'Workbench', furnace: 'Furnace', storageBox: 'Storage Box' } as const;
+const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'sulfurOre', 'sulfur', 'hqmOre', 'hqm', 'charcoal', 'gunpowder', 'cloth'];
+const FURNACE_LABELS = ['Wood', 'Ore', 'Ore', 'Out', 'Out', 'Out'];
 
 export interface InventoryActions {
   move(from: SlotRef, to: SlotRef, count?: number): void;
@@ -32,11 +34,13 @@ export class InventoryUi {
   slots: Slots = [];
   active = 0;
   container: Deployable | null = null;
-  nearWorkbench = false;
+  /** Level of the best workbench in reach, or 0. */
+  workbench = 0;
   private queue: CraftJob[] = [];
   private queueAt = 0;
   private category: Recipe['category'] | 'All' = 'All';
   private selected: ItemId = 'stoneHatchet';
+  private listScroll = 0;
   private drag: { from: SlotRef; stack: Stack } | null = null;
 
   constructor(private actions: InventoryActions) {
@@ -149,14 +153,14 @@ export class InventoryUi {
     const d = this.container;
     panel.hidden = !d || d.slots.length === 0;
     if (!d || panel.hidden) return;
-    $('container-title').textContent = CONTAINER_NAMES[d.kind];
+    $('container-title').textContent = d.kind === 'lootBag' ? `${d.label ?? 'Someone'}'s loot bag` : DEPLOYABLE_INFO[d.kind].name;
     const grid = $('container-grid');
     grid.innerHTML = '';
     d.slots.forEach((s, i) => {
       const el = this.slotElement({ c: d.id, i }, s, true);
       if (d.kind === 'furnace') {
         el.classList.add('label-slot');
-        el.dataset.label = ['Wood', 'Ore', 'Metal'][i];
+        el.dataset.label = FURNACE_LABELS[i];
       }
       grid.appendChild(el);
     });
@@ -165,48 +169,54 @@ export class InventoryUi {
     if (d.kind === 'furnace') {
       $('furnace-toggle').textContent = d.on ? 'Put out' : 'Light';
       const fuel = d.slots[FURNACE_FUEL]?.count ?? 0;
-      const ore = d.slots[FURNACE_ORE]?.count ?? 0;
-      const out = d.slots[FURNACE_OUTPUT]?.count ?? 0;
+      const ore = FURNACE_ORE_SLOTS.reduce((n, i) => n + (d.slots[i]?.count ?? 0), 0);
       $('furnace-status').textContent = d.on
         ? ore > 0
-          ? `Smelting: ${ore} ore left, ${out} metal ready`
-          : `Burning wood with nothing to smelt (${fuel} wood left)`
-        : 'Add wood as fuel and metal ore to smelt, then light it.';
+          ? `Smelting: ${ore} ore left, ${fuel} wood left`
+          : `Burning wood into charcoal (${fuel} wood left)`
+        : 'Add wood as fuel and metal, sulfur or high quality ore, then light it.';
     }
   }
 
   private renderCrafting() {
     const tabs = $('tabs');
     tabs.innerHTML = '';
-    for (const c of ['All', 'Tools', 'Construction'] as const) {
+    for (const c of ['All', ...RECIPE_CATEGORIES] as const) {
       const b = document.createElement('button');
       b.textContent = c;
       b.classList.toggle('on', c === this.category);
       b.onclick = () => {
         this.category = c;
+        const first = RECIPES.find((r) => c === 'All' || r.category === c);
+        if (first && c !== 'All') this.selected = first.item;
         this.render();
       };
       tabs.appendChild(b);
     }
     const list = $('recipes');
+    this.listScroll = list.scrollTop;
     list.innerHTML = '';
     for (const r of RECIPES) {
       if (this.category !== 'All' && r.category !== this.category) continue;
-      const ok = canAfford(this.slots, r) && (!r.workbench || this.nearWorkbench);
+      const ok = canAfford(this.slots, r) && (r.workbench ?? 0) <= this.workbench;
       const row = document.createElement('div');
       row.className = `recipe${ok ? '' : ' cant'}${r.item === this.selected ? ' on' : ''}`;
-      row.innerHTML = `${iconSvg(r.item)}<div><div class="rname">${ITEMS[r.item].name}${r.workbench ? '<span class="tag">Workbench</span>' : ''}</div><div class="rcost">${this.costText(r)}</div></div>`;
+      const tag = r.workbench ? `<span class="tag${r.workbench > this.workbench ? ' locked' : ''}">Workbench ${r.workbench}</span>` : '';
+      const count = r.count > 1 ? ` ×${r.count}` : '';
+      row.innerHTML = `${iconSvg(r.item)}<div><div class="rname">${ITEMS[r.item].name}${count}${tag}</div><div class="rcost">${this.costText(r)}</div></div>`;
       row.onclick = () => {
         this.selected = r.item;
         this.render();
       };
       list.appendChild(row);
     }
+    list.scrollTop = this.listScroll;
     const r = RECIPES.find((x) => x.item === this.selected)!;
-    const ok = canAfford(this.slots, r) && (!r.workbench || this.nearWorkbench);
+    const benchOk = (r.workbench ?? 0) <= this.workbench;
+    const ok = canAfford(this.slots, r) && benchOk;
     const detail = $('recipe-detail');
-    detail.innerHTML = `<b>${ITEMS[r.item].name}</b> · ${r.time}s<br/>${ITEMS[r.item].description}${
-      r.workbench && !this.nearWorkbench ? '<div class="need">Stand near a workbench to craft this.</div>' : ''
+    detail.innerHTML = `<b>${ITEMS[r.item].name}</b> · ${r.time}s<br/>${ITEMS[r.item].description}${statsText(r.item)}${
+      benchOk ? '' : `<div class="need">Stand near a level ${r.workbench} workbench to craft this.</div>`
     }<div class="actions"></div>`;
     const actions = detail.querySelector('.actions')!;
     for (const n of [1, 5]) {
@@ -219,13 +229,14 @@ export class InventoryUi {
     }
     const queue = $('queue');
     queue.innerHTML = this.queue.length ? '<h3>Queue</h3>' : '';
-    this.queue.forEach((job, i) => {
+    this.queue.slice(0, 6).forEach((job, i) => {
       const row = document.createElement('div');
       row.className = 'job';
       row.innerHTML = `${iconSvg(job.item)}${ITEMS[job.item].name}<span class="x" title="Cancel and refund">✕</span>`;
       (row.querySelector('.x') as HTMLElement).onclick = () => this.actions.cancel(i);
       queue.appendChild(row);
     });
+    if (this.queue.length > 6) queue.insertAdjacentHTML('beforeend', `<div class="job">+${this.queue.length - 6} more</div>`);
   }
 
   private costText(r: Recipe): string {
@@ -245,8 +256,10 @@ export class InventoryUi {
       const info = ITEMS[stack.item];
       el.innerHTML = iconSvg(stack.item);
       if (stack.count > 1) el.insertAdjacentHTML('beforeend', `<span class="count">${stack.count}</span>`);
-      if (info.tool && stack.hp !== undefined) {
-        el.insertAdjacentHTML('beforeend', `<span class="wear"><i style="width:${Math.round((stack.hp / info.tool.durability) * 100)}%"></i></span>`);
+      if (info.weapon?.mag) el.insertAdjacentHTML('beforeend', `<span class="count ammo">${stack.ammo ?? 0}/${info.weapon.mag}</span>`);
+      const max = maxDurability(stack.item);
+      if (max && stack.hp !== undefined) {
+        el.insertAdjacentHTML('beforeend', `<span class="wear"><i style="width:${Math.round((stack.hp / max) * 100)}%"></i></span>`);
       }
     }
     if (!interactive) return el;
@@ -254,8 +267,9 @@ export class InventoryUi {
       const tip = $('tooltip');
       if (!stack || this.drag) return;
       const info = ITEMS[stack.item];
-      const wear = info.tool && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${info.tool.durability}` : '';
-      tip.innerHTML = `<b>${info.name}</b>${info.description}${wear}`;
+      const max = maxDurability(stack.item);
+      const wear = max && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${max}` : '';
+      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}`;
       tip.hidden = false;
     });
     el.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
@@ -298,4 +312,15 @@ export class InventoryUi {
     if (same >= 0 && max > 1) return same;
     return slots.findIndex((s, i) => allowed(i) && !s);
   }
+}
+
+/** Damage, fire rate and magazine for weapons, shown in tooltips and the crafting menu. */
+function statsText(item: ItemId): string {
+  const w = ITEMS[item].weapon;
+  if (!w || ITEMS[item].kind !== 'weapon') return ITEMS[item].heal ? `<div class="stats">Heals ${ITEMS[item].heal}</div>` : '';
+  const dmg = w.pellets ? `${w.damage} × ${w.pellets} pellets` : `${w.damage}`;
+  const rate = w.auto ? `${Math.round(60 / w.delay)} rounds/min, automatic` : `${(1 / w.delay).toFixed(1)} shots/s`;
+  const parts = [`Damage ${dmg}`, w.class === 'melee' ? `Reach ${w.range} m` : rate];
+  if (w.ammo) parts.push(`${w.mag} × ${ITEMS[w.ammo].name}`, `Range ${w.range} m`);
+  return `<div class="stats">${parts.join(' · ')}</div>`;
 }

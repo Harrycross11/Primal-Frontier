@@ -42,7 +42,8 @@ const http = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 
-const game = new Game(SEED, Number(process.env.START_KIT ?? 0));
+// START_KIT=500 gives everyone 500 of each basic resource; START_ITEMS='{"metal":3000}' gives exact items.
+const game = new Game(SEED, process.env.START_ITEMS ? JSON.parse(process.env.START_ITEMS) : Number(process.env.START_KIT ?? 0));
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
@@ -124,6 +125,21 @@ wss.on('connection', (ws) => {
         break;
       case 'furnace':
         deliver(game.furnace(id, msg.id, msg.on));
+        break;
+      case 'fire':
+        deliver(game.fire(id, msg.slot, msg.d, !!msg.aim, now));
+        break;
+      case 'reload':
+        deliver(game.reload(id, msg.slot, now));
+        break;
+      case 'melee':
+        deliver(game.melee(id, msg.slot, msg.d, now));
+        break;
+      case 'use':
+        deliver(game.use(id, msg.slot, now));
+        break;
+      case 'respawn':
+        deliver(game.respawn(id));
         break;
     }
   });

@@ -332,7 +332,7 @@ export class World {
               ? this.wreck(rand)
               : node.kind === 'hemp'
                 ? buildHemp(rand)
-                : buildBoulder(rand, node.kind === 'metalOre');
+                : buildBoulder(rand, node.kind);
       g.position.set(node.x, node.y, node.z);
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);

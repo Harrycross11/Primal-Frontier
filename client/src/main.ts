@@ -12,7 +12,8 @@ import {
   type Piece,
   type PieceKind,
 } from '../../shared/building.ts';
-import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
@@ -22,6 +23,7 @@ import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Graphics } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { Effects } from './effects.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
 import { buildDeployable } from './props.ts';
@@ -33,11 +35,13 @@ const RESOURCE_NAMES = {
   scrap: 'Scrap wreck',
   stone: 'Stone boulder',
   metalOre: 'Metal ore',
+  sulfurOre: 'Sulfur ore',
+  hqmOre: 'High quality metal ore',
   hemp: 'Hemp',
 } as const;
 const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
 const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
-const DEPLOYABLE_NAMES = { workbench: 'Workbench', furnace: 'Furnace', storageBox: 'Storage box' } as const;
+const SCOPED: ItemId[] = ['boltRifle', 'l96'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
 
@@ -97,6 +101,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
   };
   welcome.players.forEach(addRemote);
+
+  // Health and combat.
+  let hp = welcome.hp;
+  let dead = false;
+  hud.setHealth(hp);
+  const effects = new Effects(world.scene);
+  /** Left button held, for automatic guns. */
+  let triggerHeld = false;
+  /** Right button held with a gun: aiming down sights. */
+  let aiming = false;
+  let lastAttack = 0;
+  let reloadingUntil = 0;
+  const baseFov = camera.fov;
 
   // Inventory and what is in your hands.
   let slots: Slots = welcome.slots;
@@ -169,6 +186,40 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'correct':
         controller.teleport(m.x, m.y, m.z);
         break;
+      case 'shot': {
+        const shooter = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
+        const muzzle = shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
+        effects.shot(muzzle, m.ends.map((e) => new THREE.Vector3(...e)), m.item);
+        if (shooter && shooter !== me) {
+          shooter.recoil();
+          effects.muzzle(muzzle, m.item);
+          effects.sound(m.item, muzzle.distanceTo(controller.position));
+        }
+        break;
+      }
+      case 'hitmarker':
+        hud.hitmarker(m.head);
+        effects.hitSound(m.head);
+        break;
+      case 'health':
+        if (m.hp < hp) hud.hurt();
+        hp = m.hp;
+        hud.setHealth(hp);
+        if (dead && hp > 0) {
+          dead = false;
+          me.setDead(false);
+        }
+        break;
+      case 'died': {
+        dead = true;
+        triggerHeld = aiming = false;
+        me.setDead(true);
+        ui.hide();
+        document.exitPointerLock?.();
+        const how = m.item ? ` with a ${ITEMS[m.item].name}` : '';
+        hud.showDeath(m.by ? `${m.by} killed you${how}.` : 'You died.', () => net.send({ t: 'respawn' }));
+        break;
+      }
       case 'notice':
         hud.notice(m.text);
         break;
@@ -183,11 +234,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('mousedown', (e) => {
-    if (document.pointerLockElement !== canvas) return;
-    if (e.button === 0) primary();
+    if (document.pointerLockElement !== canvas || dead) return;
+    if (e.button === 0) {
+      triggerHeld = true;
+      primary();
+    }
+    if (e.button === 2 && heldGun()) aiming = true;
     if (e.button === 2 && held() === 'buildingPlan') {
       pieceKind = PIECE_KINDS[(PIECE_KINDS.indexOf(pieceKind) + 1) % PIECE_KINDS.length];
     }
+  });
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement !== canvas) triggerHeld = aiming = false;
+  });
+  addEventListener('mouseup', (e) => {
+    if (e.button === 0) triggerHeld = false;
+    if (e.button === 2) aiming = false;
   });
   addEventListener('wheel', (e) => {
     if (document.pointerLockElement !== canvas) return;
@@ -199,10 +261,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return ui.open ? closeScreen() : openScreen(null);
     }
     if (e.code === 'Escape' && ui.open) return closeScreen();
-    if (ui.open) return;
+    if (ui.open || dead) return;
     const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
     if (n >= 0) selectSlot(n);
     if (e.code === 'KeyR' && held() === 'buildingPlan') material = MATERIALS[(MATERIALS.indexOf(material) + 1) % MATERIALS.length];
+    if (e.code === 'KeyR' && heldGun()) reload();
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
@@ -212,12 +275,16 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
   });
   function selectSlot(n: number) {
+    if (n !== ui.active) {
+      aiming = false;
+      reloadingUntil = 0;
+    }
     ui.active = n;
     ui.render();
     sendMove();
   }
   function openScreen(container: Deployable | null) {
-    ui.nearWorkbench = nearWorkbench();
+    ui.workbench = workbenchLevel();
     ui.show(container);
     document.exitPointerLock?.();
   }
@@ -225,15 +292,102 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     ui.hide();
     canvas.requestPointerLock?.();
   }
-  function nearWorkbench() {
+  function workbenchLevel() {
     const p = controller.position;
-    return [...world.deployables.values()].some((d) => d.kind === 'workbench' && Math.hypot(d.x - p.x, d.z - p.z) <= 4 && Math.abs(d.y - p.y) < 3);
+    let level = 0;
+    for (const d of world.deployables.values()) {
+      const l = WORKBENCH_LEVEL[d.kind] ?? 0;
+      if (l > level && Math.hypot(d.x - p.x, d.z - p.z) <= 4 && Math.abs(d.y - p.y) < 3) level = l;
+    }
+    return level;
+  }
+
+  /** The bow or gun in your hands, if any. */
+  function heldGun() {
+    const item = held();
+    const w = item ? ITEMS[item].weapon : undefined;
+    return w && w.class !== 'melee' ? w : null;
+  }
+
+  /** Where the crosshair points, out to `range` metres: the first thing hit, or empty air. */
+  function aimTarget(range: number): THREE.Vector3 {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const o = ray.ray.origin;
+    const d = ray.ray.direction;
+    ray.far = range + camera.position.distanceTo(controller.eye);
+    let t = ray.far;
+    for (const h of ray.intersectObjects(world.pickables, true)) {
+      if (!isVisible(h.object) || h.distance < camera.position.distanceTo(controller.eye) - 0.5) continue;
+      t = h.distance;
+      break;
+    }
+    for (const r of remotes.values()) {
+      if (r.state.dead) continue;
+      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, t);
+      if (hit) t = hit.t;
+    }
+    return o.clone().addScaledVector(d, t);
+  }
+
+  function dirTo(target: THREE.Vector3): Vec3 {
+    const d = target.sub(controller.eye).normalize();
+    return [d.x, d.y, d.z];
+  }
+
+  function fire() {
+    const item = held();
+    const w = heldGun();
+    const stack = slots[ui.active];
+    if (!item || !w || !stack) return;
+    const now = performance.now();
+    if (now < reloadingUntil || now - lastAttack < w.delay * 1000) return;
+    if (!stack.ammo) {
+      triggerHeld = false;
+      return reload();
+    }
+    lastAttack = now;
+    stack.ammo -= 1;
+    ui.render();
+    net.send({ t: 'fire', slot: ui.active, d: dirTo(aimTarget(w.range)), aim: aiming });
+    // Kick the view up and a little to the side.
+    const kick = (w.recoil ?? 0) * (aiming ? 0.6 : 1);
+    controller.pitch = Math.min(1.1, controller.pitch + kick);
+    controller.yaw += (Math.random() - 0.5) * kick * 0.6;
+    me.recoil();
+    effects.muzzle(me.muzzlePosition(), item);
+    effects.sound(item, 0);
+    if (!w.auto) triggerHeld = false;
+  }
+
+  function reload() {
+    const w = heldGun();
+    const stack = slots[ui.active];
+    if (!w?.ammo || !w.mag || !stack) return;
+    if (performance.now() < reloadingUntil || (stack.ammo ?? 0) >= w.mag) return;
+    if (countItem(slots, w.ammo) === 0) return hud.notice(`No ${ITEMS[w.ammo].name.toLowerCase()}: craft some first`);
+    net.send({ t: 'reload', slot: ui.active });
+    reloadingUntil = performance.now() + (w.reload ?? 1) * 1000;
+    me.reloadAnim(w.reload ?? 1);
+  }
+
+  /** Swing whatever is in your hands (or your fists) at whoever is in front of you. */
+  function melee() {
+    const item = held();
+    const w = (item ? ITEMS[item].weapon : FIST) ?? FIST;
+    const now = performance.now();
+    if (now - lastAttack < w.delay * 1000) return;
+    lastAttack = now;
+    net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
+    me.swing();
   }
 
   const raycaster = new THREE.Raycaster();
   let aim: AimHit | null = null;
   let aimResource: ResourceNode | null = null;
   let aimDeployable: Deployable | null = null;
+  /** The survivor under the crosshair within a few metres, for melee. */
+  let aimPlayer: Remote | null = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
   let proposal: Piece | null = null;
 
@@ -260,6 +414,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       else if (piece?.kind === 'floor' && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
       break;
     }
+    // A survivor in front of whatever else the crosshair is on.
+    aimPlayer = null;
+    const o = raycaster.ray.origin;
+    const d = raycaster.ray.direction;
+    let best = aim ? camera.position.distanceTo(aim.point) : raycaster.far;
+    for (const r of remotes.values()) {
+      if (r.state.dead) continue;
+      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, best);
+      if (hit) {
+        best = hit.t;
+        aimPlayer = r;
+        aimResource = null;
+        aimDeployable = null;
+      }
+    }
   }
 
   function isVisible(o: THREE.Object3D): boolean {
@@ -277,6 +446,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   function primary() {
     const item = held();
+    if (heldGun()) return fire();
+    if (item && ITEMS[item].heal) {
+      net.send({ t: 'use', slot: ui.active });
+      me.swing();
+      return;
+    }
+    if (aimPlayer && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
       if (!proposal) return;
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
@@ -306,7 +482,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
       net.send({ t: 'hit', key: pieceKey(aim.piece) });
       me.swing();
-    }
+    } else melee();
   }
 
   /** E: open a furnace or box, or pick a hemp plant. */
@@ -394,10 +570,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const how = info.tool === 'pickup' ? 'E to pick' : 'Left click to gather';
       return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
+    if (aimPlayer) return { text: aimPlayer.state.name };
     if (aimDeployable) {
       const d = aimDeployable;
-      const hints = [d.slots.length > 0 ? 'E to open' : d.kind === 'workbench' ? 'Craft salvaged tools nearby' : '', 'Hit to pick up'];
-      const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_NAMES[d.kind];
+      if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
+      const bench = WORKBENCH_LEVEL[d.kind];
+      const hints = [d.slots.length > 0 ? 'E to open' : bench ? `Unlocks level ${bench} recipes nearby` : '', 'Hit to pick up'];
+      const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
       return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
     }
     if (aim?.piece && (item !== 'buildingPlan' || aim.piece.kind === 'wall')) {
@@ -428,6 +607,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       id: welcome.id,
       others: remotes.size,
       inventory: { wood: 0, stone: 0, scrap: 0, ...itemTotals(slots) },
+      hp,
+      dead,
       slots,
       active: ui.active,
       deployables: [...world.deployables.values()],
@@ -463,6 +644,18 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       net.send({ t: 'place', kind, i, y, k, dir, material: mat });
     },
     craft: (item: ItemId, count = 1) => net.send({ t: 'craft', item, count }),
+    /** Fires the gun in your hands at a point in the world. */
+    shootAt: (x: number, y: number, z: number, aim = true) => {
+      const w = heldGun();
+      if (!w) return false;
+      net.send({ t: 'fire', slot: ui.active, d: dirTo(new THREE.Vector3(x, y, z)), aim });
+      me.recoil();
+      effects.muzzle(me.muzzlePosition(), held()!);
+      return true;
+    },
+    reload: () => net.send({ t: 'reload', slot: ui.active }),
+    respawn: () => net.send({ t: 'respawn' }),
+    aim: (on: boolean) => (aiming = on),
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
@@ -511,12 +704,27 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     timer.update(now);
     const dt = Math.min(timer.getDelta(), 0.05);
     time += dt;
-    controller.update(dt);
+    if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
-    me.setHeld(held());
-    me.update(dt, controller.moving);
-    controller.updateCamera(camera);
+    me.setHeld(dead ? null : held());
+    me.aimPitch = controller.pitch;
+    me.update(dt, controller.moving && !dead);
+    // Aiming down sights: zoom in over the shoulder, or look through the scope.
+    const gun = heldGun();
+    const ads = aiming && !!gun && !dead;
+    const scoped = ads && SCOPED.includes(held()!);
+    const fov = ads ? baseFov / (scoped ? 4 : 1.4) : baseFov;
+    if (Math.abs(camera.fov - fov) > 0.05) {
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 14);
+      camera.updateProjectionMatrix();
+    }
+    controller.sensitivity = camera.fov / baseFov;
+    const throughScope = scoped && camera.fov < baseFov * 0.5;
+    hud.setScope(throughScope);
+    me.root.visible = !throughScope;
+    controller.updateCamera(camera, ads ? 1 : 0, throughScope);
+    if (triggerHeld && gun?.auto && !ui.open) fire();
     if (portrait) {
       const a = controller.yaw + Math.PI + portrait.angle;
       const p = controller.position;
@@ -532,6 +740,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
       r.avatar.root.rotation.y = r.state.yaw + Math.PI;
       r.avatar.setHeld(r.state.held);
+      r.avatar.setDead(r.state.dead);
       r.avatar.update(dt, r.state.moving);
     }
 
@@ -540,12 +749,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     updateDeployGhost();
     updateBuildInfo();
     ui.tick();
-    hud.setTarget(describeTarget());
+    effects.update(dt);
+    hud.setTarget(dead ? { text: '' } : describeTarget());
+    const stack = slots[ui.active];
+    hud.setAmmo(
+      gun?.ammo && stack
+        ? { loaded: stack.ammo ?? 0, mag: gun.mag ?? 0, carried: countItem(slots, gun.ammo), name: ITEMS[gun.ammo].name, reloading: performance.now() < reloadingUntil }
+        : null,
+    );
 
     sendTimer += dt;
     if (sendTimer > 1 / 15) {
       sendTimer = 0;
-      sendMove();
+      if (!dead) sendMove();
     }
 
     world.update(dt, controller.position, time);
