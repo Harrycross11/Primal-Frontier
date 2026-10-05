@@ -1,20 +1,24 @@
 // The 3D world: lit terrain, scenery, resources, player-built pieces and floating ash.
 
 import * as THREE from 'three';
-import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
+import { WORLD_SIZE } from '../../shared/constants.ts';
 import { MAX_HP, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
+import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
+import { buildScenery } from './scenery.ts';
 import {
   barkSurface,
   concreteSurface,
   dotTexture,
   grassTexture,
   groundSurface,
+  macroNoiseTexture,
   metalSurface,
   plankSurface,
   rustSurface,
+  sandSurface,
   worldBox,
 } from './textures.ts';
 
@@ -57,7 +61,6 @@ export class World {
     const concrete = concreteSurface();
     const bark = barkSurface();
     const barkDark = barkSurface(true);
-    const wreck = rustSurface('#55606a');
     const barrel = rustSurface('#3f5a3c');
     this.materials = {
       wood: std({ ...planks, roughness: 0.85 }),
@@ -67,10 +70,7 @@ export class World {
       bark: std({ ...bark, roughness: 0.95 }),
       barkDark: std({ ...barkDark, roughness: 0.95 }),
       leaves: std({ color: 0x5f6b34, roughness: 0.9, flatShading: true }),
-      wreck: std({ ...wreck, roughness: 0.7, metalness: 0.5 }),
       barrel: std({ ...barrel, roughness: 0.7, metalness: 0.5 }),
-      tyre: std({ color: 0x1c1c1c, roughness: 0.95 }),
-      glass: std({ color: 0x1a2024, roughness: 0.15, metalness: 0.4 }),
       rock: std({ ...concrete, color: 0x8a8278, roughness: 1, flatShading: true }),
       pole: std({ ...bark, color: 0x8a7a6a, roughness: 0.95 }),
     };
@@ -79,9 +79,10 @@ export class World {
     this.scene.add(this.terrain);
     this.pickables.push(this.terrain);
     this.cameraBlockers.push(this.terrain);
-    this.buildOuterPlain();
     this.buildGrass();
-    for (const d of generateDecor(seed)) this.addDecor(d);
+    const decor = generateDecor(seed);
+    for (const d of decor) this.addDecor(d);
+    buildScenery(this.scene, seed, decor);
     this.ash = this.buildAsh();
   }
 
@@ -123,21 +124,47 @@ export class World {
       vertexColors: true,
       roughness: 1,
     });
+    // Break up the texture repeat: mix the cracked earth at two scales, blend in drifts of
+    // rippled sand, and vary brightness over tens of metres.
+    const sand = sandSurface();
+    const macro = macroNoiseTexture();
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.sandMap = { value: sand.map };
+      shader.uniforms.sandNormal = { value: sand.normalMap };
+      shader.uniforms.macroMap = { value: macro };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D sandMap;\nuniform sampler2D sandNormal;\nuniform sampler2D macroMap;')
+        .replace(
+          '#include <map_fragment>',
+          `float sandy = 0.0;
+          #ifdef USE_MAP
+            vec4 macro = texture2D(macroMap, vMapUv * 0.045);
+            vec4 macro2 = texture2D(macroMap, vMapUv * 0.013 + vec2(0.3, 0.6));
+            vec4 crackA = texture2D(map, vMapUv);
+            vec4 crackB = texture2D(map, vMapUv * 0.37 + vec2(0.17, 0.53));
+            vec4 grit = texture2D(sandMap, vMapUv * 1.6);
+            sandy = smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4);
+            vec4 ground = mix(crackA, crackB, 0.4);
+            vec4 sampledDiffuseColor = mix(ground, grit, sandy);
+            sampledDiffuseColor.rgb *= mix(0.8, 1.15, macro2.g) * mix(0.92, 1.06, macro.r);
+            diffuseColor *= sampledDiffuseColor;
+          #endif`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#ifdef USE_NORMALMAP_TANGENTSPACE
+            vec3 mapN = mix(texture2D(normalMap, vNormalMapUv).xyz, texture2D(sandNormal, vNormalMapUv * 1.6).xyz, sandy) * 2.0 - 1.0;
+            mapN.xy *= normalScale;
+            normal = normalize(tbn * mapN);
+          #else
+            #include <normal_fragment_maps>
+          #endif`,
+        );
+    };
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.name = 'terrain';
     return mesh;
-  }
-
-  /** A huge flat plain under the map so the horizon never shows a gap. */
-  private buildOuterPlain() {
-    // Starts just outside the map's edge ridge and fades into the haze.
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(HALF_WORLD * 1.3, 1500, 64, 1).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x8a7f70, roughness: 1 }),
-    );
-    ring.position.y = 10;
-    this.scene.add(ring);
   }
 
   private buildGrass() {
@@ -365,45 +392,13 @@ export class World {
     return g;
   }
 
-  /** A burnt-out car: extruded body profile, missing glass, flat tyres. */
+  /** A rusted-out old car, with a loose sheet of scrap lying beside it. */
   private wreck(rand: () => number): THREE.Group {
-    const g = new THREE.Group();
-    const shape = new THREE.Shape();
-    shape.moveTo(-2.1, 0.25);
-    shape.lineTo(2.1, 0.25);
-    shape.lineTo(2.15, 0.75);
-    shape.lineTo(1.2, 0.85);
-    shape.lineTo(0.7, 1.35);
-    shape.lineTo(-0.9, 1.35);
-    shape.lineTo(-1.5, 0.9);
-    shape.lineTo(-2.15, 0.85);
-    shape.closePath();
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.7, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.06, bevelSegments: 2 });
-    geo.translate(0, 0, -0.85);
-    const body = new THREE.Mesh(geo, this.materials.wreck);
-    g.add(body);
-    // Dark empty window holes.
-    const win = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.38, 1.76), this.materials.glass);
-    win.position.set(-0.1, 1.1, 0);
-    g.add(win);
-    for (const [x, z] of [
-      [1.35, 0.85],
-      [1.35, -0.85],
-      [-1.35, 0.85],
-      [-1.35, -0.85],
-    ]) {
-      if (rand() < 0.25) continue; // wheel long gone
-      const tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.25, 14).rotateX(Math.PI / 2), this.materials.tyre);
-      tyre.position.set(x, 0.3, z);
-      g.add(tyre);
-    }
-    body.rotation.z = (rand() - 0.5) * 0.12;
-    body.rotation.x = (rand() - 0.5) * 0.08;
+    const g = buildCar(rand);
     const sheet = new THREE.Mesh(new THREE.BoxGeometry(1, 0.04, 0.7), this.materials.scrap);
     sheet.position.set(2.4, 0.1, 1.1);
     sheet.rotation.set(0.2, rand() * 3, 0.15);
     g.add(sheet);
-    g.scale.setScalar(0.85);
     return g;
   }
 

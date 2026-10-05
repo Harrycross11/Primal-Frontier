@@ -272,6 +272,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   // Test hooks for the automated smoke test (scripts/smoke.ts).
   const dist = (r: { x: number; z: number }) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
   let portrait: { angle: number; distance: number } | null = null;
+  let fixedView: { from: number[]; to: number[] } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
     state: () => ({
       id: welcome.id,
@@ -293,6 +294,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
     /** Points the camera at your own survivor from the front, for character screenshots. */
     portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
+    /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
+    view: (from: number[] | null, to: number[] = [0, 0, 0]) => (fixedView = from ? { from, to } : null),
     setQuality: (q: 'high' | 'low') => {
       gfx.setQuality(q);
       hud.setQuality(q);
@@ -335,6 +338,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const p = controller.position;
       camera.position.set(p.x + Math.sin(a) * portrait.distance, p.y + 1.45, p.z + Math.cos(a) * portrait.distance);
       camera.lookAt(p.x, p.y + 1.05, p.z);
+    }
+    if (fixedView) {
+      camera.position.fromArray(fixedView.from);
+      camera.lookAt(new THREE.Vector3().fromArray(fixedView.to));
     }
 
     for (const r of remotes.values()) {

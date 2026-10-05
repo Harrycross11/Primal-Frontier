@@ -261,6 +261,173 @@ export function rustSurface(paint = '#5f6b5a'): Surface {
   return surface(`rust-${paint}`, 256, draw, bump, 2);
 }
 
+/** Wind-rippled fine sand and grit, blended into the ground in drifts. */
+export function sandSurface(): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#a3967f';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 2200, ['#8a7e6a', '#b8ab92', '#6f6656', '#c4b9a2'], 0.4, 1.6, 0.6);
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    // Wavy ripples whose height fades in and out, so drifts don't read as straight stripes.
+    const img = ctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const t = (Math.PI * 2) / size;
+        const wave = Math.sin(y * t * 9 + Math.sin(x * t * 2) * 2.2 + Math.sin(x * t * 5 + y * t) * 0.6);
+        const fade = 0.5 + 0.5 * Math.sin(x * t * 3 + y * t * 2);
+        const c = 128 + wave * 30 * fade;
+        const i = (y * size + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = c;
+        img.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    blotches(ctx, size, rand, 1800, ['#666', '#bbb'], 0.4, 1.4, 0.6);
+  };
+  return surface('sand', 256, draw, bump, 1);
+}
+
+/** Large soft grey blotches, used to vary the ground over tens of metres so it never looks tiled. */
+export function macroNoiseTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const rand = mulberry32(777);
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, size, size);
+  blotches(ctx, size, rand, 90, ['#202020', '#e0e0e0', '#555', '#aaa'], 14, 50, 0.35);
+  blotches(ctx, size, rand, 300, ['#404040', '#c0c0c0'], 4, 14, 0.25);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+/**
+ * Broken old asphalt: cracked and patched, a faded dashed centre line, crumbling edges and
+ * holes (transparent, so the ground shows through).
+ */
+export function asphaltSurface(): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#4a4744';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 160, ['#3e3b38', '#57534e', '#615c55'], 4, 26, 0.45);
+    blotches(ctx, size, rand, 2400, ['#2e2c2a', '#6e6a63', '#7a7468'], 0.4, 1.4, 0.6);
+    blotches(ctx, size, rand, 40, ['rgba(150,138,115,1)'], 6, 22, 0.35);
+    ctx.fillStyle = 'rgba(176,150,80,0.55)';
+    for (let y = 0; y < size; y += size / 2) ctx.fillRect(size / 2 - 3, y + size * 0.08, 6, size * 0.28);
+    cracks(ctx, size, rand, 50, 'rgba(25,23,21,0.85)', 1.3);
+    // Crumbled edges and pot holes.
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let y = 0; y < size; y += 2) {
+      const l = Math.max(0, 6 + Math.sin(y * 0.07) * 6 + rand() * 10);
+      const r = Math.max(0, 6 + Math.cos(y * 0.05) * 6 + rand() * 10);
+      ctx.fillRect(0, y, l, 2);
+      ctx.fillRect(size - r, y, r, 2);
+    }
+    blotches(ctx, size, rand, 7, ['#000'], 5, 16, 1);
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#909090';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 2400, ['#707070', '#b0b0b0'], 0.4, 1.4, 0.6);
+    cracks(ctx, size, rand, 50, '#303030', 1.6);
+  };
+  return surface('asphalt', 256, draw, bump, 2.5);
+}
+
+/**
+ * Old car paint, sun-faded and eaten by rust: large rust patches, dark rust-through holes
+ * and streaks running down from them.
+ */
+export function carPaintSurface(paint: string): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = paint;
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 120, ['rgba(255,250,235,0.5)', 'rgba(0,0,0,0.35)'], 6, 30, 0.18);
+    // Irregular rust patches: clusters of small spots that wander, not neat circles.
+    blotches(ctx, size, rand, 40, ['#6e4a30', '#5e4434', '#7a5a40'], 20, 60, 0.28);
+    for (let patch = 0; patch < 22; patch++) {
+      let x = rand() * size;
+      let y = rand() * size;
+      const spots = 40 + Math.floor(rand() * 90);
+      for (let n = 0; n < spots; n++) {
+        x += (rand() - 0.5) * 7;
+        y += (rand() - 0.5) * 7;
+        ctx.globalAlpha = 0.35 + rand() * 0.4;
+        ctx.fillStyle = ['#6e3c20', '#7f4a28', '#5e3420', '#8a5530', '#4e2c18'][Math.floor(rand() * 5)];
+        ctx.beginPath();
+        ctx.arc(((x % size) + size) % size, ((y % size) + size) % size, 2 + rand() * 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    blotches(ctx, size, rand, 900, ['#5a2c14', '#b0662f', '#3e2010'], 0.5, 2.4, 0.5);
+    // Rust streaks running down.
+    for (let n = 0; n < 60; n++) {
+      const x = rand() * size;
+      const y = rand() * size;
+      const g = ctx.createLinearGradient(x, y, x, y + size * (0.1 + rand() * 0.25));
+      g.addColorStop(0, 'rgba(110,52,22,0.55)');
+      g.addColorStop(1, 'rgba(110,52,22,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, 1 + rand() * 3, size * 0.35);
+    }
+    blotches(ctx, size, rand, 30, ['#1c120c', '#24170f'], 1, 4, 0.9);
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#999';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 1500, ['#555', '#b0b0b0'], 0.5, 2.5, 0.6);
+    blotches(ctx, size, rand, 30, ['#222'], 1, 4, 0.9);
+  };
+  return surface(`car-${paint}`, 256, draw, bump, 3);
+}
+
+/** Dirty, cracked safety glass with a spider-web break, on a transparent background. */
+export function crackedGlassTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const rand = mulberry32(4242);
+  ctx.fillStyle = 'rgba(150,140,120,0.55)';
+  ctx.fillRect(0, 0, size, size);
+  blotches(ctx, size, rand, 200, ['rgba(120,105,85,1)', 'rgba(180,170,150,1)'], 3, 20, 0.35);
+  const cx = size * (0.3 + rand() * 0.4);
+  const cy = size * (0.3 + rand() * 0.4);
+  ctx.strokeStyle = 'rgba(235,235,225,0.9)';
+  ctx.lineWidth = 1.2;
+  for (let n = 0; n < 14; n++) {
+    let a = (n / 14) * Math.PI * 2 + rand() * 0.3;
+    let x = cx;
+    let y = cy;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 8; s++) {
+      a += (rand() - 0.5) * 0.4;
+      x += Math.cos(a) * size * 0.06;
+      y += Math.sin(a) * size * 0.06;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  for (let ring = 1; ring < 5; ring++) {
+    ctx.beginPath();
+    for (let n = 0; n <= 14; n++) {
+      const a = (n / 14) * Math.PI * 2;
+      const r = ring * size * 0.07 * (0.8 + rand() * 0.4);
+      ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 /**
  * Worn woven cloth in light neutral greys, tinted by the material colour, so one texture
  * serves every jacket, pair of trousers and scarf. Has grime, fading and stitched seams.
