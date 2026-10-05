@@ -93,10 +93,10 @@ wss.on('connection', (ws) => {
     }
     switch (msg.t) {
       case 'move':
-        deliver(game.move(id, msg.x, msg.y, msg.z, msg.yaw, !!msg.moving, now));
+        deliver(game.move(id, msg.x, msg.y, msg.z, msg.yaw, !!msg.moving, now, msg.slot));
         break;
       case 'gather':
-        deliver(game.gather(id, msg.id, now));
+        deliver(game.gather(id, msg.id, now, msg.slot));
         break;
       case 'place':
         deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
@@ -104,8 +104,26 @@ wss.on('connection', (ws) => {
       case 'hit':
         deliver(game.hit(id, String(msg.key), now));
         break;
+      case 'hitDeployable':
+        deliver(game.hitDeployable(id, msg.id, now));
+        break;
       case 'edit':
         deliver(game.edit(id, String(msg.key), msg.edit));
+        break;
+      case 'craft':
+        deliver(game.craft(id, msg.item, msg.count));
+        break;
+      case 'cancelCraft':
+        deliver(game.cancelCraft(id, msg.index));
+        break;
+      case 'moveItem':
+        deliver(game.moveItem(id, msg.from, msg.to, msg.count));
+        break;
+      case 'deploy':
+        deliver(game.deploy(id, msg.slot, msg.x, msg.y, msg.z, msg.rot));
+        break;
+      case 'furnace':
+        deliver(game.furnace(id, msg.id, msg.on));
         break;
     }
   });

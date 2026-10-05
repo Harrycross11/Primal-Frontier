@@ -1,0 +1,301 @@
+// The belt (hotbar), resource counters, crafting progress, and the Tab screen with the
+// inventory grid, an open furnace or box, and the crafting menu. Items move by dragging
+// between slots, or by right-clicking to send a stack to the other side.
+
+import { FURNACE_FUEL, FURNACE_ORE, FURNACE_OUTPUT, slotAccepts, type Deployable } from '../../shared/deployables.ts';
+import {
+  BELT_SIZE,
+  ITEMS,
+  RECIPES,
+  canAfford,
+  countItem,
+  type ItemId,
+  type Recipe,
+  type Slots,
+  type Stack,
+} from '../../shared/items.ts';
+import type { CraftJob, SlotRef } from '../../shared/protocol.ts';
+import { iconSvg } from './icons.ts';
+
+const $ = (id: string) => document.getElementById(id)!;
+const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'cloth'];
+const CONTAINER_NAMES = { workbench: 'Workbench', furnace: 'Furnace', storageBox: 'Storage Box' } as const;
+
+export interface InventoryActions {
+  move(from: SlotRef, to: SlotRef, count?: number): void;
+  craft(item: ItemId, count: number): void;
+  cancel(index: number): void;
+  furnace(id: number, on: boolean): void;
+}
+
+export class InventoryUi {
+  slots: Slots = [];
+  active = 0;
+  container: Deployable | null = null;
+  nearWorkbench = false;
+  private queue: CraftJob[] = [];
+  private queueAt = 0;
+  private category: Recipe['category'] | 'All' = 'All';
+  private selected: ItemId = 'stoneHatchet';
+  private drag: { from: SlotRef; stack: Stack } | null = null;
+
+  constructor(private actions: InventoryActions) {
+    // Dragging items between slots.
+    addEventListener('pointermove', (e) => {
+      const ghost = $('drag');
+      if (this.drag) {
+        ghost.style.left = `${e.clientX}px`;
+        ghost.style.top = `${e.clientY}px`;
+      }
+      const tip = $('tooltip');
+      if (!tip.hidden) {
+        tip.style.left = `${e.clientX + 14}px`;
+        tip.style.top = `${e.clientY + 14}px`;
+      }
+    });
+    addEventListener('pointerup', (e) => {
+      if (!this.drag) return;
+      const target = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-ref]');
+      const from = this.drag.from;
+      this.drag = null;
+      $('drag').hidden = true;
+      if (!target) return;
+      const to = JSON.parse(target.dataset.ref!) as SlotRef;
+      if (to.c === from.c && to.i === from.i) return;
+      this.actions.move(from, to, e.shiftKey ? Math.ceil(this.stackAt(from)!.count / 2) : undefined);
+    });
+    $('furnace-toggle').addEventListener('click', () => {
+      if (this.container) this.actions.furnace(this.container.id, !this.container.on);
+    });
+  }
+
+  get open(): boolean {
+    return !$('screen').hidden;
+  }
+
+  show(container: Deployable | null = null) {
+    this.container = container;
+    $('screen').hidden = false;
+    this.render();
+  }
+
+  hide() {
+    $('screen').hidden = true;
+    $('tooltip').hidden = true;
+    this.container = null;
+  }
+
+  setQueue(queue: CraftJob[]) {
+    this.queue = queue;
+    this.queueAt = performance.now();
+    this.render();
+  }
+
+  /** Redraws the belt and counters always, and the full screen when it is open. */
+  render() {
+    this.renderBelt();
+    this.renderResources();
+    if (!this.open) return;
+    this.renderGrid($('backpack'), 'me', BELT_SIZE, this.slots.length);
+    this.renderGrid($('belt-grid'), 'me', 0, BELT_SIZE);
+    this.renderContainer();
+    this.renderCrafting();
+  }
+
+  /** Called every frame to move the crafting progress bar. */
+  tick() {
+    const box = $('craft-progress');
+    const job = this.queue[0];
+    box.hidden = !job;
+    if (!job) return;
+    const left = Math.max(0, job.left - (performance.now() - this.queueAt) / 1000);
+    const done = 1 - left / job.total;
+    const more = this.queue.length > 1 ? ` (+${this.queue.length - 1} more)` : '';
+    const html = `Crafting ${ITEMS[job.item].name}${more}<div class="bar"><i style="width:${Math.round(done * 100)}%"></i></div>`;
+    if (box.innerHTML !== html) box.innerHTML = html;
+  }
+
+  private stackAt(ref: SlotRef): Stack | null {
+    if (ref.c === 'me') return this.slots[ref.i] ?? null;
+    return this.container?.id === ref.c ? (this.container.slots[ref.i] ?? null) : null;
+  }
+
+  private renderBelt() {
+    const belt = $('belt');
+    belt.innerHTML = '';
+    for (let i = 0; i < BELT_SIZE; i++) {
+      const el = this.slotElement({ c: 'me', i }, this.slots[i] ?? null, false);
+      el.insertAdjacentHTML('afterbegin', `<span class="key">${i + 1}</span>`);
+      el.classList.toggle('active', i === this.active);
+      belt.appendChild(el);
+    }
+  }
+
+  private renderResources() {
+    const el = $('resources');
+    el.innerHTML = SHOWN_RESOURCES.map((item) => {
+      const n = countItem(this.slots, item);
+      return n > 0 || item === 'wood' || item === 'stone' || item === 'scrap' ? `<div class="res" title="${ITEMS[item].name}">${iconSvg(item)}${n}</div>` : '';
+    }).join('');
+  }
+
+  private renderGrid(el: HTMLElement, c: SlotRef['c'], from: number, to: number) {
+    el.innerHTML = '';
+    for (let i = from; i < to; i++) el.appendChild(this.slotElement({ c, i }, this.slots[i] ?? null, true));
+  }
+
+  private renderContainer() {
+    const panel = $('container-panel');
+    const d = this.container;
+    panel.hidden = !d || d.slots.length === 0;
+    if (!d || panel.hidden) return;
+    $('container-title').textContent = CONTAINER_NAMES[d.kind];
+    const grid = $('container-grid');
+    grid.innerHTML = '';
+    d.slots.forEach((s, i) => {
+      const el = this.slotElement({ c: d.id, i }, s, true);
+      if (d.kind === 'furnace') {
+        el.classList.add('label-slot');
+        el.dataset.label = ['Wood', 'Ore', 'Metal'][i];
+      }
+      grid.appendChild(el);
+    });
+    grid.classList.toggle('furnace-row', d.kind === 'furnace');
+    $('furnace-controls').hidden = d.kind !== 'furnace';
+    if (d.kind === 'furnace') {
+      $('furnace-toggle').textContent = d.on ? 'Put out' : 'Light';
+      const fuel = d.slots[FURNACE_FUEL]?.count ?? 0;
+      const ore = d.slots[FURNACE_ORE]?.count ?? 0;
+      const out = d.slots[FURNACE_OUTPUT]?.count ?? 0;
+      $('furnace-status').textContent = d.on
+        ? ore > 0
+          ? `Smelting: ${ore} ore left, ${out} metal ready`
+          : `Burning wood with nothing to smelt (${fuel} wood left)`
+        : 'Add wood as fuel and metal ore to smelt, then light it.';
+    }
+  }
+
+  private renderCrafting() {
+    const tabs = $('tabs');
+    tabs.innerHTML = '';
+    for (const c of ['All', 'Tools', 'Construction'] as const) {
+      const b = document.createElement('button');
+      b.textContent = c;
+      b.classList.toggle('on', c === this.category);
+      b.onclick = () => {
+        this.category = c;
+        this.render();
+      };
+      tabs.appendChild(b);
+    }
+    const list = $('recipes');
+    list.innerHTML = '';
+    for (const r of RECIPES) {
+      if (this.category !== 'All' && r.category !== this.category) continue;
+      const ok = canAfford(this.slots, r) && (!r.workbench || this.nearWorkbench);
+      const row = document.createElement('div');
+      row.className = `recipe${ok ? '' : ' cant'}${r.item === this.selected ? ' on' : ''}`;
+      row.innerHTML = `${iconSvg(r.item)}<div><div class="rname">${ITEMS[r.item].name}${r.workbench ? '<span class="tag">Workbench</span>' : ''}</div><div class="rcost">${this.costText(r)}</div></div>`;
+      row.onclick = () => {
+        this.selected = r.item;
+        this.render();
+      };
+      list.appendChild(row);
+    }
+    const r = RECIPES.find((x) => x.item === this.selected)!;
+    const ok = canAfford(this.slots, r) && (!r.workbench || this.nearWorkbench);
+    const detail = $('recipe-detail');
+    detail.innerHTML = `<b>${ITEMS[r.item].name}</b> · ${r.time}s<br/>${ITEMS[r.item].description}${
+      r.workbench && !this.nearWorkbench ? '<div class="need">Stand near a workbench to craft this.</div>' : ''
+    }<div class="actions"></div>`;
+    const actions = detail.querySelector('.actions')!;
+    for (const n of [1, 5]) {
+      const b = document.createElement('button');
+      b.className = n === 1 ? 'btn' : 'btn secondary';
+      b.textContent = n === 1 ? 'Craft' : 'Craft 5';
+      b.disabled = !ok || !canAfford(this.slots, r, n);
+      b.onclick = () => this.actions.craft(r.item, n);
+      actions.appendChild(b);
+    }
+    const queue = $('queue');
+    queue.innerHTML = this.queue.length ? '<h3>Queue</h3>' : '';
+    this.queue.forEach((job, i) => {
+      const row = document.createElement('div');
+      row.className = 'job';
+      row.innerHTML = `${iconSvg(job.item)}${ITEMS[job.item].name}<span class="x" title="Cancel and refund">✕</span>`;
+      (row.querySelector('.x') as HTMLElement).onclick = () => this.actions.cancel(i);
+      queue.appendChild(row);
+    });
+  }
+
+  private costText(r: Recipe): string {
+    return Object.entries(r.cost)
+      .map(([item, n]) => {
+        const have = countItem(this.slots, item as ItemId);
+        return `<span class="${have >= n! ? '' : 'need'}">${n} ${ITEMS[item as ItemId].name}</span>`;
+      })
+      .join(' · ');
+  }
+
+  private slotElement(ref: SlotRef, stack: Stack | null, interactive: boolean): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'slot';
+    el.dataset.ref = JSON.stringify(ref);
+    if (stack) {
+      const info = ITEMS[stack.item];
+      el.innerHTML = iconSvg(stack.item);
+      if (stack.count > 1) el.insertAdjacentHTML('beforeend', `<span class="count">${stack.count}</span>`);
+      if (info.tool && stack.hp !== undefined) {
+        el.insertAdjacentHTML('beforeend', `<span class="wear"><i style="width:${Math.round((stack.hp / info.tool.durability) * 100)}%"></i></span>`);
+      }
+    }
+    if (!interactive) return el;
+    el.addEventListener('pointerenter', () => {
+      const tip = $('tooltip');
+      if (!stack || this.drag) return;
+      const info = ITEMS[stack.item];
+      const wear = info.tool && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${info.tool.durability}` : '';
+      tip.innerHTML = `<b>${info.name}</b>${info.description}${wear}`;
+      tip.hidden = false;
+    });
+    el.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
+    el.addEventListener('pointerdown', (e) => {
+      if (!stack) return;
+      e.preventDefault();
+      if (e.button === 2) return this.quickMove(ref, stack);
+      this.drag = { from: ref, stack };
+      const ghost = $('drag');
+      ghost.innerHTML = iconSvg(stack.item);
+      ghost.style.left = `${e.clientX}px`;
+      ghost.style.top = `${e.clientY}px`;
+      ghost.hidden = false;
+      $('tooltip').hidden = true;
+    });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    return el;
+  }
+
+  /** Right click: send a stack to the open container, or between belt and backpack. */
+  private quickMove(from: SlotRef, stack: Stack) {
+    const d = this.container && this.container.slots.length > 0 ? this.container : null;
+    let to: SlotRef | null = null;
+    if (from.c === 'me' && d) {
+      const i = this.bestSlot(d.slots, stack, (n) => slotAccepts(d, n, stack.item));
+      if (i >= 0) to = { c: d.id, i };
+    } else {
+      const range: [number, number] =
+        from.c !== 'me' ? [0, this.slots.length] : from.i < BELT_SIZE ? [BELT_SIZE, this.slots.length] : [0, BELT_SIZE];
+      const i = this.bestSlot(this.slots, stack, (n) => n >= range[0] && n < range[1]);
+      if (i >= 0) to = { c: 'me', i };
+    }
+    if (to) this.actions.move(from, to);
+  }
+
+  /** A slot with the same item and room, else the first empty one. */
+  private bestSlot(slots: Slots, stack: Stack, allowed: (i: number) => boolean): number {
+    const max = ITEMS[stack.item].stack;
+    const same = slots.findIndex((s, i) => allowed(i) && s?.item === stack.item && s.count < max);
+    if (same >= 0 && max > 1) return same;
+    return slots.findIndex((s, i) => allowed(i) && !s);
+  }
+}

@@ -22,5 +22,5 @@ export const GATHER_COOLDOWN = 0.35;
 /** How far a player can reach to place, edit or hit a building piece, from their eyes. */
 export const BUILD_RANGE = 7;
 
-/** Seconds before a picked-clean scrap pile reappears. Trees never regrow, by design. */
-export const SCRAP_RESPAWN_SECONDS = 120;
+/** How close a workbench must be to craft workbench recipes, in metres. */
+export const WORKBENCH_RANGE = 4;

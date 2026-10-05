@@ -1,7 +1,7 @@
 // Entry point: join screen, then the game loop (input, physics, networking, rendering).
 
 import * as THREE from 'three';
-import { GATHER_RANGE } from '../../shared/constants.ts';
+import { BUILD_RANGE, GATHER_RANGE } from '../../shared/constants.ts';
 import {
   MAX_HP,
   PIECE_COST,
@@ -12,19 +12,34 @@ import {
   type Piece,
   type PieceKind,
 } from '../../shared/building.ts';
-import type { PlayerState, ServerMessage } from '../../shared/protocol.ts';
-import { RESOURCE_INFO, type Inventory, type Material, type ResourceNode } from '../../shared/world.ts';
+import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
+import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
+import { terrainHeight } from '../../shared/terrain.ts';
+import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
-import { inReach, proposePiece, type AimHit } from './build.ts';
+import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Graphics } from './graphics.ts';
-import { Hud, type Slot } from './hud.ts';
+import { Hud } from './hud.ts';
+import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
+import { buildDeployable } from './props.ts';
 import { World, buildPieceMesh } from './world.ts';
 
-const RESOURCE_NAMES = { tree: 'Living tree', deadTree: 'Dead tree', scrap: 'Scrap wreck' } as const;
-const PIECE_NAMES: Record<PieceKind, string> = { wall: 'wall', floor: 'floor', stairs: 'stairs' };
-const SLOTS: Slot[] = ['hands', 'wall', 'floor', 'stairs'];
+const RESOURCE_NAMES = {
+  tree: 'Living tree',
+  deadTree: 'Dead tree',
+  scrap: 'Scrap wreck',
+  stone: 'Stone boulder',
+  metalOre: 'Metal ore',
+  hemp: 'Hemp',
+} as const;
+const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
+const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
+const DEPLOYABLE_NAMES = { workbench: 'Workbench', furnace: 'Furnace', storageBox: 'Storage box' } as const;
+/** How close you must be to open a furnace or box (the server allows a little more). */
+const OPEN_RANGE = 3;
 
 interface Remote {
   state: PlayerState;
@@ -65,6 +80,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const resources = welcome.resources;
   world.addResources(resources);
   for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
+  for (const d of welcome.deployables) world.setDeployable(d.id, d);
 
   const me = new Avatar(welcome.you.color);
   world.scene.add(me.root);
@@ -82,13 +98,26 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   };
   welcome.players.forEach(addRemote);
 
-  let inventory: Inventory = welcome.inventory;
-  let slot: Slot = 'hands';
+  // Inventory and what is in your hands.
+  let slots: Slots = welcome.slots;
+  let pieceKind: PieceKind = 'wall';
   let material: Material = 'wood';
-  hud.setInventory(inventory);
-  hud.setSlot(slot, material);
+  const held = (): ItemId | null => slots[ui.active]?.item ?? null;
+  const ui = new InventoryUi({
+    move: (from, to, count) => net.send({ t: 'moveItem', from, to, count }),
+    craft: (item, count) => net.send({ t: 'craft', item, count }),
+    cancel: (index) => net.send({ t: 'cancelCraft', index }),
+    furnace: (id, on) => net.send({ t: 'furnace', id, on }),
+  });
+  ui.slots = slots;
+  ui.render();
   const refreshPlayers = () => hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => r.state.name)]);
   refreshPlayers();
+
+  const sendMove = () => {
+    const p = controller.position;
+    net.send({ t: 'move', x: p.x, y: p.y, z: p.z, yaw: controller.yaw, moving: controller.moving, slot: ui.active });
+  };
 
   net.onMessage = (m) => {
     switch (m.t) {
@@ -116,11 +145,25 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         world.setResourceAmount(m.id, m.amount);
         break;
       case 'inventory':
-        inventory = m.inventory;
-        hud.setInventory(inventory);
+        slots = m.slots;
+        ui.slots = slots;
+        ui.render();
+        break;
+      case 'crafting':
+        ui.setQueue(m.queue);
         break;
       case 'piece':
         world.setPiece(m.key, m.piece);
+        if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
+        break;
+      case 'deployable':
+        world.setDeployable(m.id, m.d);
+        if (ui.container?.id === m.id) {
+          if (m.d) {
+            ui.container = m.d;
+            ui.render();
+          } else ui.hide();
+        }
         if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         break;
       case 'correct':
@@ -133,31 +176,34 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   };
   net.onClose = () => hud.disconnected();
 
-  // Input. Click captures the mouse. Left click uses the selected slot: gather and hit with
-  // hands, or place the selected piece. G edits the wall you look at. R swaps material.
+  // Input. Click captures the mouse. Left click uses what is in your hands: hit and gather
+  // with tools, place with the building plan or a deployable. Tab opens the inventory.
   canvas.addEventListener('click', () => {
-    if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+    if (document.pointerLockElement !== canvas && !ui.open) canvas.requestPointerLock?.();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('mousedown', (e) => {
     if (document.pointerLockElement !== canvas) return;
     if (e.button === 0) primary();
-    if (e.button === 2) setSlot(slot === 'hands' ? 'wall' : 'hands');
+    if (e.button === 2 && held() === 'buildingPlan') {
+      pieceKind = PIECE_KINDS[(PIECE_KINDS.indexOf(pieceKind) + 1) % PIECE_KINDS.length];
+    }
   });
   addEventListener('wheel', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const n = SLOTS.indexOf(slot) + (e.deltaY > 0 ? 1 : -1);
-    setSlot(SLOTS[(n + SLOTS.length) % SLOTS.length]);
+    selectSlot((ui.active + (e.deltaY > 0 ? 1 : -1) + 6) % 6);
   });
   addEventListener('keydown', (e) => {
-    const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
-    if (n >= 0) setSlot(SLOTS[n]);
-    if (e.code === 'KeyQ') setSlot('wall');
-    if (e.code === 'KeyR') {
-      material = material === 'wood' ? 'scrap' : 'wood';
-      hud.setSlot(slot, material);
+    if (e.code === 'Tab' || e.code === 'KeyI') {
+      e.preventDefault();
+      return ui.open ? closeScreen() : openScreen(null);
     }
-    if (e.code === 'KeyE') hitTarget();
+    if (e.code === 'Escape' && ui.open) return closeScreen();
+    if (ui.open) return;
+    const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
+    if (n >= 0) selectSlot(n);
+    if (e.code === 'KeyR' && held() === 'buildingPlan') material = MATERIALS[(MATERIALS.indexOf(material) + 1) % MATERIALS.length];
+    if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
     if (e.code === 'KeyO') {
@@ -165,14 +211,30 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       hud.setQuality(gfx.quality);
     }
   });
-  function setSlot(s: Slot) {
-    slot = s;
-    hud.setSlot(slot, material);
+  function selectSlot(n: number) {
+    ui.active = n;
+    ui.render();
+    sendMove();
+  }
+  function openScreen(container: Deployable | null) {
+    ui.nearWorkbench = nearWorkbench();
+    ui.show(container);
+    document.exitPointerLock?.();
+  }
+  function closeScreen() {
+    ui.hide();
+    canvas.requestPointerLock?.();
+  }
+  function nearWorkbench() {
+    const p = controller.position;
+    return [...world.deployables.values()].some((d) => d.kind === 'workbench' && Math.hypot(d.x - p.x, d.z - p.z) <= 4 && Math.abs(d.y - p.y) < 3);
   }
 
   const raycaster = new THREE.Raycaster();
   let aim: AimHit | null = null;
   let aimResource: ResourceNode | null = null;
+  let aimDeployable: Deployable | null = null;
+  let aimSurface: { point: THREE.Vector3; y: number } | null = null;
   let proposal: Piece | null = null;
 
   function updateAim() {
@@ -180,14 +242,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     raycaster.far = camera.position.distanceTo(controller.eye) + 10;
     aim = null;
     aimResource = null;
+    aimDeployable = null;
+    aimSurface = null;
     for (const h of raycaster.intersectObjects(world.pickables, true)) {
       if (!isVisible(h.object)) continue;
       // Ignore things between the camera and the player's back.
       if (h.distance < camera.position.distanceTo(controller.eye) - 0.5) continue;
       const rid = h.object.userData.resourceId as number | undefined;
       if (rid !== undefined) aimResource = resources[rid];
+      const did = h.object.userData.deployableId as number | undefined;
+      if (did !== undefined) aimDeployable = world.deployables.get(did) ?? null;
       const key = h.object.userData.pieceKey as string | undefined;
-      aim = { point: h.point.clone(), piece: key ? (world.pieces.get(key) ?? null) : null };
+      const piece = key ? (world.pieces.get(key) ?? null) : null;
+      aim = { point: h.point.clone(), piece };
+      // Somewhere a workbench, furnace or box could stand: open ground or the top of a floor.
+      if (h.object.name === 'terrain') aimSurface = { point: h.point.clone(), y: terrainHeight(world.seed, h.point.x, h.point.z) };
+      else if (piece?.kind === 'floor' && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
       break;
     }
   }
@@ -201,22 +271,52 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     return Math.hypot(node.x - controller.position.x, node.z - controller.position.z) <= GATHER_RANGE + RESOURCE_INFO[node.kind].radius;
   }
 
+  function deployableInRange(d: Deployable, range: number) {
+    return distanceToBox(controller.eye, deployableBox(d)) <= range;
+  }
+
   function primary() {
-    if (slot === 'hands') return hitTarget();
-    if (!proposal) return;
-    if (inventory[material] < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${material}`);
-    net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material });
-    me.swing();
+    const item = held();
+    if (item === 'buildingPlan') {
+      if (!proposal) return;
+      if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
+      net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material });
+      me.swing();
+      return;
+    }
+    if (item && DEPLOYABLE_KINDS.includes(item as DeployableKind)) {
+      if (!deployGhost.visible) return hud.notice('Aim at open ground or a floor nearby');
+      const p = deployGhost.position;
+      net.send({ t: 'deploy', slot: ui.active, x: p.x, y: p.y, z: p.z, rot: deployGhost.rotation.y });
+      return;
+    }
+    hitTarget();
   }
 
   function hitTarget() {
     if (aimResource) {
       if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
-      net.send({ t: 'gather', id: aimResource.id });
+      net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
+      me.swing();
+    } else if (aimDeployable) {
+      if (!deployableInRange(aimDeployable, BUILD_RANGE)) return hud.notice('Too far away');
+      net.send({ t: 'hitDeployable', id: aimDeployable.id });
       me.swing();
     } else if (aim?.piece) {
       if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
       net.send({ t: 'hit', key: pieceKey(aim.piece) });
+      me.swing();
+    }
+  }
+
+  /** E: open a furnace or box, or pick a hemp plant. */
+  function interact() {
+    if (aimDeployable && aimDeployable.slots.length > 0) {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
+      return openScreen(aimDeployable);
+    }
+    if (aimResource?.kind === 'hemp' && resourceInRange(aimResource)) {
+      net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
       me.swing();
     }
   }
@@ -235,10 +335,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let ghostKey = '';
   function updateGhost() {
     proposal = null;
-    if (slot !== 'hands') {
+    if (held() === 'buildingPlan') {
       const look = new THREE.Vector3();
       camera.getWorldDirection(look);
-      proposal = proposePiece(world, slot, material, aim, controller.eye, look, controller.position.y);
+      proposal = proposePiece(world, pieceKind, material, aim, controller.eye, look, controller.position.y);
     }
     const key = proposal ? `${pieceKey(proposal)}:${material}` : '';
     if (key !== ghostKey) {
@@ -248,25 +348,75 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       ghostKey = key;
     }
     if (proposal) {
-      const ok = inventory[material] >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
+      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
       ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
     }
   }
 
+  // The same kind of preview for a workbench, furnace or box in your hands.
+  const deployGhost = new THREE.Group();
+  deployGhost.visible = false;
+  world.scene.add(deployGhost);
+  let deployGhostKind: DeployableKind | null = null;
+  function updateDeployGhost() {
+    const item = held();
+    const kind = item && DEPLOYABLE_KINDS.includes(item as DeployableKind) ? (item as DeployableKind) : null;
+    if (kind !== deployGhostKind) {
+      deployGhost.clear();
+      if (kind) {
+        const model = buildDeployable(kind);
+        model.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh) {
+            m.material = ghostMat;
+            m.castShadow = false;
+          }
+        });
+        deployGhost.add(model);
+      }
+      deployGhostKind = kind;
+    }
+    deployGhost.visible = false;
+    if (!kind || !aimSurface) return;
+    const box = deployableBox({ kind, x: aimSurface.point.x, y: aimSurface.y, z: aimSurface.point.z, rot: controller.yaw });
+    if (distanceToBox(controller.eye, box) > BUILD_RANGE) return;
+    deployGhost.position.set(aimSurface.point.x, aimSurface.y, aimSurface.point.z);
+    deployGhost.rotation.y = controller.yaw;
+    deployGhost.visible = true;
+    ghostMat.color.set(0x4fb3ff);
+  }
+
   function describeTarget(): { text: string; health?: number } {
+    const item = held();
     if (aimResource && aimResource.amount > 0) {
       const info = RESOURCE_INFO[aimResource.kind];
-      const label = `${RESOURCE_NAMES[aimResource.kind]}: ${aimResource.amount} ${info.material}`;
-      return { text: resourceInRange(aimResource) ? `${label}  ·  Left click to gather` : `${label}  ·  Get closer` };
+      const label = `${RESOURCE_NAMES[aimResource.kind]}: ${aimResource.amount} ${ITEMS[info.yields].name.toLowerCase()}`;
+      const how = info.tool === 'pickup' ? 'E to pick' : 'Left click to gather';
+      return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
-    if (aim?.piece && (slot === 'hands' || aim.piece.kind === 'wall')) {
+    if (aimDeployable) {
+      const d = aimDeployable;
+      const hints = [d.slots.length > 0 ? 'E to open' : d.kind === 'workbench' ? 'Craft salvaged tools nearby' : '', 'Hit to pick up'];
+      const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_NAMES[d.kind];
+      return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
+    }
+    if (aim?.piece && (item !== 'buildingPlan' || aim.piece.kind === 'wall')) {
       const p = aim.piece;
-      const name = `${p.material === 'wood' ? 'Wood' : 'Scrap'} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind]}`;
-      const hints = [slot === 'hands' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : ''].filter(Boolean);
+      const name = `${ITEMS[p.material].name} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind].toLowerCase()}`;
+      const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : ''].filter(Boolean);
       return { text: [name, ...hints].join('  ·  '), health: p.hp / MAX_HP[p.material] };
     }
-    if (slot !== 'hands' && proposal && inventory[material] < PIECE_COST) return { text: `Need ${PIECE_COST} ${material}` };
+    if (item === 'buildingPlan' && proposal && countItem(slots, material) < PIECE_COST) return { text: `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}` };
     return { text: '' };
+  }
+
+  const buildInfo = document.getElementById('build-info')!;
+  function updateBuildInfo() {
+    const show = held() === 'buildingPlan';
+    buildInfo.hidden = !show;
+    if (!show) return;
+    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)<br/><small>Right click: wall, floor, stairs · R: wood, stone, scrap</small>`;
+    if (buildInfo.innerHTML !== html) buildInfo.innerHTML = html;
   }
 
   // Test hooks for the automated smoke test (scripts/smoke.ts).
@@ -277,7 +427,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     state: () => ({
       id: welcome.id,
       others: remotes.size,
-      inventory,
+      inventory: { wood: 0, stone: 0, scrap: 0, ...itemTotals(slots) },
+      slots,
+      active: ui.active,
+      deployables: [...world.deployables.values()],
       pieces: [...world.pieces.values()],
       position: controller.position.toArray(),
     }),
@@ -288,9 +441,39 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       controller.pitch = pitch;
     },
     nearestResource: (kind: string) => resources.filter((r) => r.kind === kind && r.amount > 0).sort((a, b) => dist(a) - dist(b))[0],
-    gather: (id: number) => net.send({ t: 'gather', id }),
-    place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) =>
-      net.send({ t: 'place', kind, i, y, k, dir, material: mat }),
+    /** Selects a belt slot holding this item, if there is one. */
+    hold: (item: ItemId) => {
+      const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
+      if (n >= 0) selectSlot(n);
+      return n >= 0;
+    },
+    select: (n: number) => selectSlot(n),
+    gather: (id: number) => {
+      // Swing whatever tool is on the belt if your hands hold something else.
+      const h = held();
+      if (!h || !ITEMS[h].tool) {
+        const n = slots.findIndex((s, i) => i < 6 && s && ITEMS[s.item].tool);
+        if (n >= 0) selectSlot(n);
+      }
+      net.send({ t: 'gather', id, slot: ui.active });
+    },
+    place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) => {
+      const n = slots.findIndex((s, i) => i < 6 && s?.item === 'buildingPlan');
+      if (n >= 0) selectSlot(n);
+      net.send({ t: 'place', kind, i, y, k, dir, material: mat });
+    },
+    craft: (item: ItemId, count = 1) => net.send({ t: 'craft', item, count }),
+    deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
+      const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
+      if (n < 0) return false;
+      selectSlot(n);
+      net.send({ t: 'deploy', slot: n, x, y: terrainHeight(world.seed, x, z), z, rot });
+      return true;
+    },
+    moveItem: (from: SlotRef, to: SlotRef, count?: number) => net.send({ t: 'moveItem', from, to, count }),
+    furnace: (id: number, on: boolean) => net.send({ t: 'furnace', id, on }),
+    openScreen: (id: number | null) => openScreen(id === null ? null : (world.deployables.get(id) ?? null)),
+    closeScreen: () => ui.hide(),
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
     /** Points the camera at your own survivor from the front, for character screenshots. */
     portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
@@ -331,6 +514,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
+    me.setHeld(held());
     me.update(dt, controller.moving);
     controller.updateCamera(camera);
     if (portrait) {
@@ -347,18 +531,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     for (const r of remotes.values()) {
       r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
       r.avatar.root.rotation.y = r.state.yaw + Math.PI;
+      r.avatar.setHeld(r.state.held);
       r.avatar.update(dt, r.state.moving);
     }
 
     updateAim();
     updateGhost();
+    updateDeployGhost();
+    updateBuildInfo();
+    ui.tick();
     hud.setTarget(describeTarget());
 
     sendTimer += dt;
     if (sendTimer > 1 / 15) {
       sendTimer = 0;
-      const p = controller.position;
-      net.send({ t: 'move', x: p.x, y: p.y, z: p.z, yaw: controller.yaw, moving: controller.moving });
+      sendMove();
     }
 
     world.update(dt, controller.position, time);

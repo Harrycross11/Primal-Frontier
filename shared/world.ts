@@ -1,10 +1,13 @@
 // Resources and blocks: the parts of the world that players change.
 
 import { HALF_WORLD } from './constants.ts';
+import type { ItemId } from './items.ts';
 import { mulberry32, terrainHeight } from './terrain.ts';
 
-export type ResourceKind = 'tree' | 'deadTree' | 'scrap';
-export type Material = 'wood' | 'scrap';
+export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'hemp';
+/** Building materials, weakest to strongest is wood, stone, scrap. Each is also an item. */
+export type Material = 'wood' | 'stone' | 'scrap';
+export const MATERIALS: Material[] = ['wood', 'stone', 'scrap'];
 
 export interface ResourceNode {
   id: number;
@@ -19,17 +22,21 @@ export interface ResourceNode {
   scale: number;
 }
 
-export const RESOURCE_INFO: Record<ResourceKind, { material: Material; amount: number; perHit: number; radius: number }> = {
-  tree: { material: 'wood', amount: 60, perHit: 6, radius: 0.45 },
-  deadTree: { material: 'wood', amount: 24, perHit: 4, radius: 0.3 },
-  scrap: { material: 'scrap', amount: 40, perHit: 4, radius: 0.9 },
+/**
+ * yields: the item a node gives. tool: which tool multiplier applies ('pickup' nodes are
+ * collected whole by hand). respawn: seconds until a used-up node comes back (0 = never).
+ */
+export const RESOURCE_INFO: Record<
+  ResourceKind,
+  { yields: ItemId; tool: 'wood' | 'stone' | 'scrap' | 'pickup'; amount: number; perHit: number; radius: number; respawn: number }
+> = {
+  tree: { yields: 'wood', tool: 'wood', amount: 60, perHit: 6, radius: 0.45, respawn: 0 },
+  deadTree: { yields: 'wood', tool: 'wood', amount: 24, perHit: 4, radius: 0.3, respawn: 0 },
+  scrap: { yields: 'scrap', tool: 'scrap', amount: 40, perHit: 4, radius: 0.9, respawn: 120 },
+  stone: { yields: 'stone', tool: 'stone', amount: 120, perHit: 6, radius: 0.9, respawn: 180 },
+  metalOre: { yields: 'metalOre', tool: 'stone', amount: 90, perHit: 4, radius: 0.85, respawn: 240 },
+  hemp: { yields: 'cloth', tool: 'pickup', amount: 10, perHit: 10, radius: 0.2, respawn: 150 },
 };
-
-export type Inventory = Record<Material, number>;
-
-export function emptyInventory(): Inventory {
-  return { wood: 0, scrap: 0 };
-}
 
 /**
  * Lays out the map's resources. Living trees only grow in one small "overgrowth" pocket;
@@ -61,6 +68,14 @@ export function generateResources(seed: number): ResourceNode[] {
   }
   for (let i = 0; i < 30; i++) add('deadTree', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
   for (let i = 0; i < 26; i++) add('scrap', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  for (let i = 0; i < 22; i++) add('stone', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  for (let i = 0; i < 14; i++) add('metalOre', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  // Hemp grows in a few small patches.
+  for (let patch = 0; patch < 6; patch++) {
+    const px = (rand() - 0.5) * 2 * span;
+    const pz = (rand() - 0.5) * 2 * span;
+    for (let i = 0; i < 4; i++) add('hemp', px + (rand() - 0.5) * 6, pz + (rand() - 0.5) * 6);
+  }
   return nodes;
 }
 

@@ -42,25 +42,72 @@
         border-radius: 10px; font-size: 13px; max-width: 320px; }
       #player-count { font-weight: 700; }
       #player-list { opacity: .75; margin-top: 2px; }
-      #inventory { position: fixed; right: 16px; top: 16px; display: flex; gap: 8px; }
-      .res { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel);
-        border-radius: 10px; font-weight: 800; font-size: 18px; }
-      .chip { width: 18px; height: 18px; border-radius: 4px; }
-      .chip.wood { background: #9a6b3f; } .chip.scrap { background: linear-gradient(135deg,#6b6f75 50%,#a35d32 50%); }
-      #hotbar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
-      .slot { position: relative; width: 74px; padding: 8px 6px 6px; background: var(--panel); border: 3px solid transparent;
-        border-radius: 12px; text-align: center; font-size: 12px; font-weight: 700; color: #4fb3ff; }
-      .slot svg { display: block; width: 34px; height: 34px; margin: 0 auto 4px; }
-      .slot { color: var(--ink); } .slot svg { color: #4fb3ff; }
-      .slot.active { border-color: #4fb3ff; background: rgba(20, 50, 80, 0.7); }
-      .slot .key { position: absolute; left: 6px; top: 3px; font-size: 11px; opacity: .7; }
-      #material { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-        min-width: 92px; padding: 6px 10px; background: var(--panel); border-radius: 12px; font-weight: 800; }
-      #material small { font-weight: 500; font-size: 10px; opacity: .75; }
-      #material .chip { width: 22px; height: 22px; }
-      #material[data-material="wood"] .chip { background: #9a6b3f; }
-      #material[data-material="scrap"] .chip { background: linear-gradient(135deg,#6b6f75 50%,#a35d32 50%); }
-      body:not(.building) #material { opacity: .5; }
+      #resources { position: fixed; right: 16px; top: 16px; display: flex; gap: 6px; }
+      .res { display: flex; align-items: center; gap: 4px; padding: 4px 10px 4px 4px; background: var(--panel);
+        border-radius: 10px; font-weight: 800; font-size: 16px; }
+      .res svg { width: 26px; height: 26px; }
+      #belt { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+      .slot { position: relative; width: 64px; height: 64px; background: rgba(24, 20, 16, 0.62); border: 2px solid rgba(255,255,255,.08);
+        border-radius: 10px; user-select: none; }
+      .slot svg { position: absolute; inset: 8px; width: 44px; height: 44px; pointer-events: none; }
+      .slot .count { position: absolute; right: 5px; bottom: 2px; font-size: 12px; font-weight: 800; text-shadow: 0 1px 2px #000; pointer-events: none; }
+      .slot .key { position: absolute; left: 5px; top: 2px; font-size: 11px; opacity: .6; pointer-events: none; }
+      .slot .wear { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0,0,0,.5); pointer-events: none; }
+      .slot .wear i { display: block; height: 100%; border-radius: 2px; background: #9fd36b; }
+      .slot.active { border-color: #ffb45e; background: rgba(80, 52, 20, 0.75); }
+      .slot.drop { border-color: #4fb3ff; }
+      .slot.label-slot::after { content: attr(data-label); position: absolute; left: 0; right: 0; top: -17px; text-align: center;
+        font-size: 11px; opacity: .75; }
+      #build-info { position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); padding: 6px 14px; background: var(--panel);
+        border-radius: 10px; font-size: 13px; text-align: center; white-space: nowrap; }
+      #build-info[hidden] { display: none; }
+      #build-info b { color: #ffb45e; }
+      #craft-progress { position: fixed; bottom: 96px; right: 16px; width: 210px; padding: 8px 10px; background: var(--panel);
+        border-radius: 10px; font-size: 12px; }
+      #craft-progress[hidden] { display: none; }
+      .bar { height: 5px; margin-top: 5px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
+      .bar i { display: block; height: 100%; background: #ffb45e; }
+
+      #screen { position: fixed; inset: 0; display: flex; gap: 14px; align-items: flex-start; justify-content: center;
+        padding: 60px 16px 16px; background: rgba(12, 10, 8, 0.72); overflow: auto; }
+      #screen[hidden] { display: none; }
+      .panel { background: rgba(36, 30, 24, 0.95); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 14px; }
+      .panel h2 { margin: 0 0 10px; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; opacity: .85; }
+      .grid { display: grid; grid-template-columns: repeat(6, 64px); gap: 6px; }
+      .grid + h3 { margin-top: 14px; }
+      .panel h3 { margin: 0 0 8px; font-size: 12px; opacity: .6; text-transform: uppercase; letter-spacing: 1px; }
+      #container-panel[hidden] { display: none; }
+      .furnace-row { display: flex; gap: 18px; margin-top: 20px; }
+      #furnace-toggle, .btn { padding: 8px 14px; border: 0; border-radius: 8px; font-weight: 800; cursor: pointer;
+        background: #ffb45e; color: #20140a; }
+      .btn.secondary { background: rgba(255,255,255,.12); color: var(--ink); }
+      .btn:disabled { opacity: .4; cursor: not-allowed; }
+      #furnace-status { margin-top: 10px; font-size: 13px; opacity: .8; }
+      #crafting { width: 380px; }
+      .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+      .tabs button { padding: 5px 10px; border-radius: 8px; border: 0; background: rgba(255,255,255,.08); color: var(--ink); cursor: pointer; font-weight: 700; }
+      .tabs button.on { background: #ffb45e; color: #20140a; }
+      #recipes { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
+      .recipe { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+      .recipe:hover, .recipe.on { background: rgba(255,255,255,.08); }
+      .recipe svg { width: 34px; height: 34px; flex: none; }
+      .recipe .rname { font-weight: 700; font-size: 14px; }
+      .recipe .rcost { font-size: 12px; opacity: .8; }
+      .recipe.cant .rname { opacity: .55; }
+      .need { color: #ff9c86; }
+      .tag { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(79,179,255,.25); margin-left: 6px; }
+      #recipe-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); font-size: 13px; }
+      #recipe-detail .actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+      #queue { margin-top: 12px; font-size: 12px; }
+      #queue .job { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+      #queue .job svg { width: 22px; height: 22px; }
+      #queue .job .x { margin-left: auto; cursor: pointer; opacity: .7; }
+      #tooltip { position: fixed; z-index: 10; max-width: 240px; padding: 8px 10px; background: rgba(10,8,6,.95); border-radius: 8px;
+        font-size: 12px; pointer-events: none; }
+      #tooltip[hidden] { display: none; }
+      #tooltip b { display: block; font-size: 13px; margin-bottom: 2px; }
+      #drag { position: fixed; z-index: 11; width: 48px; height: 48px; pointer-events: none; margin: -24px 0 0 -24px; }
+      #drag[hidden] { display: none; }
       #target-health { margin-top: 5px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
       #target-health[hidden] { display: none; }
       #target-health-fill { height: 100%; background: #7cff6b; }
@@ -88,7 +135,7 @@
         <button id="play">Enter the wasteland</button>
         <div id="join-error"></div>
         <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
-          Left click gather or build · 1–4 hands, wall, floor, stairs · G edit</div>
+          Left click hit or build · 1–6 belt · Tab inventory and crafting · E open</div>
       </div>
     </div>
 
@@ -96,29 +143,43 @@
       <div id="crosshair"></div>
       <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
       <div id="top-left"><div id="player-count"></div><div id="player-list"></div></div>
-      <div id="inventory">
-        <div class="res"><span class="chip wood"></span><span id="inv-wood">0</span></div>
-        <div class="res"><span class="chip scrap"></span><span id="inv-scrap">0</span></div>
-      </div>
-      <div id="hotbar">
-        <div class="slot" data-slot="hands"><span class="key">1</span>
-          <svg viewBox="0 0 40 40"><path d="M10 30 L26 14" stroke="#c9b28a" stroke-width="4" stroke-linecap="round"/><path d="M18 8 Q30 6 34 16 L28 18 Q26 12 18 12 Z" fill="#9aa3ad"/></svg>Hands</div>
-        <div class="slot" data-slot="wall"><span class="key">2</span>
-          <svg viewBox="0 0 40 40"><rect x="9" y="8" width="22" height="26" rx="2" fill="currentColor"/></svg>Wall</div>
-        <div class="slot" data-slot="floor"><span class="key">3</span>
-          <svg viewBox="0 0 40 40"><path d="M4 26 L20 18 L36 26 L20 34 Z" fill="currentColor"/></svg>Floor</div>
-        <div class="slot" data-slot="stairs"><span class="key">4</span>
-          <svg viewBox="0 0 40 40"><path d="M6 34 V28 H14 V22 H22 V16 H30 V10 H36 V34 Z" fill="currentColor"/></svg>Stairs</div>
-        <div id="material" data-material="wood"><span class="chip"></span><span id="material-name">Wood</span><small>R to swap · 10 each</small></div>
-      </div>
+      <div id="resources"></div>
+      <div id="build-info" hidden></div>
+      <div id="craft-progress" hidden></div>
+      <div id="belt"></div>
       <div id="notice"></div>
       <div id="help">
         Click the game to look around · <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
-        <kbd>1</kbd> hands · <kbd>2</kbd> wall · <kbd>3</kbd> floor · <kbd>4</kbd> stairs · or scroll<br />
-        Left click gather, hit or build · <kbd>R</kbd> wood or scrap<br />
-        <kbd>G</kbd> edit a wall: window, door, half wall
+        <kbd>1</kbd>–<kbd>6</kbd> or scroll: pick from your belt · <kbd>Tab</kbd> inventory and crafting<br />
+        Left click: hit, gather or place · <kbd>E</kbd> open, pick up hemp<br />
+        Building plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit a wall
       </div>
+      <div id="screen" hidden>
+        <div class="panel" id="inventory-panel">
+          <h2>Inventory</h2>
+          <div class="grid" id="backpack"></div>
+          <h3>Belt</h3>
+          <div class="grid" id="belt-grid"></div>
+        </div>
+        <div class="panel" id="container-panel" hidden>
+          <h2 id="container-title"></h2>
+          <div class="grid" id="container-grid"></div>
+          <div id="furnace-controls" hidden>
+            <div id="furnace-status"></div>
+            <div style="margin-top:10px"><button id="furnace-toggle">Light</button></div>
+          </div>
+        </div>
+        <div class="panel" id="crafting">
+          <h2>Crafting</h2>
+          <div class="tabs" id="tabs"></div>
+          <div id="recipes"></div>
+          <div id="recipe-detail"></div>
+          <div id="queue"></div>
+        </div>
+      </div>
+      <div id="tooltip" hidden></div>
+      <div id="drag" hidden></div>
       <div id="disconnected" hidden>Lost connection to the server. Refresh to rejoin.</div>
     </div>
 
