@@ -6,12 +6,15 @@ This repository is the **browser prototype**, built step by step. Milestones don
 
 ![A rusted car against the low sun, with light scattering through the dust](docs/screenshots/realism-car.png)
 
+![Wood, stone and sheet steel walls](docs/screenshots/walls.png)
+
 ![A two-storey wood hut with windows and stairs in the hazy wasteland](docs/screenshots/building.png)
 
 ## What works now
 
 - A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, burnt-out cars, ruined concrete houses, leaning power poles, boulders and one small pocket of living trees.
-- Graphics: a hazy low-sun sky with drifting clouds, height fog that pools in low ground and glows toward the sun, light shafts, soft 4K shadows, materials with roughness detail, dense dry grass that sways in the wind, drifting ash, ambient occlusion, bloom and a filmic grade with grain. Press **O** to switch to low graphics on slower computers.
+- Graphics: a hazy low-sun sky with drifting clouds, height fog that pools in low ground and glows toward the sun, light shafts, soft 4K shadows, materials with roughness detail, dense dry grass that sways in the wind, drifting ash, ambient occlusion, bloom and a filmic grade with grain.
+- Items look like the real thing: inventory icons are rendered from 3D models (logs, ore, ingots, cartridges, every tool and gun). Walls are built from weathered boards in a timber frame, coursed stone blocks with lintels, or rusty corrugated steel on steel posts. Guns have shaped stocks, curved magazines, sights and rails; tools have lashed flint heads, saw blades and taped grips. Press **O** to switch to low graphics on slower computers.
 - Up to 8 players per server, each a gritty hooded survivor with goggles, a respirator, a loaded backpack and whatever tool is on their belt, in muted clothing with a faded colour on their scarf and armband so players stay easy to tell apart. Walking, sprinting and chopping each have their own animation.
 - Gathering: hit trees for wood, wrecks for scrap, boulders for stone, metal ore, sulfur ore and rare high quality metal ore, and press E on hemp for cloth. Trees never regrow; the rest respawn after a few minutes. You spawn with a rock and a building plan.
 - Rust-style inventory: a 6-slot belt and a 24-slot backpack. Drag stacks between slots, shift-drag to split, right click to quick-move.

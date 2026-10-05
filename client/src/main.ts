@@ -29,6 +29,7 @@ import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
 import { buildDeployable } from './props.ts';
 import { World, buildPieceMesh } from './world.ts';
+import { itemIconUrl } from './itemIcons.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -695,6 +696,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return best;
     },
     storey: STOREY,
+    iconUrl: (item: ItemId) => itemIconUrl(item),
   };
 
   // Game loop.

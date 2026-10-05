@@ -579,3 +579,244 @@ export function worldBox(w: number, h: number, d: number, scale = 1.5): THREE.Bo
   }
   return geo;
 }
+
+/** Smooth tiling value noise: a lattice of random values, `cells` across, eased between. */
+function tilingNoise(rand: () => number, cells: number): (u: number, v: number) => number {
+  const grid = Float32Array.from({ length: cells * cells }, rand);
+  const at = (i: number, j: number) => grid[(((j % cells) + cells) % cells) * cells + (((i % cells) + cells) % cells)];
+  return (u, v) => {
+    const x = u * cells;
+    const y = v * cells;
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    let fx = x - i;
+    let fy = y - j;
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    const a = at(i, j) + (at(i + 1, j) - at(i, j)) * fx;
+    const b = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx;
+    return a + (b - a) * fy;
+  };
+}
+
+/** Paints every pixel from a function of (u, v) in 0..1, returning [r, g, b] in 0..255. */
+function paint(ctx: CanvasRenderingContext2D, size: number, fn: (u: number, v: number) => [number, number, number]) {
+  const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const [r, g, b] = fn(x / size, y / size);
+      const i = (y * size + x) * 4;
+      img.data[i] = r;
+      img.data[i + 1] = g;
+      img.data[i + 2] = b;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * Sun-bleached vertical boards for wood walls: each board its own shade, wavy grain, knots,
+ * dark gaps between boards and rusty nail heads where the boards cross hidden battens.
+ */
+export function woodWallSurface(): Surface {
+  const BOARDS = 6;
+  const plan = (rand: () => number) => ({
+    shade: Array.from({ length: BOARDS }, () => 0.78 + rand() * 0.34),
+    tint: Array.from({ length: BOARDS }, () => rand()),
+    knots: Array.from({ length: 7 }, () => [rand(), rand(), 0.008 + rand() * 0.012] as const),
+    grain: tilingNoise(rand, 8),
+    fine: tilingNoise(rand, 64),
+    stain: tilingNoise(rand, 5),
+  });
+  const height = (u: number, v: number, p: ReturnType<typeof plan>) => {
+    const b = Math.floor(u * BOARDS);
+    const inB = u * BOARDS - b;
+    const gap = Math.min(inB, 1 - inB) < 0.035 ? 0 : 1;
+    // Boards cup slightly: their middles stand proud of their edges.
+    const cup = Math.sin(inB * Math.PI) * 0.25;
+    const wave = Math.sin((u * BOARDS * 40 + p.grain(u, v) * 9 + b * 3.1) * 1.0);
+    return { b, inB, gap, cup, wave };
+  };
+  const draw: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const { b, gap, wave } = height(u, v, p);
+      if (!gap) return [34, 27, 21];
+      let k = p.shade[b] * (0.86 + wave * 0.06 + p.fine(u, v) * 0.1);
+      for (const [ku, kv, r] of p.knots) {
+        const d = Math.hypot((u - ku) * 2.2, v - kv);
+        if (d < r * 2.5) k *= 0.55 + (d / (r * 2.5)) * 0.45;
+      }
+      // Old weathered grey on some boards, warmer brown under the grey on others.
+      const grey = 0.35 + p.tint[b] * 0.5 + (p.stain(u, v) - 0.5) * 0.4;
+      const warm: [number, number, number] = [138, 98, 64];
+      const aged: [number, number, number] = [128, 118, 104];
+      const c = warm.map((w, i) => (w + (aged[i] - w) * Math.min(1, Math.max(0, grey))) * k) as [number, number, number];
+      // Nail heads.
+      const inB = u * BOARDS - b;
+      for (const nv of [0.12, 0.62]) {
+        for (const nu of [0.3, 0.7]) {
+          if (Math.hypot((inB - nu) / BOARDS, v - nv) < 0.006) return [52, 36, 26];
+        }
+      }
+      return c;
+    });
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const { gap, cup, wave } = height(u, v, p);
+      const h = gap ? 150 + cup * 120 + wave * 18 + p.fine(u, v) * 20 : 20;
+      return [h, h, h];
+    });
+  };
+  return surface('wood-wall', 512, draw, bump, 3);
+}
+
+/**
+ * Rough-cut stone blocks laid in courses with recessed mortar, for stone walls. Each block
+ * has its own tone, chipped edges and lichen-dark stains.
+ */
+export function stoneWallSurface(): Surface {
+  const ROWS = 6;
+  const COLS = 3;
+  const plan = (rand: () => number) => ({
+    shade: Array.from({ length: ROWS * COLS * 2 }, () => 0.8 + rand() * 0.3),
+    warm: Array.from({ length: ROWS * COLS * 2 }, () => rand()),
+    n: tilingNoise(rand, 16),
+    fine: tilingNoise(rand, 96),
+    big: tilingNoise(rand, 4),
+  });
+  const cell = (u: number, v: number, p: ReturnType<typeof plan>) => {
+    const row = Math.floor(v * ROWS);
+    // Every other course is offset by half a block.
+    const uu = u * COLS + (row % 2) * 0.5;
+    const col = Math.floor(uu);
+    const fu = uu - col;
+    const fv = v * ROWS - row;
+    const wobble = (p.n(u, v) - 0.5) * 0.12;
+    // Blocks are twice as long as they are tall, so measure the mortar in the same units both ways.
+    const edge = Math.min(fu * (ROWS / COLS), (1 - fu) * (ROWS / COLS), fv, 1 - fv) + wobble * 0.3;
+    const id = row * COLS + (col % COLS);
+    return { edge, id };
+  };
+  const draw: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const { edge, id } = cell(u, v, p);
+      if (edge < 0.06) {
+        const m = 78 + p.fine(u, v) * 26;
+        return [m * 1.02, m * 0.98, m * 0.92];
+      }
+      const k = p.shade[id] * (0.82 + p.n(u, v) * 0.18 + p.fine(u, v) * 0.12) * (edge < 0.12 ? 0.9 : 1);
+      const stain = Math.max(0, p.big(u, v) - 0.55) * 1.2;
+      const base: [number, number, number] = p.warm[id] > 0.5 ? [160, 152, 140] : [146, 145, 141];
+      return [base[0] * k * (1 - stain * 0.4), base[1] * k * (1 - stain * 0.35), base[2] * k * (1 - stain * 0.45)];
+    });
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const { edge } = cell(u, v, p);
+      // Blocks bulge out of the mortar, with rounded, chipped arrises.
+      const h = edge < 0.06 ? 40 : 120 + Math.min(1, (edge - 0.06) * 8) * 70 + p.n(u, v) * 40 + p.fine(u, v) * 30;
+      return [h, h, h];
+    });
+  };
+  return surface('stone-wall', 512, draw, bump, 5);
+}
+
+/**
+ * Corrugated sheet steel for scrap walls: deep ridges, flaking grey paint over rust, orange
+ * streaks running down from bolt holes and a row of rivets where two sheets overlap.
+ */
+export function sheetMetalSurface(): Surface {
+  const RIDGES = 10;
+  const plan = (rand: () => number) => ({
+    rust: tilingNoise(rand, 6),
+    flake: tilingNoise(rand, 40),
+    streak: Array.from({ length: 64 }, () => rand()),
+  });
+  const draw: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const ridge = 0.5 + 0.5 * Math.sin(u * Math.PI * 2 * RIDGES);
+      const s = p.streak[Math.floor(u * 64)];
+      const streak = s > 0.7 ? Math.max(0, 1 - ((v + s * 3) % 1) * 1.6) * (s - 0.7) * 3 : 0;
+      const rust = Math.min(0.85, Math.max(0, (p.rust(u, v) - 0.55) * 2.2 + (p.flake(u, v) - 0.5) * 0.9 + streak));
+      const paintC = 98 + ridge * 40;
+      const painted: [number, number, number] = [paintC * 0.95, paintC, paintC * 1.02];
+      const r = 0.75 + p.flake(u, v) * 0.35;
+      const rusty: [number, number, number] = [124 * r, 74 * r, 46 * r];
+      // Rivets along the overlap seam.
+      if (Math.abs(v - 0.5) < 0.012 && Math.abs(((u * RIDGES) % 1) - 0.5) < 0.12) return [70, 50, 40];
+      if (Math.abs(v - 0.5) < 0.004) return [50, 40, 34];
+      return painted.map((c, i) => c + (rusty[i] - c) * rust) as [number, number, number];
+    });
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const ridge = 0.5 + 0.5 * Math.sin(u * Math.PI * 2 * RIDGES);
+      let h = 50 + ridge * 160 + (p.flake(u, v) - 0.5) * 20;
+      if (Math.abs(v - 0.5) < 0.012 && Math.abs(((u * RIDGES) % 1) - 0.5) < 0.12) h = 240;
+      return [h, h, h];
+    });
+  };
+  return surface('sheet-metal', 512, draw, bump, 3);
+}
+
+/** Close wood grain for tool handles and gun furniture: oiled, darker along the grain lines. */
+export function woodGrainSurface(): Surface {
+  const plan = (rand: () => number) => ({ n: tilingNoise(rand, 6), fine: tilingNoise(rand, 80) });
+  const draw: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const ring = Math.sin((v * 30 + p.n(u, v) * 6) * Math.PI);
+      const k = 0.78 + ring * 0.12 + p.fine(u, v) * 0.12;
+      return [150 * k, 100 * k, 60 * k];
+    });
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const h = 128 + Math.sin((v * 30 + p.n(u, v) * 6) * Math.PI) * 30 + p.fine(u, v) * 20;
+      return [h, h, h];
+    });
+  };
+  return surface('wood-grain', 256, draw, bump, 1.5);
+}
+
+/** Worn gun metal: fine brushing scratches, darker bluing in recesses, lighter wear on edges. */
+export function gunMetalSurface(): Surface {
+  const plan = (rand: () => number) => ({ n: tilingNoise(rand, 8), fine: tilingNoise(rand, 128) });
+  const draw: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const k = 0.8 + p.n(u, v) * 0.25 + p.fine(u * 0.2, v) * 0.15;
+      return [180 * k, 182 * k, 186 * k];
+    });
+    // Scratches.
+    ctx.strokeStyle = 'rgba(235,235,240,0.35)';
+    ctx.lineWidth = 1;
+    for (let n = 0; n < 90; n++) {
+      const x = rand() * size;
+      const y = rand() * size;
+      const a = (rand() - 0.5) * 0.6;
+      const l = 4 + rand() * 30;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+      ctx.stroke();
+    }
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    const p = plan(rand);
+    paint(ctx, size, (u, v) => {
+      const h = 128 + p.fine(u * 0.2, v) * 30;
+      return [h, h, h];
+    });
+  };
+  return surface('gun-metal', 256, draw, bump, 0.8);
+}

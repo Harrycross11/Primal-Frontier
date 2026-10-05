@@ -45,7 +45,7 @@
       #resources { position: fixed; right: 16px; top: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 55%; }
       .res { display: flex; align-items: center; gap: 3px; padding: 3px 9px 3px 3px; background: var(--panel);
         border-radius: 10px; font-weight: 800; font-size: 15px; }
-      .res svg { width: 24px; height: 24px; }
+      .res svg, .res .icon { width: 24px; height: 24px; }
       #vitals { position: fixed; right: 16px; bottom: 18px; width: 230px; padding: 8px 10px; background: var(--panel); border-radius: 10px; }
       .vital { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; }
       .vital .bar { flex: 1; height: 16px; margin: 0; border-radius: 4px; position: relative; }
@@ -80,7 +80,7 @@
       #belt { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
       .slot { position: relative; width: 64px; height: 64px; background: rgba(24, 20, 16, 0.62); border: 2px solid rgba(255,255,255,.08);
         border-radius: 10px; user-select: none; }
-      .slot svg { position: absolute; inset: 8px; width: 44px; height: 44px; pointer-events: none; }
+      .slot svg, .slot .icon { position: absolute; inset: 8px; width: 44px; height: 44px; pointer-events: none; }
       .slot .count { position: absolute; right: 5px; bottom: 2px; font-size: 12px; font-weight: 800; text-shadow: 0 1px 2px #000; pointer-events: none; }
       .slot .count.ammo { left: 5px; right: auto; top: 2px; bottom: auto; font-size: 10px; color: #ffd28a; }
       .slot .key ~ .count.ammo { top: auto; bottom: 7px; }
@@ -125,7 +125,7 @@
       #recipes { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
       .recipe { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
       .recipe:hover, .recipe.on { background: rgba(255,255,255,.08); }
-      .recipe svg { width: 34px; height: 34px; flex: none; }
+      .recipe svg, .recipe .icon { width: 34px; height: 34px; flex: none; }
       .recipe .rname { font-weight: 700; font-size: 14px; }
       .recipe .rcost { font-size: 12px; opacity: .8; }
       .recipe.cant .rname { opacity: .55; }
@@ -135,7 +135,7 @@
       #recipe-detail .actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
       #queue { margin-top: 12px; font-size: 12px; }
       #queue .job { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-      #queue .job svg { width: 22px; height: 22px; }
+      #queue .job svg, #queue .job .icon { width: 22px; height: 22px; }
       #queue .job .x { margin-left: auto; cursor: pointer; opacity: .7; }
       #tooltip { position: fixed; z-index: 10; max-width: 240px; padding: 8px 10px; background: rgba(10,8,6,.95); border-radius: 8px;
         font-size: 12px; pointer-events: none; }

@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { WORLD_SIZE } from '../../shared/constants.ts';
-import { MAX_HP, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
+import { MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
@@ -21,6 +21,10 @@ import {
   plankSurface,
   rustSurface,
   sandSurface,
+  sheetMetalSurface,
+  stoneWallSurface,
+  woodGrainSurface,
+  woodWallSurface,
   worldBox,
 } from './textures.ts';
 
@@ -70,10 +74,13 @@ export class World {
     const barkDark = barkSurface(true);
     const barrel = rustSurface('#3f5a3c');
     this.materials = {
-      wood: std({ ...planks, roughness: 0.85 }),
-      scrap: std({ ...metal, roughness: 0.55, metalness: 0.65 }),
+      wood: std({ ...woodWallSurface(), roughness: 0.9 }),
+      scrap: std({ ...sheetMetalSurface(), roughness: 0.6, metalness: 0.55 }),
       concrete: std({ ...concrete, roughness: 0.95 }),
-      stone: std({ ...concrete, color: 0xc2b9aa, roughness: 0.95 }),
+      stone: std({ ...stoneWallSurface(), roughness: 0.95 }),
+      timber: std({ ...woodGrainSurface(), color: 0x8a7462, roughness: 0.9 }),
+      steel: std({ ...rustSurface('#55575a'), roughness: 0.55, metalness: 0.7 }),
+      lintel: std({ ...concrete, color: 0xb0a898, roughness: 0.95 }),
       rebar: std({ color: 0x5a3a28, roughness: 0.7, metalness: 0.6 }),
       bark: std({ ...bark, roughness: 0.95 }),
       barkDark: std({ ...barkDark, roughness: 0.95 }),
@@ -452,6 +459,7 @@ export class World {
     }
     this.pieces.set(key, piece);
     const g = buildPieceMesh(piece, this.pieceMaterial(piece));
+    this.addFraming(g, piece);
     g.traverse((o) => {
       o.userData.pieceKey = key;
       o.castShadow = true;
@@ -490,6 +498,64 @@ export class World {
     }
     g.userData.setOn?.(d.on);
     g.userData.health = d.hp / DEPLOYABLE_INFO[d.kind].hp;
+  }
+
+  /**
+   * The structure around a wall's infill, so it reads as something built: timber posts,
+   * rails and a brace for wood; steel posts for scrap; stone lintels and sills for stone.
+   * Window and door openings get a frame of the same.
+   */
+  private addFraming(g: THREE.Group, piece: Piece) {
+    if (piece.kind !== 'wall') return;
+    const m = piece.material;
+    const mat = m === 'wood' ? this.materials.timber : m === 'scrap' ? this.materials.steel : this.materials.lintel;
+    const S = TILE;
+    const H = piece.edit === 'half' ? STOREY / 2 : STOREY;
+    const P = m === 'scrap' ? 0.12 : 0.16;
+    const depth = THICK + 0.08;
+    // [a0, h0, a1, h1] rectangles in the wall's own length/height coordinates.
+    const parts: [number, number, number, number][] = [];
+    if (m !== 'stone') {
+      parts.push([0, 0, P, H], [S - P, 0, S, H], [P, H - P, S - P, H], [P, 0, S - P, P]);
+      if (piece.edit === 'half') parts.push([P, H / 2 - P / 2, S - P, H / 2 + P / 2]);
+    }
+    const J = m === 'stone' ? 0.22 : P * 0.8;
+    if (piece.edit === 'window') {
+      // Sill, head and jambs; the stone ones overhang the opening a little.
+      const over = m === 'stone' ? 0.15 : 0;
+      parts.push([0.9 - over, 1.1 - J, S - 0.9 + over, 1.1], [0.9 - over, 2.1, S - 0.9 + over, 2.1 + J]);
+      if (m !== 'stone') parts.push([0.9 - J, 1.1, 0.9, 2.1], [S - 0.9, 1.1, S - 0.9 + J, 2.1]);
+    } else if (piece.edit === 'door') {
+      const d0 = S / 2 - 0.65;
+      const d1 = S / 2 + 0.65;
+      parts.push([d0 - (m === 'stone' ? 0.2 : J), 2.3, d1 + (m === 'stone' ? 0.2 : J), 2.3 + J]);
+      if (m !== 'stone') parts.push([d0 - J, P, d0, 2.3], [d1, P, d1 + J, 2.3]);
+    }
+    const t = depth / 2;
+    const x0 = piece.i * TILE;
+    const z0 = piece.k * TILE;
+    // Walls along z sit a hair lower so their posts never share a face with crossing walls.
+    const dy = piece.dir === 1 ? -0.004 : 0;
+    for (const [a0, h0, a1, h1] of parts) {
+      const w = a1 - a0;
+      const h = h1 - h0 + dy * 2;
+      const geo = piece.dir === 0 ? worldBox(w, h, depth, 1.2) : worldBox(depth, h, w, 1.2);
+      const mesh = new THREE.Mesh(geo, mat);
+      const a = (a0 + a1) / 2;
+      const y = piece.y + (h0 + h1) / 2;
+      if (piece.dir === 0) mesh.position.set(x0 + a, y, z0);
+      else mesh.position.set(x0, y, z0 + a);
+      g.add(mesh);
+    }
+    // A diagonal brace across solid wood walls, like a barn's.
+    if (m === 'wood' && piece.edit === 'solid') {
+      const len = Math.hypot(S - 2 * P, H - 2 * P);
+      const brace = new THREE.Mesh(worldBox(len, P * 0.8, t * 2 - 0.02, 1.2), mat);
+      brace.rotation.set(0, piece.dir === 0 ? 0 : -Math.PI / 2, Math.atan2(H - 2 * P, S - 2 * P));
+      if (piece.dir === 0) brace.position.set(x0 + S / 2, piece.y + H / 2, z0);
+      else brace.position.set(x0, piece.y + H / 2, z0 + S / 2);
+      g.add(brace);
+    }
   }
 
   /** Damaged pieces get darker, so you can see a wall is about to break. */

@@ -2,6 +2,7 @@
 
 import type { ItemId } from '../../shared/items.ts';
 import { gunIconBody } from './guns.ts';
+import { itemIconUrl } from './itemIcons.ts';
 
 const wood = '#9a6b3f';
 const woodDark = '#6e4a2a';
@@ -54,6 +55,9 @@ export const ICONS: Partial<Record<ItemId, string>> = {
   syringe: `<path d="M9 31 L25 15" stroke="#cfe0e8" stroke-width="7" stroke-linecap="round"/><path d="M11 29 L21 19" stroke="#b03a2e" stroke-width="4"/><path d="M25 15 L33 7" stroke="#a9adb2" stroke-width="1.5"/><path d="M5 31 L9 35 M7 33 L10 30" stroke="#6b6f75" stroke-width="2"/>`,
 };
 
+/** The item's rendered 3D icon, falling back to the drawn one where WebGL isn't available. */
 export function iconSvg(item: ItemId): string {
+  const url = itemIconUrl(item);
+  if (url) return `<img class="icon" src="${url}" alt="" draggable="false">`;
   return `<svg viewBox="0 0 40 40" aria-hidden="true">${ICONS[item] ?? gunIconBody(item) ?? ''}</svg>`;
 }
