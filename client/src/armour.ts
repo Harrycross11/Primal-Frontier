@@ -47,11 +47,7 @@ const strap = () =>
     const s = leatherSurface();
     return new THREE.MeshStandardMaterial({ color: 0x4e3b2a, map: s.map, normalMap: s.normalMap, roughness: 0.75 });
   });
-const steel = () =>
-  mat('armour-steel', () => {
-    const s = rustSurface('#62625e');
-    return new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, roughness: 0.55, metalness: 0.75, side: THREE.DoubleSide });
-  });
+const steel = () => mat('armour-steel', steelMaterial);
 const darkSteel = () => mat('armour-dark-steel', () => new THREE.MeshStandardMaterial({ color: 0x1c1b1a, roughness: 0.6, metalness: 0.5 }));
 const rivet = () => mat('armour-rivet', () => new THREE.MeshStandardMaterial({ color: 0x8c877c, roughness: 0.35, metalness: 0.9 }));
 const can = () =>
@@ -123,6 +119,46 @@ function roadSignMaterial(kind: 'chevron' | 'stop' | 'warning'): THREE.Material 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.35, side: THREE.DoubleSide });
+}
+
+/** Dark grey welded steel, scuffed bright on the edges, with a few rust spots and weld seams. */
+function steelMaterial(): THREE.Material {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d')!;
+  let seed = 4242;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  ctx.fillStyle = '#5c5e5f';
+  ctx.fillRect(0, 0, 128, 128);
+  // Brushed grain and hammer marks.
+  for (let i = 0; i < 260; i++) {
+    const l = 70 + rand() * 40;
+    ctx.fillStyle = `rgba(${l},${l + 2},${l + 4},0.35)`;
+    ctx.fillRect(rand() * 128, rand() * 128, 6 + rand() * 30, 1);
+  }
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = `rgba(30,30,30,${0.1 + rand() * 0.15})`;
+    ctx.beginPath();
+    ctx.arc(rand() * 128, rand() * 128, 2 + rand() * 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Rust spots, kept small.
+  for (let i = 0; i < 14; i++) {
+    ctx.fillStyle = `rgba(${120 + rand() * 30},${60 + rand() * 20},30,${0.25 + rand() * 0.3})`;
+    ctx.beginPath();
+    ctx.arc(rand() * 128, rand() * 128, 1 + rand() * 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // A weld seam across the plate.
+  for (let x = 0; x < 128; x += 3) {
+    ctx.fillStyle = `rgba(${45 + rand() * 30},${40 + rand() * 25},${35 + rand() * 20},0.9)`;
+    ctx.beginPath();
+    ctx.arc(x, 64 + Math.sin(x * 0.15) * 1.5, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.48, metalness: 0.8, side: THREE.DoubleSide });
 }
 
 /** A curved plate: a slice of a cylinder around the y axis, facing +z, `arc` radians wide. */
