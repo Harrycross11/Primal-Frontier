@@ -91,6 +91,9 @@
       .slot .wear i { display: block; height: 100%; border-radius: 2px; background: #9fd36b; }
       .slot.active { border-color: #ffb45e; background: rgba(80, 52, 20, 0.75); }
       .slot.drop { border-color: #4fb3ff; }
+      .slot.wear-slot:empty::before { content: attr(data-label); position: absolute; inset: 0; display: grid; place-items: center;
+        font-size: 11px; letter-spacing: 1px; text-transform: uppercase; opacity: .35; }
+      #armour-total { margin-top: 8px; font-size: 12px; opacity: .7; }
       .slot.label-slot::after { content: attr(data-label); position: absolute; left: 0; right: 0; top: -17px; text-align: center;
         font-size: 11px; opacity: .75; }
       #build-info { position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); padding: 6px 14px; background: var(--panel);
@@ -202,6 +205,9 @@
           <div class="grid" id="backpack"></div>
           <h3>Belt</h3>
           <div class="grid" id="belt-grid"></div>
+          <h3>Armour</h3>
+          <div class="grid" id="wear-grid"></div>
+          <div id="armour-total"></div>
         </div>
         <div class="panel" id="container-panel" hidden>
           <h2 id="container-title"></h2>

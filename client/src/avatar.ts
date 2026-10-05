@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
+import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
 import { buildHeldItem } from './props.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
@@ -79,6 +80,12 @@ export class Avatar {
   private reloadTimer = 0;
   private dead = false;
   private tag: THREE.Sprite | null = null;
+  /** Bind-pose positions of the bones, for hanging armour on them. */
+  private boneAt = new Map<BoneName, THREE.Vector3>();
+  /** The survivor's own hood and face gear, hidden under some armour. */
+  private gear: Record<HiddenGear, THREE.Object3D[]> = { hood: [], face: [] };
+  private worn: (ItemId | null)[] = [null, null, null];
+  private wornMeshes: THREE.Object3D[][] = [[], [], []];
   /** Aim pitch (radians, up is positive), so others see where a survivor points their gun. */
   aimPitch = 0;
 
@@ -185,11 +192,13 @@ export class Avatar {
     band.rotation.z = -ARM_REST;
 
     // Head: hood, goggles and respirator, so the face reads as a gritty survivor.
+    const faceStart = this.bones.head.children.length;
     const hoodMesh = attach('head', new THREE.SphereGeometry(0.13, 24, 16, Math.PI / 2 + 0.72, Math.PI * 2 - 1.44, 0, Math.PI * 0.78), hood, 0, 1.705, -0.012);
     hoodMesh.scale.set(1.06, 1.1, 1.14);
     const strap = attach('head', new THREE.TorusGeometry(0.094, 0.011, 6, 24), darkLeather, 0, 1.718, 0.005);
     strap.rotation.x = Math.PI / 2;
     strap.scale.set(1, 1.1, 1);
+    this.gear.hood.push(hoodMesh, strap);
     for (const x of [-0.042, 0.042]) {
       attach('head', new THREE.CylinderGeometry(0.031, 0.034, 0.035, 16), metal, x, 1.718, 0.095).rotation.x = Math.PI / 2;
       attach('head', new THREE.CircleGeometry(0.026, 16), glass, x, 1.718, 0.113);
@@ -198,6 +207,8 @@ export class Avatar {
     for (const x of [-0.055, 0.055]) {
       attach('head', new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), metal, x, 1.615, 0.12).rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
     }
+    this.gear.face.push(...this.bones.head.children.slice(faceStart).filter((o) => o !== hoodMesh && o !== strap));
+    for (const [n, pos] of world) this.boneAt.set(n, pos);
 
     // Whatever is in their hands goes here: a rock, a tool or a building plan.
     const grip = new THREE.Group();
@@ -230,6 +241,28 @@ export class Avatar {
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;
     this.pose = !w || w.class === 'melee' ? 'normal' : w.class === 'bow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
+  }
+
+  /** Dresses the survivor in the armour worn on their head, chest and legs. */
+  setWear(wear: (ItemId | null)[]) {
+    let changed = false;
+    for (let i = 0; i < this.worn.length; i++) {
+      const item = wear[i] ?? null;
+      if (item === this.worn[i]) continue;
+      changed = true;
+      this.worn[i] = item;
+      for (const m of this.wornMeshes[i]) m.removeFromParent();
+      this.wornMeshes[i] = [];
+      if (!item) continue;
+      for (const { bone, mesh } of armourParts(item)) {
+        mesh.position.sub(this.boneAt.get(bone)!);
+        this.bones[bone].add(mesh);
+        this.wornMeshes[i].push(mesh);
+      }
+    }
+    if (!changed) return;
+    const hidden = new Set(this.worn.flatMap((item) => (item ? (ARMOUR_HIDES[item] ?? []) : [])));
+    for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind);
   }
 
   /** World position of the gun's muzzle, for flashes and tracers. */

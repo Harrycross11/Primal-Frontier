@@ -53,6 +53,15 @@ export const ICONS: Partial<Record<ItemId, string>> = {
   rifleAmmo: `<path d="M11 34 V16 L13 13 V9 Q14.5 5 16 9 V13 L18 16 V34 Z" fill="${brass}"/><path d="M13 13 V9 Q14.5 5 16 9 V13 Z" fill="#9b6b3e"/><path d="M22 34 V16 L24 13 V9 Q25.5 5 27 9 V13 L29 16 V34 Z" fill="${brass}"/><path d="M24 13 V9 Q25.5 5 27 9 V13 Z" fill="#9b6b3e"/>`,
   bandage: `<ellipse cx="17" cy="22" rx="10" ry="10" fill="#e6dccb"/><ellipse cx="17" cy="22" rx="4" ry="4" fill="#c9bb9e"/><path d="M27 22 L35 30" stroke="#e6dccb" stroke-width="6"/><path d="M14 22 H20 M17 19 V25" stroke="#b03a2e" stroke-width="2"/>`,
   syringe: `<path d="M9 31 L25 15" stroke="#cfe0e8" stroke-width="7" stroke-linecap="round"/><path d="M11 29 L21 19" stroke="#b03a2e" stroke-width="4"/><path d="M25 15 L33 7" stroke="#a9adb2" stroke-width="1.5"/><path d="M5 31 L9 35 M7 33 L10 30" stroke="#6b6f75" stroke-width="2"/>`,
+  burlapHeadwrap: `<path d="M9 30 Q8 8 20 7 Q32 8 31 30 L25 30 Q26 16 20 16 Q14 16 15 30 Z" fill="#a08c62"/><path d="M10 14 Q20 10 30 14" stroke="#8a7550" stroke-width="2.5" fill="none"/>`,
+  burlapShirt: `<path d="M12 8 L28 8 L36 16 L31 20 L29 18 L29 34 L11 34 L11 18 L9 20 L4 16 Z" fill="#a08c62"/><path d="M11 29 H29" stroke="#8a7550" stroke-width="2.5"/>`,
+  burlapTrousers: `<path d="M11 6 H29 L31 35 H23 L20 16 L17 35 H9 Z" fill="#a08c62"/><rect x="10" y="23" width="6" height="5" fill="#6f5f40"/><rect x="24" y="23" width="6" height="5" fill="#6f5f40"/>`,
+  coffeeCanHelmet: `<rect x="9" y="8" width="22" height="20" rx="2" fill="#4f5d4a"/><rect x="8" y="27" width="24" height="3" rx="1.5" fill="#8c877c"/><path d="M11 30 Q20 38 29 30" stroke="#4e3b2a" stroke-width="2" fill="none"/>`,
+  roadsignJacket: `<path d="M12 7 L28 7 L36 15 L31 19 L29 17 L29 34 L11 34 L11 17 L9 19 L4 15 Z" fill="#4e3b2a"/><rect x="12" y="11" width="16" height="13" fill="#c99a24"/><path d="M14 11 L18 17.5 L14 24 M20 11 L24 17.5 L20 24" stroke="#1d1b18" stroke-width="2.5" fill="none"/>`,
+  roadsignKilt: `<rect x="8" y="8" width="24" height="4" rx="1" fill="#4e3b2a"/><rect x="7" y="12" width="9" height="20" fill="#c99a24"/><rect x="15.5" y="12" width="9" height="21" fill="#9e2a22"/><rect x="24" y="12" width="9" height="20" fill="#c99a24"/>`,
+  metalFacemask: `<path d="M10 9 Q20 4 30 9 L29 30 Q20 36 11 30 Z" fill="#6f716e"/><rect x="13" y="15" width="14" height="3" fill="#1c1b1a"/><circle cx="17" cy="25" r="1.2" fill="#1c1b1a"/><circle cx="20" cy="25" r="1.2" fill="#1c1b1a"/><circle cx="23" cy="25" r="1.2" fill="#1c1b1a"/>`,
+  metalChestplate: `<path d="M9 8 L31 8 Q33 22 29 34 L11 34 Q7 22 9 8 Z" fill="#6f716e"/><path d="M20 9 V33" stroke="#8c877c" stroke-width="2"/><circle cx="13" cy="12" r="1.3" fill="#8c877c"/><circle cx="27" cy="12" r="1.3" fill="#8c877c"/>`,
+  metalLegPlates: `<path d="M8 6 H17 L16 34 H9 Z" fill="#6f716e"/><path d="M23 6 H32 L31 34 H24 Z" fill="#6f716e"/><path d="M8 13 H17 M8 27 H16 M23 13 H32 M24 27 H31" stroke="#4e3b2a" stroke-width="2"/>`,
 };
 
 /** The item's rendered 3D icon, falling back to the drawn one where WebGL isn't available. */

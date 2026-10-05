@@ -60,7 +60,17 @@ export type ItemId =
   | 'rifleAmmo'
   // Medical
   | 'bandage'
-  | 'syringe';
+  | 'syringe'
+  // Armour
+  | 'burlapHeadwrap'
+  | 'burlapShirt'
+  | 'burlapTrousers'
+  | 'coffeeCanHelmet'
+  | 'roadsignJacket'
+  | 'roadsignKilt'
+  | 'metalFacemask'
+  | 'metalChestplate'
+  | 'metalLegPlates';
 
 /** What a tool is good at: multipliers on the base amount per hit, for each kind of node. */
 export interface ToolInfo {
@@ -99,15 +109,30 @@ export interface WeaponInfo {
   durability?: number;
 }
 
+/** Where armour is worn, and the part of the body it covers. */
+export type ArmourSlot = 'head' | 'chest' | 'legs';
+/** The three clothing slots, in order: slot 0 is the head, 1 the chest, 2 the legs. */
+export const ARMOUR_SLOTS: ArmourSlot[] = ['head', 'chest', 'legs'];
+
+/** Worn armour: which slot it goes in and how much of each hit on that part it stops. */
+export interface ArmourInfo {
+  slot: ArmourSlot;
+  /** Fraction of damage blocked on hits to the part it covers, 0 to 1. */
+  protection: number;
+  /** Hits it absorbs before it falls apart. */
+  durability: number;
+}
+
 export interface ItemInfo {
   name: string;
-  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical';
+  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour';
   stack: number;
   description: string;
   tool?: ToolInfo;
   weapon?: WeaponInfo;
   /** Medical items: health restored. */
   heal?: number;
+  armour?: ArmourInfo;
 }
 
 const res = (name: string, description: string): ItemInfo => ({ name, kind: 'resource', stack: 1000, description });
@@ -117,6 +142,13 @@ const melee = (name: string, description: string, damage: number, delay: number,
   stack: 1,
   description,
   weapon: { class: 'melee', damage, delay, range, durability },
+});
+const armour = (name: string, description: string, slot: ArmourSlot, protection: number, durability: number): ItemInfo => ({
+  name,
+  kind: 'armour',
+  stack: 1,
+  description,
+  armour: { slot, protection, durability },
 });
 const gun = (name: string, description: string, weapon: Omit<WeaponInfo, 'class'> & { class?: 'bow' }): ItemInfo => ({
   name,
@@ -251,6 +283,16 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
 
   bandage: { name: 'Bandage', kind: 'medical', stack: 3, heal: 15, description: 'Heals 15 health. Left click to use.' },
   syringe: { name: 'Medical Syringe', kind: 'medical', stack: 2, heal: 35, description: 'Heals 35 health. Left click to use.' },
+
+  burlapHeadwrap: armour('Burlap Headwrap', 'Sacking wound round the head. Better than nothing.', 'head', 0.1, 60),
+  burlapShirt: armour('Burlap Shirt', 'A rough cloth shirt that takes the sting off a hit.', 'chest', 0.1, 60),
+  burlapTrousers: armour('Burlap Trousers', 'Rough cloth trousers, padded at the knees.', 'legs', 0.1, 60),
+  coffeeCanHelmet: armour('Coffee Can Helmet', 'A dented can with a leather strap. Turns a few bullets.', 'head', 0.3, 120),
+  roadsignJacket: armour('Road Sign Jacket', 'Road signs riveted to a jacket. Heavy, loud and it works.', 'chest', 0.3, 120),
+  roadsignKilt: armour('Road Sign Kilt', 'Hammered road signs hung from a belt to guard the legs.', 'legs', 0.3, 120),
+  metalFacemask: armour('Metal Facemask', 'A welded steel face plate. Headshots stop being lucky.', 'head', 0.5, 200),
+  metalChestplate: armour('Metal Chest Plate', 'Thick steel front and back. The best a survivor can wear.', 'chest', 0.5, 200),
+  metalLegPlates: armour('Metal Leg Plates', 'Steel plates strapped over the thighs and shins.', 'legs', 0.45, 200),
 };
 
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -286,7 +328,13 @@ export function newStack(item: ItemId, count = 1): Stack {
 /** Uses before an item breaks, or 0 if it never does. */
 export function maxDurability(item: ItemId): number {
   const info = ITEMS[item];
-  return info.tool?.durability ?? info.weapon?.durability ?? 0;
+  return info.tool?.durability ?? info.weapon?.durability ?? info.armour?.durability ?? 0;
+}
+
+/** Whether an item can be worn in clothing slot `i` (0 head, 1 chest, 2 legs). */
+export function fitsArmourSlot(item: ItemId, i: number): boolean {
+  const a = ITEMS[item].armour;
+  return !!a && ARMOUR_SLOTS[i] === a.slot;
 }
 
 export function countItem(slots: Slots, item: ItemId): number {
@@ -365,8 +413,8 @@ export interface Recipe {
   category: RecipeCategory;
 }
 
-export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Ammo' | 'Medical' | 'Resources';
-export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Ammo', 'Medical', 'Resources'];
+export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Ammo' | 'Armour' | 'Medical' | 'Resources';
+export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Ammo', 'Armour', 'Medical', 'Resources'];
 
 export const RECIPES: Recipe[] = [
   { item: 'rock', count: 1, cost: { stone: 10 }, time: 1, category: 'Tools' },
@@ -409,6 +457,16 @@ export const RECIPES: Recipe[] = [
   { item: 'shotgunShell', count: 2, cost: { metal: 5, gunpowder: 10 }, time: 2, workbench: 1, category: 'Ammo' },
   { item: 'pistolAmmo', count: 4, cost: { metal: 10, gunpowder: 5 }, time: 2, workbench: 1, category: 'Ammo' },
   { item: 'rifleAmmo', count: 3, cost: { metal: 10, gunpowder: 5 }, time: 2, workbench: 2, category: 'Ammo' },
+
+  { item: 'burlapHeadwrap', count: 1, cost: { cloth: 10 }, time: 3, category: 'Armour' },
+  { item: 'burlapShirt', count: 1, cost: { cloth: 15 }, time: 3, category: 'Armour' },
+  { item: 'burlapTrousers', count: 1, cost: { cloth: 15 }, time: 3, category: 'Armour' },
+  { item: 'coffeeCanHelmet', count: 1, cost: { metal: 40, cloth: 10, scrap: 10 }, time: 6, workbench: 1, category: 'Armour' },
+  { item: 'roadsignJacket', count: 1, cost: { metal: 80, cloth: 20, scrap: 30 }, time: 8, workbench: 1, category: 'Armour' },
+  { item: 'roadsignKilt', count: 1, cost: { metal: 60, cloth: 15, scrap: 20 }, time: 8, workbench: 1, category: 'Armour' },
+  { item: 'metalFacemask', count: 1, cost: { hqm: 15, metal: 50, cloth: 10 }, time: 12, workbench: 2, category: 'Armour' },
+  { item: 'metalChestplate', count: 1, cost: { hqm: 25, metal: 100, cloth: 20 }, time: 15, workbench: 2, category: 'Armour' },
+  { item: 'metalLegPlates', count: 1, cost: { hqm: 20, metal: 80, cloth: 15 }, time: 15, workbench: 2, category: 'Armour' },
 
   { item: 'bandage', count: 1, cost: { cloth: 4 }, time: 2, category: 'Medical' },
   { item: 'syringe', count: 1, cost: { cloth: 15, metal: 10 }, time: 4, workbench: 1, category: 'Medical' },

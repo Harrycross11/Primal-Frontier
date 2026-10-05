@@ -490,3 +490,53 @@ test('shotguns fire many pellets; melee weapons hit up close; bandages heal', ()
   assert.equal(knife.target.hp, MAX_HEALTH - 20);
   assert.equal(have(knife.game, knife.b, 'bandage'), 0);
 });
+
+test('armour is worn in its own slot and cuts damage to the part it covers', () => {
+  const { game, a, b, target, shooter } = duel('boltRifle');
+  shooter.slots[2]!.ammo = 4;
+  give(game, b, 'metalChestplate', 1);
+  give(game, b, 'burlapHeadwrap', 1);
+  const plate = target.slots.findIndex((s) => s?.item === 'metalChestplate');
+  // A chest plate will not go on your head; on the chest it fits.
+  game.moveItem(b, { c: 'me', i: plate }, { c: 'wear', i: 0 });
+  assert.equal(target.wear.filter(Boolean).length, 0);
+  game.moveItem(b, { c: 'me', i: plate }, { c: 'wear', i: 1 });
+  assert.equal(target.wear[1]?.item, 'metalChestplate');
+  assert.equal(target.slots[plate], null);
+  // Using armour from the belt puts it on.
+  const wrap = target.slots.findIndex((s) => s?.item === 'burlapHeadwrap');
+  game.use(b, wrap, 1000);
+  assert.equal(target.wear[0]?.item, 'burlapHeadwrap');
+
+  const out = game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(target.hp, MAX_HEALTH - 40, 'the plate stops half of a body shot');
+  assert.ok(out.some((o) => o.msg.t === 'hitmarker' && o.msg.armour));
+  assert.equal(target.wear[1]!.hp, ITEMS.metalChestplate.armour!.durability - 1, 'the plate wears');
+  assert.equal(game.players.get(a)!.slots[2]!.item, 'boltRifle');
+
+  // Legs are not covered.
+  target.hp = MAX_HEALTH;
+  game.fire(a, 2, [10, 0.6 - EYE_HEIGHT, 0], true, 4000);
+  assert.equal(target.hp, MAX_HEALTH - 80, 'leg shot');
+
+  // Others see what you wear.
+  const state = game.tick(5000).find((o) => o.msg.t === 'state')!.msg as { players: { id: number; wear: (ItemId | null)[] }[] };
+  assert.deepEqual(state.players.find((p) => p.id === b)!.wear, ['burlapHeadwrap', 'metalChestplate', null]);
+});
+
+test('worn armour drops in the loot bag and breaks when worn out', () => {
+  const { game, a, b, target, shooter } = duel('l96');
+  shooter.slots[2]!.ammo = 5;
+  target.wear[1] = { item: 'burlapShirt', count: 1, hp: 1 };
+  game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(target.wear[1], null, 'the worn-out shirt fell apart');
+  target.wear[2] = { item: 'roadsignKilt', count: 1, hp: 50 };
+  target.hp = 1;
+  game.fire(a, 2, AT_BODY, true, 4000);
+  assert.equal(target.dead, true);
+  const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
+  assert.ok(bag.slots.some((s) => s?.item === 'roadsignKilt'));
+  assert.deepEqual(target.wear, [null, null, null]);
+  game.respawn(b);
+  assert.deepEqual(target.wear, [null, null, null]);
+});

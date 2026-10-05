@@ -20,11 +20,13 @@ export interface PlayerState {
   held: ItemId | null;
   /** Lying dead, waiting to respawn. */
   dead: boolean;
+  /** Armour worn on the head, chest and legs, so others see it. */
+  wear: (ItemId | null)[];
 }
 
-/** A slot in your own inventory ('me') or in a furnace or box (its id). */
+/** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
 export interface SlotRef {
-  c: 'me' | number;
+  c: 'me' | 'wear' | number;
   i: number;
 }
 
@@ -70,13 +72,15 @@ export type ServerMessage =
       pieces: Piece[];
       deployables: Deployable[];
       slots: Slots;
+      wear: Slots;
       hp: number;
     }
   | { t: 'state'; players: PlayerState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }
   | { t: 'resource'; id: number; amount: number }
-  | { t: 'inventory'; slots: Slots }
+  /** Your inventory and the armour you wear (head, chest, legs). */
+  | { t: 'inventory'; slots: Slots; wear: Slots }
   | { t: 'crafting'; queue: CraftJob[] }
   /** A piece was placed, changed or damaged (piece set), or destroyed (piece null). */
   | { t: 'piece'; key: string; piece: Piece | null; by: number }
@@ -86,10 +90,10 @@ export type ServerMessage =
   | { t: 'notice'; text: string }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
   | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
-  /** You hit someone (for the hit marker). */
-  | { t: 'hitmarker'; head: boolean; kill: boolean }
-  /** Your health changed; `from` is where the damage came from, if anywhere. */
-  | { t: 'health'; hp: number; from?: Vec3 }
+  /** You hit someone (for the hit marker); `armour` when the hit landed on armour. */
+  | { t: 'hitmarker'; head: boolean; kill: boolean; armour?: boolean }
+  /** Your health changed; `from` is where the damage came from, if anywhere, and `armour` if your armour took some of it. */
+  | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
   | { t: 'died'; by: string | null; item: ItemId | null }
   | { t: 'full' };

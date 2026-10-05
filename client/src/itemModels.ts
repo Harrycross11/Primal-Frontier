@@ -7,6 +7,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_KINDS, type DeployableKind } from '../../shared/deployables.ts';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { mulberry32 } from '../../shared/terrain.ts';
+import { buildArmourModel } from './armour.ts';
 import { GUN_LOOKS, buildGun, buildOtherWeapon } from './guns.ts';
 import { buildBoulder, buildDeployable, buildHeldItem } from './props.ts';
 import { barkSurface, clothSurface, concreteSurface, gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
@@ -228,7 +229,7 @@ function resource(item: ItemId): THREE.Object3D | null {
 }
 
 /** The model an item's icon is drawn from, plus how to frame it. */
-export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'side' | 'top' } | null {
+export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'side' | 'top' | 'front' } | null {
   const r = resource(item);
   if (r) return { model: r, view: 'top' };
   if ((DEPLOYABLE_KINDS as readonly string[]).includes(item)) return { model: buildDeployable(item as DeployableKind), view: 'top' };
@@ -247,6 +248,12 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
       if (item === 'crossbow') w.rotation.set(-0.6, 0, 1.2);
       return { model: wrap(w), view: item === 'bandage' ? 'top' : 'side' };
     }
+  }
+  const armour = buildArmourModel(item);
+  if (armour) {
+    // Seen from the front and a little to the side, like clothing laid out for sale.
+    armour.rotation.y = -0.55;
+    return { model: wrap(armour), view: 'front' };
   }
   const held = buildHeldItem(item);
   if (held) {

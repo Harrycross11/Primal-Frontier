@@ -4,6 +4,7 @@
 
 import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
+  ARMOUR_SLOTS,
   BELT_SIZE,
   ITEMS,
   RECIPES,
@@ -32,6 +33,8 @@ export interface InventoryActions {
 
 export class InventoryUi {
   slots: Slots = [];
+  /** Armour worn on the head, chest and legs. */
+  wear: Slots = [null, null, null];
   active = 0;
   container: Deployable | null = null;
   /** Level of the best workbench in reach, or 0. */
@@ -102,6 +105,7 @@ export class InventoryUi {
     if (!this.open) return;
     this.renderGrid($('backpack'), 'me', BELT_SIZE, this.slots.length);
     this.renderGrid($('belt-grid'), 'me', 0, BELT_SIZE);
+    this.renderWear();
     this.renderContainer();
     this.renderCrafting();
   }
@@ -121,6 +125,7 @@ export class InventoryUi {
 
   private stackAt(ref: SlotRef): Stack | null {
     if (ref.c === 'me') return this.slots[ref.i] ?? null;
+    if (ref.c === 'wear') return this.wear[ref.i] ?? null;
     return this.container?.id === ref.c ? (this.container.slots[ref.i] ?? null) : null;
   }
 
@@ -146,6 +151,21 @@ export class InventoryUi {
   private renderGrid(el: HTMLElement, c: SlotRef['c'], from: number, to: number) {
     el.innerHTML = '';
     for (let i = from; i < to; i++) el.appendChild(this.slotElement({ c, i }, this.slots[i] ?? null, true));
+  }
+
+  private renderWear() {
+    const grid = $('wear-grid');
+    grid.innerHTML = '';
+    ARMOUR_SLOTS.forEach((part, i) => {
+      const el = this.slotElement({ c: 'wear', i }, this.wear[i] ?? null, true);
+      el.classList.add('wear-slot');
+      el.dataset.label = part;
+      grid.appendChild(el);
+    });
+    $('armour-total').textContent = ARMOUR_SLOTS.map((part, i) => {
+      const a = this.wear[i] ? ITEMS[this.wear[i]!.item].armour : undefined;
+      return `${part[0].toUpperCase()}${part.slice(1)} ${Math.round((a?.protection ?? 0) * 100)}%`;
+    }).join(' · ') + ' protection';
   }
 
   private renderContainer() {
@@ -289,11 +309,21 @@ export class InventoryUi {
     return el;
   }
 
-  /** Right click: send a stack to the open container, or between belt and backpack. */
+  /**
+   * Right click: send a stack to the open container, put armour on or take it off, or move
+   * between belt and backpack.
+   */
   private quickMove(from: SlotRef, stack: Stack) {
     const d = this.container && this.container.slots.length > 0 ? this.container : null;
+    const armour = ITEMS[stack.item].armour;
     let to: SlotRef | null = null;
-    if (from.c === 'me' && d) {
+    if (from.c === 'me' && !d && armour) {
+      to = { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) };
+    } else if (from.c === 'wear') {
+      const i = this.bestSlot(this.slots, stack, (n) => n >= BELT_SIZE);
+      const j = i >= 0 ? i : this.bestSlot(this.slots, stack, () => true);
+      if (j >= 0) to = { c: 'me', i: j };
+    } else if (from.c === 'me' && d) {
       const i = this.bestSlot(d.slots, stack, (n) => slotAccepts(d, n, stack.item));
       if (i >= 0) to = { c: d.id, i };
     } else {
@@ -316,6 +346,8 @@ export class InventoryUi {
 
 /** Damage, fire rate and magazine for weapons, shown in tooltips and the crafting menu. */
 function statsText(item: ItemId): string {
+  const a = ITEMS[item].armour;
+  if (a) return `<div class="stats">Worn on the ${a.slot} · Blocks ${Math.round(a.protection * 100)}% of damage there · Right click to wear</div>`;
   const w = ITEMS[item].weapon;
   if (!w || ITEMS[item].kind !== 'weapon') return ITEMS[item].heal ? `<div class="stats">Heals ${ITEMS[item].heal}</div>` : '';
   const dmg = w.pellets ? `${w.damage} × ${w.pellets} pellets` : `${w.damage}`;

@@ -46,6 +46,7 @@ import {
   type DeployableKind,
 } from '../shared/deployables.ts';
 import {
+  ARMOUR_SLOTS,
   BELT_SIZE,
   INVENTORY_SIZE,
   ITEMS,
@@ -53,6 +54,7 @@ import {
   canAfford,
   countItem,
   emptySlots,
+  fitsArmourSlot,
   maxDurability,
   recipeFor,
   removeItem,
@@ -61,12 +63,14 @@ import {
   type Slots,
   type Stack,
 } from '../shared/items.ts';
+import type { ArmourSlot } from '../shared/items.ts';
 import {
   EYE_HEIGHT,
   FIST,
   HEADSHOT,
   HEAL_COOLDOWN,
   MAX_HEALTH,
+  armourFactor,
   falloff,
   normalize,
   rayBox,
@@ -83,8 +87,10 @@ export type Outgoing =
   | { to: 'all'; msg: ServerMessage }
   | { to: 'others'; except: number; msg: ServerMessage };
 
-interface Player extends Omit<PlayerState, 'held'> {
+interface Player extends Omit<PlayerState, 'held' | 'wear'> {
   slots: Slots;
+  /** Armour worn on the head, chest and legs. */
+  wear: Slots;
   /** Belt slot in their hands. */
   active: number;
   queue: CraftJob[];
@@ -164,6 +170,7 @@ export class Game {
       moving: false,
       dead: false,
       slots,
+      wear: emptySlots(ARMOUR_SLOTS.length),
       active: 0,
       hp: MAX_HEALTH,
       nextAttackAt: 0,
@@ -191,6 +198,7 @@ export class Game {
             pieces: [...this.pieces.values()],
             deployables: [...this.deployables.values()],
             slots: clone(slots),
+            wear: clone(player.wear),
             hp: player.hp,
           },
         },
@@ -388,6 +396,7 @@ export class Game {
     const a = src.slots[from.i];
     if (!a) return [];
     if (dst.deployable && !slotAccepts(dst.deployable, to.i, a.item)) return [notice(id, "That can't go there")];
+    if (dst.wear && !fitsArmourSlot(a.item, to.i)) return [notice(id, ITEMS[a.item].armour ? `That is worn on the ${ITEMS[a.item].armour!.slot}` : 'Only armour can be worn')];
     const n = Number.isInteger(count) && count! > 0 ? Math.min(count!, a.count) : a.count;
     const b = dst.slots[to.i];
     const stackMax = ITEMS[a.item].stack;
@@ -403,6 +412,7 @@ export class Game {
     } else {
       if (n !== a.count) return [];
       if (src.deployable && !slotAccepts(src.deployable, from.i, b.item)) return [notice(id, "That can't go there")];
+      if (src.wear && !fitsArmourSlot(b.item, from.i)) return [notice(id, "That can't go there")];
       src.slots[from.i] = b;
       dst.slots[to.i] = a;
     }
@@ -469,21 +479,22 @@ export class Game {
     const d = normalize(dir);
     const cone = (w.spread ?? 0) * (aim ? 0.5 : 1) * (p.moving ? 1.6 : 1);
     const ends: Vec3[] = [];
-    const damage = new Map<Player, { amount: number; head: boolean }>();
+    const damage = new Map<Player, { amount: number; head: boolean; zones: Set<ArmourSlot> }>();
     for (let n = 0; n < (w.pellets ?? 1); n++) {
       const pd = spreadDir(d, cone, this.rand);
       const hit = this.trace(p, from, pd, w.range);
       ends.push([from[0] + pd[0] * hit.t, from[1] + pd[1] * hit.t, from[2] + pd[2] * hit.t]);
       if (!hit.player) continue;
-      const amount = w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1);
-      const sum = damage.get(hit.player) ?? { amount: 0, head: false };
+      const amount = w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1) * armourFactor(hit.player.wear, hit.zone);
+      const sum = damage.get(hit.player) ?? { amount: 0, head: false, zones: new Set() };
       sum.amount += amount;
       sum.head ||= hit.head;
+      sum.zones.add(hit.zone);
       damage.set(hit.player, sum);
     }
     const out: Outgoing[] = [{ to: 'all', msg: { t: 'shot', by: id, item: stack.item, from, ends } }];
     out.push(...this.wear(p, slot));
-    for (const [victim, { amount, head }] of damage) out.push(...this.damage(victim, amount, p, stack.item, head));
+    for (const [victim, { amount, head, zones }] of damage) out.push(...this.damage(victim, amount, p, stack.item, head, zones));
     out.push(this.inventory(p));
     return out;
   }
@@ -521,7 +532,8 @@ export class Game {
     const hit = this.trace(p, from, normalize(dir), w.range + 0.6);
     if (!hit.player) return [];
     const out = this.wear(p, slot);
-    out.push(...this.damage(hit.player, w.damage * (hit.head ? 1.5 : 1), p, stack?.item ?? null, hit.head));
+    const amount = w.damage * (hit.head ? 1.5 : 1) * armourFactor(hit.player.wear, hit.zone);
+    out.push(...this.damage(hit.player, amount, p, stack?.item ?? null, hit.head, new Set([hit.zone])));
     if (stack) out.push(this.inventory(p));
     return out;
   }
@@ -531,6 +543,9 @@ export class Game {
     const p = this.alive(id);
     if (!p || !isBeltSlot(slot)) return [];
     const stack = p.slots[slot];
+    // Armour in your hands is put on, swapping with whatever was worn there.
+    const armour = stack ? ITEMS[stack.item].armour : undefined;
+    if (armour) return this.moveItem(id, { c: 'me', i: slot }, { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) });
     const heal = stack ? ITEMS[stack.item].heal : undefined;
     if (!stack || !heal) return [];
     if ((now - p.lastHealAt) / 1000 < HEAL_COOLDOWN) return [];
@@ -553,6 +568,7 @@ export class Game {
     p.dead = false;
     p.hp = MAX_HEALTH;
     p.slots = starterSlots();
+    p.wear = emptySlots(ARMOUR_SLOTS.length);
     p.active = 0;
     p.reloadUntil = 0;
     return [
@@ -566,7 +582,7 @@ export class Game {
    * Follows a ray until it hits a player, or is stopped by a building piece, a deployable or
    * the ground. Returns how far it went.
    */
-  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; head: boolean } {
+  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; head: boolean; zone: ArmourSlot } {
     let t = range;
     for (const piece of this.pieces.values()) {
       for (const b of pieceBoxes(piece)) {
@@ -580,11 +596,11 @@ export class Game {
     }
     const ground = rayTerrain(this.seed, o, d, t);
     if (ground !== null) t = ground;
-    let best: { t: number; player?: Player; head: boolean } = { t, head: false };
+    let best: { t: number; player?: Player; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
     for (const other of this.players.values()) {
       if (other === shooter || other.dead) continue;
       const hit = rayPlayer(o, d, other, best.t);
-      if (hit) best = { t: hit.t, player: other, head: hit.head };
+      if (hit) best = { t: hit.t, player: other, head: hit.head, zone: hit.zone };
     }
     return best;
   }
@@ -599,14 +615,33 @@ export class Game {
     return [notice(p.id, `Your ${ITEMS[stack.item].name} broke`), this.inventory(p)];
   }
 
-  private damage(victim: Player, amount: number, by: Player, item: ItemId | null, head: boolean): Outgoing[] {
+  /** Applies damage (already reduced by armour) and wears down the armour on each part hit. */
+  private damage(victim: Player, amount: number, by: Player, item: ItemId | null, head: boolean, zones: Set<ArmourSlot>): Outgoing[] {
     victim.hp = Math.max(0, victim.hp - amount);
     const kill = victim.hp <= 0;
+    const armour = [...zones].some((z) => victim.wear[ARMOUR_SLOTS.indexOf(z)]);
     const out: Outgoing[] = [
-      { to: by.id, msg: { t: 'hitmarker', head, kill } },
-      { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z] } },
+      { to: by.id, msg: { t: 'hitmarker', head, kill, armour } },
+      { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z], armour } },
     ];
-    if (kill) out.push(...this.kill(victim, by, item));
+    if (kill) return [...out, ...this.kill(victim, by, item)];
+    if (armour) out.push(...this.wearArmour(victim, zones));
+    return out;
+  }
+
+  /** Each armour piece that took a hit loses one point of condition, and falls apart at zero. */
+  private wearArmour(p: Player, zones: Set<ArmourSlot>): Outgoing[] {
+    const out: Outgoing[] = [];
+    for (const zone of zones) {
+      const i = ARMOUR_SLOTS.indexOf(zone);
+      const piece = p.wear[i];
+      if (!piece || piece.hp === undefined) continue;
+      piece.hp -= 1;
+      if (piece.hp > 0) continue;
+      p.wear[i] = null;
+      out.push(notice(p.id, `Your ${ITEMS[piece.item].name} fell apart`));
+    }
+    out.push(this.inventory(p));
     return out;
   }
 
@@ -620,15 +655,18 @@ export class Game {
     victim.dead = true;
     victim.hp = 0;
     const out: Outgoing[] = [];
-    if (victim.slots.some(Boolean)) {
+    // Worn armour goes in the bag too, after the inventory.
+    const carried = [...victim.slots, ...victim.wear];
+    if (carried.some(Boolean)) {
       const bag = newDeployable(this.nextDeployableId++, 'lootBag', victim.x, victim.y, victim.z, victim.yaw, 0);
-      bag.slots = victim.slots;
+      bag.slots = carried;
       bag.label = victim.name;
       this.deployables.set(bag.id, bag);
       this.bagExpiry.set(bag.id, LOOT_BAG_SECONDS);
       out.push({ to: 'all', msg: { t: 'deployable', id: bag.id, d: bag, by: 0 } });
     }
     victim.slots = emptySlots(INVENTORY_SIZE);
+    victim.wear = emptySlots(ARMOUR_SLOTS.length);
     const how = item ? ` with ${ITEMS[item].name.replace(/^an? /i, '')}` : '';
     const text = by ? `${by.name} killed ${victim.name}${how}` : `${victim.name} died`;
     out.push(
@@ -743,8 +781,10 @@ export class Game {
   }
 
   /** Your inventory, or a furnace or box you are close enough to use. */
-  private container(p: Player, c: SlotRef['c']): { slots: Slots; deployable: Deployable | null } | null {
+  private container(p: Player, c: SlotRef['c']): { slots: Slots; deployable: Deployable | null; wear?: boolean } | null {
     if (c === 'me') return { slots: p.slots, deployable: null };
+    if (c === 'wear') return { slots: p.wear, deployable: null, wear: true };
+    if (typeof c !== 'number') return null;
     const d = this.deployables.get(c);
     if (!d || d.slots.length === 0) return null;
     const b = deployableBox(d);
@@ -777,7 +817,7 @@ export class Game {
   }
 
   private inventory(p: Player): Outgoing {
-    return { to: p.id, msg: { t: 'inventory', slots: clone(p.slots) } };
+    return { to: p.id, msg: { t: 'inventory', slots: clone(p.slots), wear: clone(p.wear) } };
   }
 
   private crafting(p: Player): Outgoing {
@@ -793,7 +833,19 @@ export class Game {
 }
 
 function publicState(p: Player): PlayerState {
-  return { id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, z: p.z, yaw: p.yaw, moving: p.moving, held: p.dead ? null : (p.slots[p.active]?.item ?? null), dead: p.dead };
+  return {
+    id: p.id,
+    name: p.name,
+    color: p.color,
+    x: p.x,
+    y: p.y,
+    z: p.z,
+    yaw: p.yaw,
+    moving: p.moving,
+    held: p.dead ? null : (p.slots[p.active]?.item ?? null),
+    dead: p.dead,
+    wear: p.wear.map((s) => s?.item ?? null),
+  };
 }
 
 /** Like Rust, everyone starts with a rock. A building plan comes free too, so you can build at once. */

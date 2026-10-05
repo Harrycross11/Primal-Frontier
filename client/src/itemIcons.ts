@@ -56,10 +56,11 @@ export function itemIconUrl(item: ItemId): string | null {
   const centre = box.getCenter(new THREE.Vector3());
   const sphere = box.getBoundingSphere(new THREE.Sphere());
   // Side views look at the left side of the model (+z to the right), a little from above
-  // and in front; top views look down at a three-quarter angle.
-  const dir = view === 'side' ? new THREE.Vector3(-1, 0.32, 0.28) : new THREE.Vector3(-0.75, 0.85, 1);
+  // and in front; top views look down at a three-quarter angle;
+  // front views look at the front (+z) from slightly above.
+  const dir = view === 'side' ? new THREE.Vector3(-1, 0.32, 0.28) : view === 'front' ? new THREE.Vector3(0, 0.35, 1) : new THREE.Vector3(-0.75, 0.85, 1);
   dir.normalize();
-  const fit = view === 'side' ? 0.66 : 0.8;
+  const fit = view === 'side' ? 0.66 : view === 'front' ? 0.72 : 0.8;
   const dist = (sphere.radius * fit) / Math.sin(THREE.MathUtils.degToRad(s.camera.fov / 2));
   s.camera.position.copy(centre).addScaledVector(dir, dist);
   s.camera.lookAt(centre);

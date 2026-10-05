@@ -2,7 +2,7 @@
 
 A survival sandbox set in a world after a nuclear apocalypse. Players join a server, scavenge a barren map for wood, stone, scrap, ores and hemp, craft tools and guns, build, and fight. The full vision is Rust-style survival with ARK-style creatures, Minecraft-style building and Fortnite-style characters on servers that wipe every 30 days.
 
-This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build**, **better graphics with Fortnite-style building**, **Rust-style crafting** and **Rust-style weapons**.
+This repository is the **browser prototype**, built step by step. Milestones done: **walk, gather, build**, **better graphics with Fortnite-style building**, **Rust-style crafting**, **Rust-style weapons** and **armour with punchier combat sounds**.
 
 ![A rusted car against the low sun, with light scattering through the dust](docs/screenshots/realism-car.png)
 
@@ -21,6 +21,8 @@ This repository is the **browser prototype**, built step by step. Milestones don
 - Crafting (Tab): a queue that crafts over time and refunds when cancelled. Stone hatchets and pickaxes gather much faster than the rock; salvaged tools are faster again but need a workbench nearby. Tools wear out and break.
 - Deployables: workbenches (levels 1, 2 and 3), a furnace that burns wood into charcoal while smelting metal, sulfur and high quality ore, and a 12-slot storage box. Hit one to pick it back up.
 - Weapons, Rust-style: spears, a machete and a salvaged sword; the hunting bow and crossbow; the Eoka, waterpipe, revolver and double barrel; the semi-auto pistol, pump shotgun, Thompson, custom SMG and semi-auto rifle (workbench 2); the MP5, assault rifle, LR-300, bolt action rifle, L96 and M249 (workbench 3). Five ammo types are crafted from gunpowder (charcoal and sulfur). Guns have magazines, reloads, recoil, spread, damage falloff and headshots; scoped rifles zoom right in.
+- Armour: burlap (cloth), road sign (workbench 1) and welded metal (workbench 2) pieces for the head, chest and legs. Each blocks a share of the damage on the part it covers (10%, 30% and 45-50%), wears down as it takes hits and shows on your survivor. Wear it from the Armour row in the inventory, by right clicking it, or by left clicking it on your belt. Worn armour goes in your loot bag when you die.
+- Sound: every gun has its own synthesised shot, layered from a supersonic crack, a low punch and the blast's body, with an echo that takes over at range and stereo panning. Bolt rifles cycle their bolt, the pump shotgun racks, reloads click, and hits thud, ping off helmets and clank on your own armour.
 - Combat: 100 health, bandages and syringes to heal. Dying drops everything in a loot bag anyone can open, and you respawn with a rock. The server traces every shot, so walls and the ground stop bullets.
 - Fortnite-style building on a 3 m grid with the building plan in hand: walls, floors and stairs in wood, stone or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
@@ -76,6 +78,6 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Armour, and survival needs: hunger, thirst, radiation zones
+1. Survival needs: hunger, thirst, radiation zones
 2. The first creature: a mutated Ashhound that can be tamed and ridden
 3. Saving the world to disk and the 30-day wipe cycle

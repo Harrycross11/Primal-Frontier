@@ -129,6 +129,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     furnace: (id, on) => net.send({ t: 'furnace', id, on }),
   });
   ui.slots = slots;
+  ui.wear = welcome.wear;
   ui.render();
   const refreshPlayers = () => hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => r.state.name)]);
   refreshPlayers();
@@ -166,6 +167,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'inventory':
         slots = m.slots;
         ui.slots = slots;
+        ui.wear = m.wear;
         ui.render();
         break;
       case 'crafting':
@@ -195,16 +197,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         if (shooter && shooter !== me) {
           shooter.recoil();
           effects.muzzle(muzzle, m.item);
-          effects.sound(m.item, muzzle.distanceTo(controller.position));
+          effects.sound(m.item, muzzle.distanceTo(controller.position), panOf(muzzle));
         }
         break;
       }
       case 'hitmarker':
         hud.hitmarker(m.head);
-        effects.hitSound(m.head);
+        effects.hitSound(m.head, m.kill, m.armour);
         break;
       case 'health':
-        if (m.hp < hp) hud.hurt();
+        if (m.hp < hp) {
+          hud.hurt();
+          if (m.from) effects.hurtSound(!!m.armour);
+        }
         hp = m.hp;
         hud.setHealth(hp);
         if (dead && hp > 0) {
@@ -332,6 +337,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     return o.clone().addScaledVector(d, t);
   }
 
+  /** Where a sound sits left to right of the camera, -1 to 1. */
+  function panOf(at: THREE.Vector3): number {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const to = at.clone().sub(camera.position).normalize();
+    return to.dot(right) * 0.8;
+  }
+
   function dirTo(target: THREE.Vector3): Vec3 {
     const d = target.sub(controller.eye).normalize();
     return [d.x, d.y, d.z];
@@ -346,6 +358,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (now < reloadingUntil || now - lastAttack < w.delay * 1000) return;
     if (!stack.ammo) {
       triggerHeld = false;
+      if (countItem(slots, w.ammo!) === 0) effects.dryFire();
       return reload();
     }
     lastAttack = now;
@@ -371,6 +384,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     net.send({ t: 'reload', slot: ui.active });
     reloadingUntil = performance.now() + (w.reload ?? 1) * 1000;
     me.reloadAnim(w.reload ?? 1);
+    if (w.class === 'gun') effects.reloadSound(w.reload ?? 1);
   }
 
   /** Swing whatever is in your hands (or your fists) at whoever is in front of you. */
@@ -449,6 +463,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   function primary() {
     const item = held();
     if (heldGun()) return fire();
+    if (item && ITEMS[item].armour) return net.send({ t: 'use', slot: ui.active });
     if (item && ITEMS[item].heal) {
       net.send({ t: 'use', slot: ui.active });
       me.swing();
@@ -711,6 +726,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
     me.setHeld(dead ? null : held());
+    me.setWear(ui.wear.map((s) => s?.item ?? null));
     me.aimPitch = controller.pitch;
     me.update(dt, controller.moving && !dead);
     // Aiming down sights: zoom in over the shoulder, or look through the scope.
@@ -744,6 +760,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.root.rotation.y = r.state.yaw + Math.PI;
       r.avatar.setHeld(r.state.held);
       r.avatar.setDead(r.state.dead);
+      r.avatar.setWear(r.state.wear ?? []);
       r.avatar.update(dt, r.state.moving);
     }
 
