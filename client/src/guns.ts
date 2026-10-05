@@ -5,8 +5,9 @@
 // Model space: the grip is at the origin, the barrel points along +z, up is +y. Metres.
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { ItemId } from '../../shared/items.ts';
-import { metalSurface, plankSurface, rustSurface } from './textures.ts';
+import { gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 type Finish = 'black' | 'rust' | 'scrap' | 'steel';
 type Stock = 'none' | 'wood' | 'solid' | 'skeleton' | 'pipe';
@@ -66,10 +67,11 @@ const finishMat = (f: Finish) =>
   mat(`gun-${f}`, () =>
     f === 'rust' || f === 'scrap'
       ? new THREE.MeshStandardMaterial({ ...rustSurface(f === 'rust' ? '#6a5a4c' : '#6a6a64'), color: FINISH_COLORS[f], roughness: 0.6, metalness: 0.6 })
-      : new THREE.MeshStandardMaterial({ ...metalSurface(), color: FINISH_COLORS[f], roughness: f === 'black' ? 0.55 : 0.4, metalness: 0.75 }),
+      : new THREE.MeshStandardMaterial({ ...gunMetalSurface(), color: FINISH_COLORS[f], roughness: f === 'black' ? 0.5 : 0.38, metalness: 0.8 }),
   );
-const woodMat = () => mat('gun-wood', () => new THREE.MeshStandardMaterial({ ...plankSurface(), color: 0xa0704a, roughness: 0.7 }));
-const darkMat = () => mat('gun-dark', () => new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.7, metalness: 0.3 }));
+const woodMat = () => mat('gun-wood', () => new THREE.MeshStandardMaterial({ ...woodGrainSurface(), color: 0xc08a60, roughness: 0.55 }));
+/** Black polymer furniture, slightly textured. */
+const darkMat = () => mat('gun-dark', () => new THREE.MeshStandardMaterial({ ...gunMetalSurface(), color: 0x2a2a2a, roughness: 0.68, metalness: 0.15 }));
 const glassMat = () => mat('gun-glass', () => new THREE.MeshStandardMaterial({ color: 0x223844, roughness: 0.1, metalness: 0.5 }));
 const clothMat = () => mat('gun-cloth', () => new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 1 }));
 const stoneMat = () => mat('gun-stone', () => new THREE.MeshStandardMaterial({ color: 0x8f8a80, roughness: 1, flatShading: true }));
@@ -83,7 +85,19 @@ function part(g: THREE.Object3D, geo: THREE.BufferGeometry, m: THREE.Material, x
   return mesh;
 }
 
-const box = (w: number, h: number, l: number) => new THREE.BoxGeometry(w, h, l);
+/** Boxes with softly rounded edges, so every edge catches a highlight the way machined parts do. */
+const box = (w: number, h: number, l: number) => new RoundedBoxGeometry(w, h, l, 2, Math.min(w, h, l) * 0.22);
+/** A flat 2D profile in the (z, y) plane, extruded sideways to a width, with bevelled edges. */
+function profile(points: [number, number][], width: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape(points.map(([z, y]) => new THREE.Vector2(z, y)));
+  const bevel = Math.min(0.006, width * 0.2);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: width - bevel * 2, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, curveSegments: 8 });
+  geo.translate(0, 0, -(width - bevel * 2) / 2);
+  // Shape x becomes model z; the extrusion becomes model x.
+  geo.rotateY(-Math.PI / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
 /** A cylinder lying along z. */
 const tube = (r: number, len: number, seg = 10) => new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2);
 
@@ -124,15 +138,43 @@ export function buildGun(item: ItemId): THREE.Group | null {
   }
   if (look.wood) part(g, box(w * 1.05, h * 0.55, look.barrel * 0.55), woodMat(), 0, midY - h * 0.15, front + look.barrel * 0.28);
   if (look.pump) part(g, tube(look.bore * 1.8, 0.14), woodMat(), 0, barrelY - look.bore * 2.5, front + look.barrel * 0.3);
-  // Front sight.
+  // Front sight, and a rear sight or a top rail.
   part(g, box(0.006, 0.02, 0.01), metal, 0, barrelY + look.bore + 0.008, front + look.barrel - 0.02);
+  if (look.shroud && look.finish === 'black') {
+    part(g, box(w * 0.55, 0.008, len * 0.9), darkMat(), 0, top + 0.034, back + len / 2);
+    for (let z = back + 0.02; z < front - 0.01; z += 0.018) part(g, box(w * 0.62, 0.007, 0.008), darkMat(), 0, top + 0.041, z);
+  } else if (!look.scope) {
+    part(g, box(w * 0.5, 0.016, 0.012), metal, 0, top + 0.036, back + 0.03);
+  }
+  // Ejection port on the right, trigger inside the guard, and a muzzle device on long guns.
+  part(g, box(0.004, h * 0.32, len * 0.22), darkMat(), w / 2 + 0.001, midY + h * 0.12, back + len * 0.55);
+  part(g, box(0.006, 0.026, 0.008), metal, 0, 0.022, 0.032, 0.35);
+  if (!look.pistol && !look.double && look.mag !== 'none') {
+    part(g, tube(look.bore * 1.7, 0.045, 10), darkMat(), 0, barrelY, front + look.barrel + 0.02);
+  }
+  // Rivets and screws on the receiver side.
+  for (const z of [back + 0.03, front - 0.03]) part(g, tube(0.004, 0.004, 6).rotateY(Math.PI / 2), metal, w / 2 + 0.002, midY - h * 0.2, z);
 
   // Stock.
   const stockZ = back - look.stockLength / 2;
-  if (look.stock === 'wood') {
-    part(g, box(w * 0.9, h * 1.2, look.stockLength), woodMat(), 0, midY - h * 0.25, stockZ, 0.12);
-  } else if (look.stock === 'solid') {
-    part(g, box(w * 0.9, h * 1.1, look.stockLength), darkMat(), 0, midY - h * 0.2, stockZ, 0.08);
+  if (look.stock === 'wood' || look.stock === 'solid') {
+    // A real stock profile: slim at the wrist behind the receiver, dropping to a deep butt.
+    const L = look.stockLength;
+    const top = midY + h * 0.45;
+    const wrist = midY - h * 0.35;
+    const drop = look.stock === 'wood' ? h * 0.35 : h * 0.15;
+    const shape: [number, number][] = [
+      [back + 0.01, top],
+      [back - L * 0.35, top - drop * 0.4],
+      [back - L, top - drop],
+      [back - L, top - drop - h * 1.55],
+      [back - L * 0.55, wrist - h * 0.55],
+      [back - L * 0.25, wrist - h * 0.1],
+      [back + 0.01, wrist],
+    ];
+    part(g, profile(shape, w * 0.85), look.stock === 'wood' ? woodMat() : darkMat(), 0, 0, 0);
+    // Rubber butt pad.
+    part(g, box(w * 0.9, h * 1.55, 0.015), darkMat(), 0, top - drop - h * 0.78, back - L - 0.004);
   } else if (look.stock === 'skeleton') {
     part(g, box(0.012, 0.012, look.stockLength), metal, 0, midY + h * 0.25, stockZ);
     part(g, box(0.012, 0.012, look.stockLength), metal, 0, midY - h * 0.35, stockZ, -0.1);
@@ -146,7 +188,17 @@ export function buildGun(item: ItemId): THREE.Group | null {
   const magZ = look.pistol ? 0 : back + len * 0.55;
   if (look.mag === 'box') part(g, box(w * 0.7, 0.14, 0.05), darkMat(), 0, -0.05, magZ, 0.08);
   else if (look.mag === 'curved') {
-    for (let s = 0; s < 3; s++) part(g, box(w * 0.7, 0.07, 0.05), darkMat(), 0, -0.01 - s * 0.055, magZ + s * 0.02, 0.18 + s * 0.12);
+    // A banana magazine, curving forward as it drops.
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      pts.push([magZ - 0.025 + t * t * 0.07, 0.03 - t * 0.17]);
+    }
+    for (let i = 6; i >= 0; i--) {
+      const t = i / 6;
+      pts.push([magZ + 0.028 + t * t * 0.085, 0.03 - t * 0.16]);
+    }
+    part(g, profile(pts, w * 0.62), look.finish === 'black' ? darkMat() : finishMat('steel'), 0, 0, 0);
   } else if (look.mag === 'drum') part(g, new THREE.CylinderGeometry(0.08, 0.08, w * 1.1, 16).rotateZ(Math.PI / 2), darkMat(), 0, -0.07, magZ);
   else if (look.mag === 'tube') part(g, tube(look.bore * 0.9, look.barrel * 0.85), metal, 0, barrelY - look.bore * 2.2, front + look.barrel * 0.43);
   else if (look.mag === 'belt') part(g, box(0.1, 0.12, 0.14), darkMat(), w * 0.6 + 0.04, midY - 0.05, magZ);
@@ -190,31 +242,65 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
           ? [new THREE.Vector3(-limbR * 0.72, 0.02, 0.32), new THREE.Vector3(0, 0.02, 0.05), new THREE.Vector3(limbR * 0.72, 0.02, 0.32)]
           : [new THREE.Vector3(0, limbR * 0.81 + 0.02, -0.05), new THREE.Vector3(0, 0.02, -0.12), new THREE.Vector3(0, -limbR * 0.81 + 0.02, -0.05)],
       );
-      g.add(new THREE.Line(string, new THREE.LineBasicMaterial({ color: 0xd8d0bc })));
+      // The string as thin cords, so it has thickness and catches light.
+      const pts: THREE.Vector3[] = [];
+      const pos = string.attributes.position;
+      for (let i = 0; i < pos.count; i++) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i));
+      const cord = mat('bowstring', () => new THREE.MeshStandardMaterial({ color: 0xd8d0bc, roughness: 0.8 }));
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const d = pts[i + 1].clone().sub(pts[i]);
+        const c = part(g, new THREE.CylinderGeometry(0.0025, 0.0025, d.length(), 5), cord, 0, 0, 0);
+        c.position.copy(pts[i]).addScaledVector(d, 0.5);
+        c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+      }
+      if (cross) {
+        // Trigger housing, a stirrup at the front and a loaded bolt.
+        part(g, box(0.05, 0.06, 0.08), finishMat('scrap'), 0, 0.0, 0.05);
+        part(g, new THREE.TorusGeometry(0.05, 0.006, 5, 12, Math.PI).rotateX(Math.PI / 2), finishMat('scrap'), 0, 0.03, 0.47);
+        part(g, tube(0.005, 0.38, 6), wood, 0, 0.055, 0.25);
+      }
       return g;
     }
     case 'woodenSpear':
-    case 'stoneSpear':
-      part(g, tube(0.016, 1.8, 6), wood, 0, 0, 0.35);
-      if (item === 'stoneSpear') part(g, new THREE.ConeGeometry(0.035, 0.16, 5).rotateX(Math.PI / 2), stoneMat(), 0, 0, 1.3);
-      else part(g, new THREE.ConeGeometry(0.018, 0.12, 6).rotateX(Math.PI / 2), wood, 0, 0, 1.31);
+    case 'stoneSpear': {
+      part(g, tube(0.016, 1.8, 8), wood, 0, 0, 0.35);
+      if (item === 'stoneSpear') {
+        // A knapped leaf-shaped point, lashed into a split in the shaft.
+        part(g, profile([[1.22, 0], [1.3, 0.035], [1.42, 0], [1.3, -0.035]], 0.014), stoneMat(), 0, 0, 0);
+        for (let z = 1.17; z < 1.25; z += 0.012) part(g, new THREE.TorusGeometry(0.018, 0.005, 4, 10), clothMat(), 0, 0, z);
+      } else part(g, new THREE.ConeGeometry(0.016, 0.16, 8).rotateX(Math.PI / 2), mat('spear-tip', () => new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.9 })), 0, 0, 1.33);
+      for (let z = -0.05; z < 0.1; z += 0.012) part(g, new THREE.TorusGeometry(0.018, 0.005, 4, 10), clothMat(), 0, 0, z);
       return g;
-    case 'machete':
-      part(g, box(0.03, 0.035, 0.12), darkMat(), 0, 0, 0);
-      part(g, box(0.006, 0.05, 0.45), finishMat('steel'), 0, 0.01, 0.28);
+    }
+    case 'machete': {
+      // A broad blade swelling toward a clipped tip, with a riveted grip.
+      part(g, box(0.026, 0.034, 0.13), darkMat(), 0, 0, 0);
+      for (const z of [-0.03, 0.03]) part(g, tube(0.005, 0.03, 6).rotateY(Math.PI / 2), finishMat('steel'), 0, 0, z);
+      part(g, profile([[0.06, 0.012], [0.07, 0.022], [0.42, 0.034], [0.5, 0.02], [0.52, -0.01], [0.46, -0.028], [0.07, -0.018], [0.06, -0.012]], 0.004), finishMat('steel'), 0, 0.006, 0);
       return g;
-    case 'salvagedSword':
+    }
+    case 'salvagedSword': {
+      // A blade cut from a road sign or leaf spring: rusty, ragged and wrapped in cloth.
       part(g, box(0.03, 0.035, 0.14), clothMat(), 0, 0, 0);
-      part(g, box(0.1, 0.03, 0.02), finishMat('scrap'), 0, 0, 0.08);
-      part(g, box(0.008, 0.07, 0.65), finishMat('rust'), 0, 0.005, 0.42);
+      part(g, box(0.12, 0.028, 0.025), finishMat('scrap'), 0, 0, 0.08);
+      part(g, profile([[0.09, 0.03], [0.6, 0.03], [0.74, 0.0], [0.62, -0.035], [0.09, -0.035]], 0.007), finishMat('rust'), 0, 0.005, 0);
+      for (let z = -0.06; z < 0.07; z += 0.014) part(g, new THREE.TorusGeometry(0.022, 0.005, 4, 10), clothMat(), 0, 0, z).scale.set(0.8, 1, 1);
       return g;
+    }
     case 'bandage':
-      part(g, new THREE.CylinderGeometry(0.035, 0.035, 0.06, 12), clothMat(), 0, 0, 0.03);
+      part(g, new THREE.CylinderGeometry(0.035, 0.035, 0.06, 16), mat('gauze', () => new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 1 })), 0, 0, 0.03);
+      part(g, new THREE.CylinderGeometry(0.012, 0.012, 0.061, 10), mat('gauze-core', () => new THREE.MeshStandardMaterial({ color: 0x9a8a70, roughness: 1 })), 0, 0, 0.03);
+      part(g, box(0.05, 0.002, 0.08), mat('gauze', () => new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 1 })), 0.02, -0.03, 0.08);
       return g;
-    case 'syringe':
-      part(g, tube(0.012, 0.12), glassMat(), 0, 0.02, 0.05);
-      part(g, tube(0.002, 0.05), finishMat('steel'), 0, 0.02, 0.14);
+    case 'syringe': {
+      const glass = mat('syringe-glass', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeaf0, roughness: 0.05, transmission: 0.6, transparent: true, opacity: 0.55, thickness: 0.01 }));
+      part(g, tube(0.012, 0.12, 14), glass, 0, 0.02, 0.05);
+      part(g, tube(0.009, 0.08, 12), mat('serum', () => new THREE.MeshStandardMaterial({ color: 0xb03a2e, roughness: 0.3, emissive: 0x300805 })), 0, 0.02, 0.06);
+      part(g, tube(0.0012, 0.05, 6), finishMat('steel'), 0, 0.02, 0.135);
+      part(g, tube(0.003, 0.06, 8), darkMat(), 0, 0.02, -0.035);
+      part(g, tube(0.016, 0.004, 14), darkMat(), 0, 0.02, -0.066);
       return g;
+    }
     default:
       return null;
   }

@@ -6,7 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
-import { concreteSurface, metalSurface, plankSurface, rustSurface } from './textures.ts';
+import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 const cache = new Map<string, THREE.Material>();
 function mat(key: string, make: () => THREE.Material): THREE.Material {
@@ -18,6 +18,11 @@ const stoneMat = () => mat('stone', () => new THREE.MeshStandardMaterial({ ...co
 const plankMat = () => mat('planks', () => new THREE.MeshStandardMaterial({ ...plankSurface(), roughness: 0.85 }));
 const metalMat = () => mat('metal', () => new THREE.MeshStandardMaterial({ ...metalSurface(), roughness: 0.5, metalness: 0.7 }));
 const rustMat = () => mat('rust', () => new THREE.MeshStandardMaterial({ ...rustSurface('#6a6a64'), roughness: 0.6, metalness: 0.6 }));
+const handleMat = () => mat('handle', () => new THREE.MeshStandardMaterial({ ...woodGrainSurface(), color: 0xa88866, roughness: 0.75 }));
+const ropeMat = () => mat('rope', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0xb8a27a, roughness: 1 }));
+const tapeMat = () => mat('tape', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x2e2f30, roughness: 0.85 }));
+const steelMat = () => mat('tool-steel', () => new THREE.MeshStandardMaterial({ ...gunMetalSurface(), color: 0x8a8e94, roughness: 0.4, metalness: 0.85 }));
+const flintMat = () => mat('flint', () => new THREE.MeshStandardMaterial({ ...concreteSurface(), color: 0x7d776e, roughness: 0.75, flatShading: true }));
 const plain = (color: number, roughness = 0.9, metalness = 0) =>
   mat(`plain-${color}-${roughness}-${metalness}`, () => new THREE.MeshStandardMaterial({ color, roughness, metalness }));
 
@@ -188,30 +193,81 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
   const g = new THREE.Group();
   const handle = (len: number, m: THREE.Material) => mesh(new THREE.CylinderGeometry(0.016, 0.019, len, 8), m, 0, len / 2 - 0.12, 0);
   const wood = plain(0x6b5136, 0.85);
+  /** Rope or tape wound round the shaft, as rings stacked along y. */
+  const wrap = (y0: number, y1: number, r: number, m: THREE.Material) => {
+    for (let y = y0; y <= y1; y += 0.012) g.add(mesh(new THREE.TorusGeometry(r, 0.006, 5, 12).rotateX(Math.PI / 2), m, 0, y, 0));
+  };
+  /** A knapped stone: a rough low-poly lump with its vertices jittered. */
+  const knapped = (radius: number, sx: number, sy: number, sz: number) => {
+    const geo = new THREE.IcosahedronGeometry(radius, 1);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = 0.85 + Math.abs(Math.sin(i * 12.9898) * 43758.5453 % 1) * 0.3;
+      p.setXYZ(i, p.getX(i) * k * sx, p.getY(i) * k * sy, p.getZ(i) * k * sz);
+    }
+    geo.computeVertexNormals();
+    return geo;
+  };
   switch (item) {
     case 'rock':
-      g.add(mesh(new THREE.DodecahedronGeometry(0.075, 0), stoneMat(), 0, 0.02, 0.02));
+      g.add(mesh(knapped(0.075, 1, 0.85, 1.1), flintMat(), 0, 0.02, 0.02));
       return g;
     case 'stoneHatchet':
-      g.add(handle(0.42, wood), mesh(new THREE.DodecahedronGeometry(0.06, 0).scale(0.6, 1, 1.4), stoneMat(), 0, 0.24, 0.05));
+      // A flint head split into the shaft and lashed on with rope.
+      g.add(handle(0.42, handleMat()));
+      g.add(mesh(knapped(0.06, 0.45, 0.85, 1.5), flintMat(), 0, 0.24, 0.055));
+      wrap(0.2, 0.28, 0.024, ropeMat());
+      wrap(-0.1, -0.02, 0.022, ropeMat());
       return g;
-    case 'stonePickaxe':
-      g.add(handle(0.46, wood), mesh(new THREE.ConeGeometry(0.035, 0.36, 5).rotateX(Math.PI / 2), stoneMat(), 0, 0.3, 0));
-      return g;
-    case 'salvagedAxe': {
-      const blade = mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.012, 20).rotateZ(Math.PI / 2), metalMat(), 0, 0.28, 0.07);
-      g.add(handle(0.5, rustMat()), blade);
+    case 'stonePickaxe': {
+      g.add(handle(0.46, handleMat()));
+      for (const dir of [-1, 1]) {
+        const pick = mesh(new THREE.ConeGeometry(0.032, 0.2, 6), flintMat(), 0, 0.3, dir * 0.1);
+        pick.rotation.x = dir * (Math.PI / 2 + 0.25);
+        (pick.material as THREE.MeshStandardMaterial).flatShading = true;
+        g.add(pick);
+      }
+      g.add(mesh(knapped(0.04, 1, 1, 1.2), flintMat(), 0, 0.3, 0));
+      wrap(0.25, 0.34, 0.024, ropeMat());
       return g;
     }
-    case 'salvagedPickaxe':
-      g.add(handle(0.5, rustMat()), mesh(new THREE.BoxGeometry(0.03, 0.05, 0.42), metalMat(), 0, 0.33, 0));
+    case 'salvagedAxe': {
+      // A saw blade bolted to a length of pipe, with a taped grip.
+      const pipe = mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.52, 10), rustMat(), 0, 0.14, 0);
+      const blade = mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.008, 28).rotateZ(Math.PI / 2), steelMat(), 0, 0.3, 0.07);
+      g.add(pipe, blade);
+      for (let t = 0; t < 24; t++) {
+        const a = (t / 24) * Math.PI * 2;
+        const tooth = mesh(new THREE.ConeGeometry(0.008, 0.02, 3), steelMat(), 0, 0.3 + Math.sin(a) * 0.115, 0.07 + Math.cos(a) * 0.115);
+        tooth.rotation.x = -a + Math.PI / 2;
+        g.add(tooth);
+      }
+      g.add(mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.02, 8).rotateZ(Math.PI / 2), rustMat(), 0, 0.3, 0.07));
+      wrap(-0.11, 0.05, 0.02, tapeMat());
       return g;
+    }
+    case 'salvagedPickaxe': {
+      g.add(mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.56, 10), rustMat(), 0, 0.16, 0));
+      // A forged steel head: two tapered spikes drooping slightly from a central eye.
+      for (const dir of [-1, 1]) {
+        const spike = mesh(new THREE.CylinderGeometry(0.004, 0.022, 0.22, 8), steelMat(), 0, 0.325, dir * 0.12);
+        spike.rotation.x = dir * (Math.PI / 2 + 0.22);
+        g.add(spike);
+      }
+      g.add(mesh(new RoundedBoxGeometry(0.05, 0.07, 0.06, 2, 0.01), rustMat(), 0, 0.34, 0));
+      wrap(-0.11, 0.05, 0.02, tapeMat());
+      return g;
+    }
     case 'bandage':
     case 'syringe':
       return buildOtherWeapon(item)?.rotateX(-Math.PI / 2) ?? null;
-    case 'buildingPlan':
-      g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 10).rotateX(Math.PI / 2), plain(0x3f78b8, 0.8), 0, 0.02, 0.05));
+    case 'buildingPlan': {
+      // A rolled blueprint tied with string.
+      g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));
+      g.add(mesh(new THREE.CircleGeometry(0.0275, 16).rotateY(0), plain(0xd8e4f0, 0.9), 0, 0.02, 0.201));
+      for (const z of [-0.04, 0.14]) g.add(mesh(new THREE.TorusGeometry(0.029, 0.003, 4, 16), ropeMat(), 0, 0.02, z));
       return g;
+    }
     default: {
       // Guns, bows and melee weapons are modelled along +z; turn them to point along +y like the tools.
       const gun = buildGun(item);
