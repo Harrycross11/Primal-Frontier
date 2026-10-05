@@ -42,7 +42,7 @@ const http = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 
-const game = new Game(SEED);
+const game = new Game(SEED, Number(process.env.START_KIT ?? 0));
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
@@ -99,10 +99,13 @@ wss.on('connection', (ws) => {
         deliver(game.gather(id, msg.id, now));
         break;
       case 'place':
-        deliver(game.place(id, msg.x, msg.y, msg.z, msg.block));
+        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
         break;
-      case 'break':
-        deliver(game.break(id, msg.x, msg.y, msg.z));
+      case 'hit':
+        deliver(game.hit(id, String(msg.key), now));
+        break;
+      case 'edit':
+        deliver(game.edit(id, String(msg.key), msg.edit));
         break;
     }
   });

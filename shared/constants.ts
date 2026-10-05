@@ -19,10 +19,8 @@ export const GRAVITY = 18;
 export const GATHER_RANGE = 3.5;
 /** Minimum seconds between two gather hits. */
 export const GATHER_COOLDOWN = 0.35;
-/** How far a player can reach to place or break a block, from their eyes to the block centre. */
-export const BUILD_RANGE = 6.5;
-/** Blocks may not be placed above this height. */
-export const MAX_BUILD_HEIGHT = 40;
+/** How far a player can reach to place, edit or hit a building piece, from their eyes. */
+export const BUILD_RANGE = 7;
 
 /** Seconds before a picked-clean scrap pile reappears. Trees never regrow, by design. */
 export const SCRAP_RESPAWN_SECONDS = 120;

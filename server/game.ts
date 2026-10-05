@@ -15,16 +15,26 @@ import {
 import type { PlayerState, ServerMessage } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
 import {
-  BLOCK_COST,
+  HIT_DAMAGE,
+  MAX_HP,
+  PIECE_COST,
+  WALL_EDITS,
+  boxesTouch,
+  pieceBounds,
+  pieceBoxes,
+  pieceKey,
+  pieceSupported,
+  validPieceShape,
+  type Box,
+  type Piece,
+  type PieceKind,
+  type WallEdit,
+} from '../shared/building.ts';
+import {
   RESOURCE_INFO,
-  blockKey,
-  cellInBounds,
-  cellIsSupported,
-  emptyInventory,
   generateResources,
-  type Block,
-  type BlockType,
   type Inventory,
+  type Material,
   type ResourceNode,
 } from '../shared/world.ts';
 
@@ -40,18 +50,24 @@ interface Player extends PlayerState {
   lastGatherAt: number;
 }
 
-const COLORS = [0xff5a36, 0x2ec4ff, 0xffc93c, 0x7cff6b, 0xd16bff, 0xff6bb5, 0x40e0c0, 0xff9f1c];
+// Faded dyes rather than bright team colours: they tint a survivor's scarf, armband and name
+// stripe, enough to tell players apart without breaking the wasteland look.
+const COLORS = [0xa4553a, 0x3f7f86, 0xb08c3a, 0x6f7f3e, 0x7a4f6e, 0x9a3b34, 0x4f6382, 0xb06f2e];
 
 export class Game {
   readonly seed: number;
   readonly resources: ResourceNode[];
-  readonly blocks = new Map<string, Block>();
+  readonly pieces = new Map<string, Piece>();
   readonly players = new Map<number, Player>();
   private nextId = 1;
   private respawns: { id: number; at: number }[] = [];
   private rand: () => number;
 
-  constructor(seed: number) {
+  /** @param startKit materials each player spawns with (0 normally; handy for testing builds). */
+  constructor(
+    seed: number,
+    private startKit = 0,
+  ) {
     this.seed = seed;
     this.resources = generateResources(seed);
     this.rand = mulberry32(seed ^ 0x5bd1e995);
@@ -74,7 +90,7 @@ export class Game {
       z,
       yaw: 0,
       moving: false,
-      inventory: emptyInventory(),
+      inventory: { wood: this.startKit, scrap: this.startKit },
       lastMoveAt: now,
       lastGatherAt: 0,
     };
@@ -92,7 +108,7 @@ export class Game {
             you: pub,
             players: [...this.players.values()].filter((p) => p.id !== id).map(publicState),
             resources: this.resources,
-            blocks: [...this.blocks.values()],
+            pieces: [...this.pieces.values()],
             inventory: player.inventory,
           },
         },
@@ -160,44 +176,63 @@ export class Game {
     ];
   }
 
-  place(id: number, x: number, y: number, z: number, type: BlockType): Outgoing[] {
+  place(id: number, kind: PieceKind, i: number, y: number, k: number, dir: number, material: Material): Outgoing[] {
     const p = this.players.get(id);
-    if (!p || !(type in BLOCK_COST) || !cellInBounds(x, y, z)) return [];
-    const key = blockKey(x, y, z);
-    if (this.blocks.has(key)) return [];
-    if (!this.inReach(p, x, y, z)) return [{ to: id, msg: { t: 'notice', text: 'Too far away' } }];
-    const cost = BLOCK_COST[type];
-    if (p.inventory[cost.material] < cost.amount) {
-      return [{ to: id, msg: { t: 'notice', text: `Need ${cost.amount} ${cost.material}` } }];
+    if (!p) return [];
+    const piece: Piece = { kind, i, y, k, dir: kind === 'floor' ? 0 : dir, material, edit: 'solid', hp: MAX_HP[material] };
+    if (!validPieceShape(piece)) return [];
+    const key = pieceKey(piece);
+    if (this.pieces.has(key)) return [];
+    const bounds = pieceBounds(piece);
+    if (!this.inReach(p, bounds)) return [{ to: id, msg: { t: 'notice', text: 'Too far away' } }];
+    if (p.inventory[material] < PIECE_COST) {
+      return [{ to: id, msg: { t: 'notice', text: `Need ${PIECE_COST} ${material}` } }];
     }
-    if (!cellIsSupported(this.seed, this.blocks, x, y, z)) {
-      return [{ to: id, msg: { t: 'notice', text: 'Blocks must touch the ground or another block' } }];
+    if (!pieceSupported(this.seed, piece, this.pieces.values())) {
+      return [{ to: id, msg: { t: 'notice', text: 'Must connect to the ground or another piece' } }];
     }
+    const solid = pieceBoxes(piece);
     for (const other of this.players.values()) {
-      if (overlapsPlayer(other, x, y, z)) return [{ to: id, msg: { t: 'notice', text: 'Someone is standing there' } }];
+      const pb = playerBox(other);
+      if (solid.some((b) => boxesTouch(b, pb, -0.02))) {
+        return [{ to: id, msg: { t: 'notice', text: 'Someone is standing there' } }];
+      }
     }
-    p.inventory[cost.material] -= cost.amount;
-    this.blocks.set(key, { x, y, z, type });
+    p.inventory[material] -= PIECE_COST;
+    piece.hp = MAX_HP[material];
+    this.pieces.set(key, piece);
     return [
-      { to: 'all', msg: { t: 'block', x, y, z, type, by: id } },
+      { to: 'all', msg: { t: 'piece', key, piece, by: id } },
       { to: id, msg: { t: 'inventory', inventory: { ...p.inventory } } },
     ];
   }
 
-  /** Breaking a block refunds half its cost, so building has a real price. */
-  break(id: number, x: number, y: number, z: number): Outgoing[] {
+  /** Bare-handed hits damage a piece; at zero health it breaks and refunds a little material. */
+  hit(id: number, key: string, now: number): Outgoing[] {
     const p = this.players.get(id);
-    const key = blockKey(x, y, z);
-    const block = this.blocks.get(key);
-    if (!p || !block) return [];
-    if (!this.inReach(p, x, y, z)) return [{ to: id, msg: { t: 'notice', text: 'Too far away' } }];
-    this.blocks.delete(key);
-    const cost = BLOCK_COST[block.type];
-    p.inventory[cost.material] += Math.floor(cost.amount / 2);
+    const piece = this.pieces.get(key);
+    if (!p || !piece) return [];
+    if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
+    if (!this.inReach(p, pieceBounds(piece))) return [{ to: id, msg: { t: 'notice', text: 'Too far away' } }];
+    p.lastGatherAt = now;
+    piece.hp -= HIT_DAMAGE;
+    if (piece.hp > 0) return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
+    this.pieces.delete(key);
+    p.inventory[piece.material] += PIECE_COST / 2;
     return [
-      { to: 'all', msg: { t: 'block', x, y, z, type: null, by: id } },
+      { to: 'all', msg: { t: 'piece', key, piece: null, by: id } },
       { to: id, msg: { t: 'inventory', inventory: { ...p.inventory } } },
     ];
+  }
+
+  /** Edits turn a wall into a window, door or half wall, for free, like Fortnite. */
+  edit(id: number, key: string, edit: WallEdit): Outgoing[] {
+    const p = this.players.get(id);
+    const piece = this.pieces.get(key);
+    if (!p || !piece || piece.kind !== 'wall' || !WALL_EDITS.includes(edit)) return [];
+    if (!this.inReach(p, pieceBounds(piece))) return [{ to: id, msg: { t: 'notice', text: 'Too far away' } }];
+    piece.edit = edit;
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
   }
 
   /** Called every server tick: respawns scrap and builds the position snapshot. */
@@ -216,9 +251,11 @@ export class Game {
     return out;
   }
 
-  private inReach(p: Player, x: number, y: number, z: number): boolean {
-    const eyeY = p.y + PLAYER_HEIGHT * 0.9;
-    return Math.hypot(p.x - (x + 0.5), eyeY - (y + 0.5), p.z - (z + 0.5)) <= BUILD_RANGE + 0.9;
+  /** Reach is measured from the player's eyes to the nearest point of the piece. */
+  private inReach(p: Player, b: Box): boolean {
+    const eye = [p.x, p.y + PLAYER_HEIGHT * 0.9, p.z];
+    const d = eye.map((v, a) => Math.max(b.min[a] - v, 0, v - b.max[a]));
+    return Math.hypot(d[0], d[1], d[2]) <= BUILD_RANGE + 0.5;
   }
 }
 
@@ -230,9 +267,9 @@ function cleanName(name: unknown): string {
   return typeof name === 'string' ? name.replace(/[^\w \-]/g, '').trim().slice(0, 16) : '';
 }
 
-function overlapsPlayer(p: PlayerState, x: number, y: number, z: number): boolean {
-  const r = PLAYER_RADIUS;
-  return (
-    p.x + r > x && p.x - r < x + 1 && p.z + r > z && p.z - r < z + 1 && p.y + PLAYER_HEIGHT > y && p.y < y + 1
-  );
+export function playerBox(p: PlayerState): Box {
+  return {
+    min: [p.x - PLAYER_RADIUS, p.y, p.z - PLAYER_RADIUS],
+    max: [p.x + PLAYER_RADIUS, p.y + PLAYER_HEIGHT, p.z + PLAYER_RADIUS],
+  };
 }

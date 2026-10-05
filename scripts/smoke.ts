@@ -1,5 +1,6 @@
-// End-to-end smoke test: starts the server, joins with two browser players, has one walk to
-// scrap, gather it and build a block, and checks the other player sees it. Saves screenshots to .smoke/.
+// End-to-end smoke test: starts the server, joins with two browser players, has one gather
+// wood and scrap, build a small hut (floor, walls with a door and window edit, stairs), walk
+// up the stairs, and checks the other player sees it all. Saves screenshots to .smoke/.
 // Run `npm run build` first.
 
 import { spawn } from 'node:child_process';
@@ -24,74 +25,120 @@ const errors: string[] = [];
 
 async function joinAs(name: string): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // Software rendering in CI is slow; play on low graphics and switch to high for screenshots.
+  await page.addInitScript(() => localStorage.setItem('pf-quality', 'low'));
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && errors.push(`${name}: ${m.text()}`));
   await page.goto(URL);
   await page.fill('#name', name);
   await page.click('#play');
-  await page.waitForFunction(() => (window as any).__pf !== undefined, null, { timeout: 20000 });
+  await page.waitForFunction(() => (window as any).__pf !== undefined, null, { timeout: 120000 });
   return page;
 }
 
-const state = (p: Page) => p.evaluate(() => (window as any).__pf.state());
+const pf = <T>(p: Page, fn: string, ...args: unknown[]) =>
+  p.evaluate(([f, a]) => (window as any).__pf[f as string](...(a as unknown[])), [fn, args] as const) as Promise<T>;
+const state = (p: Page) => pf<any>(p, 'state');
 const check = (ok: boolean, what: string) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`);
   if (!ok) process.exitCode = 1;
 };
+
+async function walkTo(page: Page, x: number, z: number, timeout = 150000) {
+  await pf(page, 'walkTo', x, z);
+  await page.waitForFunction(
+    ([x, z]) => {
+      const [px, , pz] = (window as any).__pf.state().position;
+      return Math.hypot(px - x, pz - z) < 0.8;
+    },
+    [x, z],
+    { timeout },
+  );
+}
+
+async function gatherAll(page: Page, kind: string, want: number, material: 'wood' | 'scrap') {
+  while ((await state(page)).inventory[material] < want) {
+    const node = await pf<any>(page, 'nearestResource', kind);
+    await walkTo(page, node.x + 1.4, node.z);
+    while ((await state(page)).inventory[material] < want) {
+      const before = (await state(page)).inventory[material];
+      await pf(page, 'gather', node.id);
+      await page.waitForTimeout(420);
+      if ((await state(page)).inventory[material] === before) break; // node used up
+    }
+  }
+}
 
 try {
   const ash = await joinAs('Ash');
   const rook = await joinAs('Rook');
   await ash.waitForTimeout(800);
   check((await state(ash)).others === 1 && (await state(rook)).others === 1, 'both players see each other');
-  await ash.screenshot({ path: '.smoke/1-spawn.png' });
+  await ash.screenshot({ path: '.smoke/1-spawn.png', timeout: 300000 });
 
-  // Walk Ash to the nearest scrap wreck and gather it.
-  const scrap = await ash.evaluate(() => (window as any).__pf.nearestResource('scrap'));
-  await ash.evaluate(([x, z]) => (window as any).__pf.walkTo(x + 1.6, z), [scrap.x, scrap.z]);
-  await ash.waitForFunction(
-    ([x, z]) => {
-      const [px, , pz] = (window as any).__pf.state().position;
-      return Math.hypot(px - (x + 1.6), pz - z) < 1.2;
-    },
-    [scrap.x, scrap.z],
-    { timeout: 30000 },
-  );
-  for (let i = 0; i < 4; i++) {
-    await ash.evaluate((id) => (window as any).__pf.gather(id), scrap.id);
-    await ash.waitForTimeout(450);
-  }
+  await gatherAll(ash, 'deadTree', 70, 'wood');
+  await gatherAll(ash, 'scrap', 20, 'scrap');
   const inv = (await state(ash)).inventory;
-  check(inv.scrap >= 4, `gathered scrap (inventory: ${JSON.stringify(inv)})`);
+  check(inv.wood >= 70 && inv.scrap >= 20, `gathered wood and scrap (inventory: ${JSON.stringify(inv)})`);
 
-  // Build two blocks next to Ash and check Rook sees them.
-  const cell = await ash.evaluate(() => (window as any).__pf.groundCellNear(2, 0));
-  await ash.evaluate((c) => (window as any).__pf.place(c.x, c.y, c.z, 'scrap'), cell);
-  await ash.waitForTimeout(300);
-  await ash.evaluate((c) => (window as any).__pf.place(c.x, c.y + 1, c.z, 'scrap'), cell);
+  // Move to open ground, then build a hut on the tile next to Ash.
+  const spot = await pf<{ x: number; z: number }>(ash, 'findClearSpot');
+  await walkTo(ash, spot.x, spot.z);
+  const [px, py, pz] = (await state(ash)).position;
+  const i = Math.floor(px / 3) + 1;
+  const k = Math.floor(pz / 3);
+  const y = Math.round(py);
+  const S = 3;
+  const place = (kind: string, ii: number, yy: number, kk: number, dir: number, mat = 'wood') =>
+    pf(ash, 'place', kind, ii, yy, kk, dir, mat).then(() => ash.waitForTimeout(150));
+  // Stand back so the walls aren't built on top of Ash.
+  await walkTo(ash, px - 2, pz + 1.5);
+  await place('floor', i, y, k, 0);
+  await place('wall', i, y, k, 0); // -z edge
+  await place('wall', i, y, k + 1, 0, 'scrap'); // +z edge
+  await place('wall', i + 1, y, k, 1); // +x edge
+  await place('wall', i, y, k, 1); // -x edge, facing Ash: becomes the door
+  await place('floor', i, y + 3, k, 0); // roof
+  await place('stairs', i - 1, y, k + 1, 1); // stairs up the outside to the roof, rising towards +x... next to the hut
   await ash.waitForTimeout(500);
-  check((await state(ash)).blocks === 2, 'Ash built 2 blocks');
-  check((await state(rook)).blocks === 2, 'Rook sees the 2 blocks');
-  await ash.screenshot({ path: '.smoke/2-built.png' });
 
-  // Rook walks to Ash so the screenshot shows two players together.
-  const [ax, , az] = (await state(ash)).position;
-  await rook.evaluate(([x, z]) => (window as any).__pf.walkTo(x - 2, z + 2), [ax, az]);
-  await rook.waitForFunction(
-    ([x, z]) => {
-      const [px, , pz] = (window as any).__pf.state().position;
-      return Math.hypot(px - (x - 2), pz - (z + 2)) < 1.2;
-    },
-    [ax, az],
-    { timeout: 60000 },
-  );
-  await ash.waitForTimeout(800);
-  await ash.screenshot({ path: '.smoke/3-together.png' });
-  await rook.screenshot({ path: '.smoke/4-rook-view.png' });
+  const pieces = (await state(ash)).pieces as any[];
+  check(pieces.length === 7, `Ash built 7 pieces (${pieces.length})`);
+  const doorKey = `wall:${i},${y},${k},1`;
+  const windowKey = `wall:${i},${y},${k},0`;
+  await pf(ash, 'edit', doorKey, 'door');
+  await pf(ash, 'edit', windowKey, 'window');
+  await ash.waitForTimeout(500);
+  const rookPieces = (await state(rook)).pieces as any[];
+  check(rookPieces.length === 7, 'Rook sees all 7 pieces');
+  const edits = Object.fromEntries(rookPieces.filter((p) => p.kind === 'wall').map((p) => [`wall:${p.i},${p.y},${p.k},${p.dir}`, p.edit]));
+  check(edits[doorKey] === 'door' && edits[windowKey] === 'window', 'Rook sees the door and window edits');
+
+  // Walk up the stairs: they rise along +x across tile (i-1, k+1).
+  await walkTo(ash, (i - 1) * S - 1, (k + 1) * S + 1.5);
+  await walkTo(ash, (i - 1) * S + 2.9, (k + 1) * S + 1.5);
+  const top = (await state(ash)).position[1];
+  check(top > y + 2.3, `walked up the stairs (feet at ${top.toFixed(2)}, ground ${y})`);
+
+  // Screenshots: Ash looking at the hut from outside, and Rook's view of Ash on the stairs.
+  await walkTo(ash, (i - 1) * S - 4, k * S + 1.5);
+  await pf(ash, 'look', Math.PI / 2 + 0.35, -0.05);
+  await pf(ash, 'setQuality', 'high');
+  await ash.waitForTimeout(3000);
+  await ash.screenshot({ path: '.smoke/2-hut.png', timeout: 300000 });
+  await pf(ash, 'setQuality', 'low');
+  await walkTo(rook, i * S - 6, (k - 2) * S, 240000);
+  await pf(rook, 'look', -Math.atan2(i * S + 1.5 - (i * S - 6), k * S + 1.5 - (k - 2) * S) + Math.PI, -0.1);
+  await pf(rook, 'setQuality', 'high');
+  await rook.waitForTimeout(3000);
+  await rook.screenshot({ path: '.smoke/3-rook-view.png', timeout: 300000 });
+  await pf(rook, 'setQuality', 'low');
+  await rook.waitForTimeout(500);
+  await rook.screenshot({ path: '.smoke/4-rook-low-quality.png', timeout: 300000 });
 
   check(errors.length === 0, `no browser errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } catch (e) {
-  console.error(e);
+  console.error(e, errors);
   process.exitCode = 1;
 } finally {
   await browser.close();
