@@ -30,13 +30,36 @@ function surface(name: string, size: number, draw: Draw, bumpDraw?: Draw, bumpSt
   const map = new THREE.CanvasTexture(color);
   map.colorSpace = THREE.SRGBColorSpace;
   const normalMap = new THREE.CanvasTexture(normalFromHeight(bump, bumpStrength));
-  for (const t of [map, normalMap]) {
+  const roughnessMap = new THREE.CanvasTexture(roughnessFromHeight(bump));
+  for (const t of [map, normalMap, roughnessMap]) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
   }
-  const s = { map, normalMap };
+  const s = { map, normalMap, roughnessMap };
   cache.set(name, s);
   return s;
+}
+
+/**
+ * Raised, worn spots are a little smoother than the grime in the cracks, so highlights break
+ * up across a surface instead of sitting on it like plastic. Scales the material's roughness.
+ */
+function roughnessFromHeight(src: HTMLCanvasElement): HTMLCanvasElement {
+  const size = src.width;
+  const data = src.getContext('2d')!.getImageData(0, 0, size, size).data;
+  const out = document.createElement('canvas');
+  out.width = out.height = size;
+  const ctx = out.getContext('2d')!;
+  const img = ctx.createImageData(size, size);
+  const rand = mulberry32(size * 31);
+  for (let i = 0; i < data.length; i += 4) {
+    const h = (data[i] + data[i + 1] + data[i + 2]) / 765;
+    const r = Math.min(1, 0.7 + (1 - h) * 0.26 + (rand() - 0.5) * 0.08);
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = r * 255;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
 }
 
 function normalFromHeight(src: HTMLCanvasElement, strength: number): HTMLCanvasElement {
