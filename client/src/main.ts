@@ -1,6 +1,7 @@
 // Entry point: join screen, then the game loop (input, physics, networking, rendering).
 
 import * as THREE from 'three';
+import './atmosphere.ts';
 import { BUILD_RANGE, GATHER_RANGE } from '../../shared/constants.ts';
 import {
   MAX_HP,

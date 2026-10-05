@@ -40,6 +40,7 @@ export class World {
   /** Objects the camera should not pass through. */
   readonly cameraBlockers: THREE.Object3D[] = [];
   private bounce = new Map<number, number>();
+  private windTime = { value: 0 };
   private ash: THREE.Points;
   private materials: Record<string, THREE.MeshStandardMaterial>;
 
@@ -49,7 +50,9 @@ export class World {
     this.scene.add(new THREE.HemisphereLight(0xcdbca2, 0x3c342c, 0.45));
     this.sun = new THREE.DirectionalLight(0xffd6a0, 2.4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(4096, 4096);
+    // Soft-edged shadows: wider filtering, like a sun seen through dust.
+    this.sun.shadow.radius = 2.5;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
     const sc = this.sun.shadow.camera;
@@ -125,6 +128,7 @@ export class World {
     const mat = new THREE.MeshStandardMaterial({
       map: ground.map,
       normalMap: ground.normalMap,
+      roughnessMap: ground.roughnessMap,
       normalScale: new THREE.Vector2(1.2, 1.2),
       vertexColors: true,
       roughness: 1,
@@ -175,13 +179,30 @@ export class World {
   private buildGrass() {
     const tex = grassTexture();
     const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 1 });
+    // Tufts sway in gusts: the tips move, the roots stay put, and each clump is out of step.
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.windTime = this.windTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float windTime;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            vec2 root = instanceMatrix[3].xz;
+            float gust = sin(windTime * 1.3 + root.x * 0.15 + root.y * 0.07) * 0.5 + 0.5;
+            float sway = sin(windTime * 3.1 + root.x * 1.7 + root.y * 2.3) * (0.05 + gust * 0.12);
+            transformed.x += sway * position.y * 1.6;
+            transformed.z += sway * position.y * 0.7;
+          #endif`,
+        );
+    };
     const blade = new THREE.PlaneGeometry(0.7, 0.55);
     blade.translate(0, 0.27, 0);
     const cross = mergeCross(blade);
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
-    const count = 1500;
+    const count = 4500;
     const mesh = new THREE.InstancedMesh(cross, mat, count);
     const rand = mulberry32(this.seed ^ 0xabcdef);
     const m = new THREE.Matrix4();
@@ -483,6 +504,7 @@ export class World {
 
   /** Keeps shadows sharp around the player, drifts the ash and animates hit bounces. */
   update(dt: number, focus: THREE.Vector3, time: number) {
+    this.windTime.value = time;
     this.sun.position.copy(focus).addScaledVector(SUN_DIRECTION, 80);
     this.sun.target.position.copy(focus);
 
