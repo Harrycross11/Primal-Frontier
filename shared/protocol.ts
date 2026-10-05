@@ -2,6 +2,7 @@
 // the server decides what actually happens and tells everyone.
 
 import type { Piece, PieceKind, WallEdit } from './building.ts';
+import type { Vec3 } from './combat.ts';
 import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Material, ResourceNode } from './world.ts';
@@ -17,6 +18,8 @@ export interface PlayerState {
   moving: boolean;
   /** The item in their hands, so others see it. */
   held: ItemId | null;
+  /** Lying dead, waiting to respawn. */
+  dead: boolean;
 }
 
 /** A slot in your own inventory ('me') or in a furnace or box (its id). */
@@ -46,7 +49,15 @@ export type ClientMessage =
   /** Move a stack (or `count` of it) between slots; stacks merge or swap. */
   | { t: 'moveItem'; from: SlotRef; to: SlotRef; count?: number }
   | { t: 'deploy'; slot: number; x: number; y: number; z: number; rot: number }
-  | { t: 'furnace'; id: number; on: boolean };
+  | { t: 'furnace'; id: number; on: boolean }
+  /** Fire the bow or gun in a belt slot from your eyes along `d`, aiming down sights or not. */
+  | { t: 'fire'; slot: number; d: Vec3; aim: boolean }
+  | { t: 'reload'; slot: number }
+  /** Swing a melee weapon or tool (or your fists) at whoever is in front of you along `d`. */
+  | { t: 'melee'; slot: number; d: Vec3 }
+  /** Use a bandage or syringe. */
+  | { t: 'use'; slot: number }
+  | { t: 'respawn' };
 
 export type ServerMessage =
   | {
@@ -59,6 +70,7 @@ export type ServerMessage =
       pieces: Piece[];
       deployables: Deployable[];
       slots: Slots;
+      hp: number;
     }
   | { t: 'state'; players: PlayerState[] }
   | { t: 'joined'; player: PlayerState }
@@ -72,4 +84,12 @@ export type ServerMessage =
   | { t: 'deployable'; id: number; d: Deployable | null; by: number }
   | { t: 'correct'; x: number; y: number; z: number }
   | { t: 'notice'; text: string }
+  /** Someone fired: where from and where each pellet ended, for tracers and sound. */
+  | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
+  /** You hit someone (for the hit marker). */
+  | { t: 'hitmarker'; head: boolean; kill: boolean }
+  /** Your health changed; `from` is where the damage came from, if anywhere. */
+  | { t: 'health'; hp: number; from?: Vec3 }
+  /** You died. */
+  | { t: 'died'; by: string | null; item: ItemId | null }
   | { t: 'full' };

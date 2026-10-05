@@ -42,10 +42,13 @@ export class Controller {
     addEventListener('blur', () => this.keys.clear());
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
-      this.yaw -= e.movementX * 0.0025;
-      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025, -1.3, 1.1);
+      this.yaw -= e.movementX * 0.0025 * this.sensitivity;
+      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025 * this.sensitivity, -1.3, 1.1);
     });
   }
+
+  /** Mouse look speed multiplier, lowered while aiming down sights. */
+  sensitivity = 1;
 
   get eye(): THREE.Vector3 {
     return this.position.clone().add(new THREE.Vector3(0, PLAYER_HEIGHT * 0.9, 0));
@@ -94,9 +97,19 @@ export class Controller {
     this.moveVertical(this.vy * dt, colliders);
   }
 
-  /** Camera behind and slightly right of the player; pulled in if a wall is in the way. */
-  updateCamera(camera: THREE.PerspectiveCamera) {
-    const dist = 4.2;
+  /**
+   * Camera behind and slightly right of the player; pulled in if a wall is in the way.
+   * `zoom` (0 to 1) brings it closer over the shoulder when aiming; `scoped` looks from the eyes.
+   */
+  updateCamera(camera: THREE.PerspectiveCamera, zoom = 0, scoped = false) {
+    if (scoped) {
+      const eye = this.eye;
+      const look = new THREE.Vector3(-Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch));
+      camera.position.copy(eye);
+      camera.lookAt(eye.addScaledVector(look, 10));
+      return;
+    }
+    const dist = 4.2 * (1 - 0.5 * zoom);
     const back = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch),
       -Math.sin(this.pitch),

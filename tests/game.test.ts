@@ -5,7 +5,8 @@ import { MAX_PLAYERS } from '../shared/constants.ts';
 import { terrainHeight } from '../shared/terrain.ts';
 import { generateResources, RESOURCE_INFO } from '../shared/world.ts';
 import { addItem, countItem, ITEMS, recipeFor, type ItemId } from '../shared/items.ts';
-import { FURNACE_FUEL, FURNACE_ORE, FURNACE_OUTPUT } from '../shared/deployables.ts';
+import { FURNACE_FUEL, FURNACE_ORE_SLOTS, FURNACE_OUTPUT_SLOTS, LOOT_BAG_SECONDS } from '../shared/deployables.ts';
+import { EYE_HEIGHT, MAX_HEALTH } from '../shared/combat.ts';
 import {
   HIT_DAMAGE,
   MAX_HP,
@@ -274,7 +275,7 @@ test('salvaged tools need a workbench nearby', () => {
   assert.equal(player.queue.length, 1);
 });
 
-test('a furnace burns wood to smelt ore into metal fragments', () => {
+test('a furnace burns wood to charcoal and smelts ore into metal fragments', () => {
   const { game, id } = setup();
   standAt(game, id, 4, 4);
   give(game, id, 'furnace', 1);
@@ -292,16 +293,18 @@ test('a furnace burns wood to smelt ore into metal fragments', () => {
   game.moveItem(id, { c: 'me', i: at('metalOre') }, { c: furnace.id, i: FURNACE_FUEL });
   assert.equal(furnace.slots[FURNACE_FUEL], null, 'ore is not fuel');
   game.moveItem(id, { c: 'me', i: at('wood') }, { c: furnace.id, i: FURNACE_FUEL }, 3);
-  game.moveItem(id, { c: 'me', i: at('metalOre') }, { c: furnace.id, i: FURNACE_ORE });
+  game.moveItem(id, { c: 'me', i: at('metalOre') }, { c: furnace.id, i: FURNACE_ORE_SLOTS[0] });
   assert.equal(have(game, id, 'wood'), 17);
   game.furnace(id, furnace.id, true);
   let t = 0;
   game.tick(t);
   for (let n = 0; n < 40; n++) game.tick((t += 250));
-  assert.equal(furnace.slots[FURNACE_OUTPUT]?.count, 5, 'all ore smelted');
-  assert.equal(furnace.slots[FURNACE_ORE], null);
+  const out = (item: ItemId) => FURNACE_OUTPUT_SLOTS.find((i) => furnace.slots[i]?.item === item)!;
+  assert.equal(furnace.slots[out('metal')]?.count, 5, 'all ore smelted');
+  assert.equal(furnace.slots[out('charcoal')]?.count, 3, 'one charcoal per wood burned');
+  assert.equal(furnace.slots[FURNACE_ORE_SLOTS[0]], null);
   assert.equal(furnace.on, false, 'goes out when the wood runs out');
-  game.moveItem(id, { c: furnace.id, i: FURNACE_OUTPUT }, { c: 'me', i: 20 });
+  game.moveItem(id, { c: furnace.id, i: out('metal') }, { c: 'me', i: 20 });
   assert.equal(have(game, id, 'metal'), 5);
 });
 
@@ -325,4 +328,165 @@ test('storage boxes hold items; breaking your own box gives it and its contents 
   while (game.deployables.size) game.hitDeployable(id, box.id, (t += 1000));
   assert.equal(have(game, id, 'stone'), 50);
   assert.equal(have(game, id, 'storageBox'), 1);
+});
+
+test('furnaces smelt sulfur and high quality ore side by side', () => {
+  const { game, id, player } = setup();
+  standAt(game, id, 4, 4);
+  give(game, id, 'furnace', 1);
+  give(game, id, 'wood', 50);
+  give(game, id, 'sulfurOre', 4);
+  give(game, id, 'hqmOre', 2);
+  game.deploy(id, player.slots.findIndex((s) => s?.item === 'furnace'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  const furnace = [...game.deployables.values()][0];
+  const at = (item: ItemId) => player.slots.findIndex((s) => s?.item === item);
+  game.moveItem(id, { c: 'me', i: at('wood') }, { c: furnace.id, i: FURNACE_FUEL });
+  game.moveItem(id, { c: 'me', i: at('sulfurOre') }, { c: furnace.id, i: FURNACE_ORE_SLOTS[0] });
+  game.moveItem(id, { c: 'me', i: at('hqmOre') }, { c: furnace.id, i: FURNACE_ORE_SLOTS[1] });
+  game.furnace(id, furnace.id, true);
+  run(game, 0, 6);
+  const total = (item: ItemId) => FURNACE_OUTPUT_SLOTS.reduce((n, i) => n + (furnace.slots[i]?.item === item ? furnace.slots[i]!.count : 0), 0);
+  assert.equal(total('sulfur'), 4);
+  assert.equal(total('hqm'), 2);
+});
+
+test('better guns need higher workbench levels', () => {
+  const { game, id, player } = setup();
+  standAt(game, id, 4, 4);
+  for (const item of ['metal', 'hqm', 'scrap', 'wood', 'cloth'] as ItemId[]) give(game, id, item, 900);
+  give(game, id, 'workbench', 1);
+  game.craft(id, 'revolver', 1);
+  assert.equal(player.queue.length, 0, 'revolver needs a workbench');
+  game.deploy(id, player.slots.findIndex((s) => s?.item === 'workbench'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  game.craft(id, 'revolver', 1);
+  assert.equal(player.queue.length, 1);
+  game.craft(id, 'thompson', 1);
+  assert.equal(player.queue.length, 1, 'the Thompson needs level 2');
+  game.craft(id, 'workbench2', 1);
+  run(game, 0, 40);
+  game.deploy(id, player.slots.findIndex((s) => s?.item === 'workbench2'), 2, terrainHeight(SEED, 2, 1.5), 1.5, 0);
+  game.craft(id, 'thompson', 1);
+  assert.equal(player.queue.length, 1);
+});
+
+/** A stretch of ground that stays level for 12 m along x, so test shots are not blocked by hills. */
+const FLAT = (() => {
+  for (let z = -60; z < 60; z += 3) {
+    for (let x = -60; x < 60; x += 3) {
+      const h = terrainHeight(SEED, x, z);
+      let ok = true;
+      for (let d = 0; d <= 12 && ok; d += 0.5) ok = Math.abs(terrainHeight(SEED, x + d, z) - h) < 0.12;
+      if (ok) return { x, z };
+    }
+  }
+  throw new Error('no flat ground');
+})();
+
+/** Two players facing each other along x, `gap` metres apart, the shooter holding `item` in slot 2. */
+function duel(item: ItemId, gap = 10) {
+  const game = new Game(SEED);
+  const a = game.join('Ash', 0)!.id;
+  const b = game.join('Bo', 0)!.id;
+  standAt(game, a, FLAT.x, FLAT.z);
+  standAt(game, b, FLAT.x + gap, FLAT.z);
+  game.players.get(b)!.y = game.players.get(a)!.y;
+  const slots = game.players.get(a)!.slots;
+  slots[2] = { item, count: 1, hp: ITEMS[item].weapon!.durability, ammo: 0 };
+  return { game, a, b, shooter: game.players.get(a)!, target: game.players.get(b)! };
+}
+
+const AT_BODY: [number, number, number] = [1, -0.5 / 10, 0];
+
+test('guns need reloading from ammo in the inventory', () => {
+  const { game, a, shooter } = duel('revolver');
+  assert.equal(game.fire(a, 2, AT_BODY, false, 1000).some((o) => o.msg.t === 'shot'), false, 'empty');
+  give(game, a, 'pistolAmmo', 5);
+  game.reload(a, 2, 1000);
+  assert.equal(shooter.slots[2]!.ammo, 5);
+  assert.equal(have(game, a, 'pistolAmmo'), 0);
+  assert.equal(game.fire(a, 2, AT_BODY, false, 1500).some((o) => o.msg.t === 'shot'), false, 'still reloading');
+  assert.ok(game.fire(a, 2, AT_BODY, false, 5000).some((o) => o.msg.t === 'shot'));
+  assert.equal(shooter.slots[2]!.ammo, 4);
+  assert.equal(game.fire(a, 2, AT_BODY, false, 5050).some((o) => o.msg.t === 'shot'), false, 'fire rate');
+});
+
+test('a shot hurts the player it hits, more on the head, and walls stop it', () => {
+  const { game, a, target, shooter } = duel('boltRifle');
+  shooter.slots[2]!.ammo = 4;
+  game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(target.hp, MAX_HEALTH - 80, 'body shot');
+  target.hp = MAX_HEALTH;
+  const head = 1.62 - EYE_HEIGHT;
+  game.fire(a, 2, [10, head, 0], true, 4000);
+  assert.ok(target.hp <= 0, 'headshot kills');
+  assert.equal(target.dead, true);
+
+  const second = duel('boltRifle');
+  second.shooter.slots[2]!.ammo = 4;
+  // A stone wall across the line between them.
+  const i = Math.floor((FLAT.x + 5) / 3);
+  const k = Math.floor(FLAT.z / 3);
+  second.game.pieces.set('w', { kind: 'wall', i, y: Math.floor(second.shooter.y) - 1, k, dir: 1, material: 'stone', edit: 'solid', hp: 250 });
+  second.game.fire(second.a, 2, AT_BODY, true, 1000);
+  assert.equal(second.target.hp, MAX_HEALTH, 'the wall took the bullet');
+});
+
+test('dying drops everything in a loot bag, and you respawn with a rock', () => {
+  const { game, a, b, target, shooter } = duel('l96');
+  give(game, b, 'metal', 300);
+  shooter.slots[2]!.ammo = 5;
+  game.fire(a, 2, AT_BODY, true, 1000);
+  game.fire(a, 2, AT_BODY, true, 4000);
+  assert.equal(target.dead, true);
+  const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
+  assert.ok(bag, 'a loot bag was left');
+  assert.equal(bag.label, 'Bo');
+  assert.equal(have(game, b, 'metal'), 0);
+  assert.deepEqual(game.move(b, 1, 1, 1, 0, true, 5000), [], 'the dead cannot act');
+
+  // The shooter loots the bag; it disappears once empty.
+  standAt(game, a, bag.x - 1, bag.z);
+  for (let i = 0; i < bag.slots.length; i++) if (bag.slots[i]) game.moveItem(a, { c: bag.id, i }, { c: 'me', i: 10 + i });
+  assert.equal(have(game, a, 'metal'), 300);
+  assert.equal(game.deployables.has(bag.id), false);
+
+  game.respawn(b);
+  assert.equal(target.dead, false);
+  assert.equal(target.hp, MAX_HEALTH);
+  assert.equal(have(game, b, 'rock'), 1);
+});
+
+test('loot bags disappear after a while', () => {
+  const { game, a, b, target, shooter } = duel('l96');
+  shooter.slots[2]!.ammo = 5;
+  target.hp = 10;
+  game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(game.deployables.size, 1);
+  run(game, 0, LOOT_BAG_SECONDS + 1);
+  assert.equal(game.deployables.size, 0);
+  void b;
+});
+
+test('shotguns fire many pellets; melee weapons hit up close; bandages heal', () => {
+  const close = duel('doubleBarrel', 4);
+  close.shooter.slots[2]!.ammo = 2;
+  const out = close.game.fire(close.a, 2, AT_BODY, false, 1000);
+  const shot = out.find((o) => o.msg.t === 'shot')!.msg as { ends: unknown[] };
+  assert.equal(shot.ends.length, 12);
+  assert.ok(close.target.hp < MAX_HEALTH - 40, 'most pellets hit at 4 m');
+
+  const knife = duel('machete', 1.5);
+  knife.game.melee(knife.a, 2, [1, -0.3, 0], 1000);
+  assert.equal(knife.target.hp, MAX_HEALTH - 35);
+  knife.game.melee(knife.a, 2, [1, -0.3, 0], 1100);
+  assert.equal(knife.target.hp, MAX_HEALTH - 35, 'swing delay');
+  const far = duel('machete', 6);
+  far.game.melee(far.a, 2, [1, -0.1, 0], 1000);
+  assert.equal(far.target.hp, MAX_HEALTH, 'out of reach');
+
+  give(knife.game, knife.b, 'bandage', 1);
+  const slot = knife.target.slots.findIndex((s) => s?.item === 'bandage');
+  knife.game.use(knife.b, slot, 2000);
+  assert.equal(knife.target.hp, MAX_HEALTH - 20);
+  assert.equal(have(knife.game, knife.b, 'bandage'), 0);
 });

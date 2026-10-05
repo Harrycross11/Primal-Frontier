@@ -7,6 +7,7 @@ const $ = (id: string) => document.getElementById(id)!;
 
 export class Hud {
   private noticeTimer = 0;
+  private hitTimer = 0;
 
   onPlay(handler: (name: string) => void) {
     const input = $('name') as HTMLInputElement;
@@ -70,6 +71,55 @@ export class Hud {
 
   toggleHelp() {
     $('help').hidden = !$('help').hidden;
+  }
+
+  setHealth(hp: number) {
+    ($('health-fill') as HTMLElement).style.width = `${Math.max(0, hp)}%`;
+    ($('health-fill') as HTMLElement).style.background = hp > 50 ? '#8fbf4a' : hp > 25 ? '#d9a33a' : '#d9503a';
+    $('health-text').textContent = String(Math.max(0, Math.round(hp)));
+  }
+
+  /** A red flash at the edges of the screen when you take damage. */
+  hurt() {
+    const el = $('damage');
+    el.classList.add('show');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('show')));
+  }
+
+  hitmarker(head: boolean) {
+    const el = $('hitmarker');
+    el.classList.toggle('head', head);
+    el.classList.remove('fade');
+    el.classList.add('show');
+    clearTimeout(this.hitTimer);
+    this.hitTimer = window.setTimeout(() => {
+      el.classList.remove('show');
+      el.classList.add('fade');
+    }, 90);
+  }
+
+  /** Rounds loaded and carried for the gun in your hands, or nothing. */
+  setAmmo(a: { loaded: number; mag: number; carried: number; name: string; reloading: boolean } | null) {
+    const el = $('ammo');
+    el.hidden = !a;
+    if (!a) return;
+    const html = `<b>${a.reloading ? '…' : a.loaded}</b> / ${a.mag}<small>${a.reloading ? 'Reloading' : `${a.carried} ${a.name}`}</small>`;
+    if (el.innerHTML !== html) el.innerHTML = html;
+    el.classList.toggle('empty', a.loaded === 0 && !a.reloading);
+  }
+
+  setScope(on: boolean) {
+    $('scope').hidden = !on;
+    $('crosshair').hidden = on;
+  }
+
+  showDeath(text: string, onRespawn: () => void) {
+    $('death-text').textContent = text;
+    $('death').hidden = false;
+    $('respawn').onclick = () => {
+      $('death').hidden = true;
+      onRespawn();
+    };
   }
 
   disconnected() {

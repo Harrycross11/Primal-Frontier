@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
+import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { concreteSurface, metalSurface, plankSurface, rustSurface } from './textures.ts';
 
 const cache = new Map<string, THREE.Material>();
@@ -28,14 +29,23 @@ function mesh(geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0)
   return out;
 }
 
-/** A lumpy boulder. Ore boulders get glinting orange-brown metal veins. */
-export function buildBoulder(rand: () => number, ore: boolean): THREE.Group {
+export type BoulderKind = 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre';
+const BOULDER_COLORS: Record<BoulderKind, [number, number]> = {
+  stone: [0xa8a196, 0xa8a196],
+  metalOre: [0x7a736b, 0xc4823a],
+  sulfurOre: [0x8a8478, 0xe0c640],
+  hqmOre: [0x5e646c, 0xa9c2d8],
+};
+
+/** A lumpy boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
+export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group {
+  const ore = kind !== 'stone';
   const g = new THREE.Group();
   const geo = new THREE.IcosahedronGeometry(1, 2);
   const p = geo.attributes.position;
   const colors = new Float32Array(p.count * 3);
-  const base = new THREE.Color(ore ? 0x6e6862 : 0xa8a196);
-  const vein = new THREE.Color(0xc4823a);
+  const base = new THREE.Color(BOULDER_COLORS[kind][0]);
+  const vein = new THREE.Color(BOULDER_COLORS[kind][1]);
   const c = new THREE.Color();
   const bumps = [...Array(6)].map(() => new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize());
   const veins = [...Array(5)].map(() => new THREE.Vector3(rand() - 0.5, rand() * 0.6, rand() - 0.5).normalize());
@@ -47,13 +57,13 @@ export function buildBoulder(rand: () => number, ore: boolean): THREE.Group {
     k += (rand() - 0.5) * 0.08;
     p.setXYZ(i, v.x * k * 1.1, v.y * k * 0.75, v.z * k);
     c.copy(base).multiplyScalar(0.85 + rand() * 0.25);
-    if (ore) for (const w of veins) if (v.dot(w) > 0.86) c.lerp(vein, 0.85);
+    if (ore) for (const w of veins) if (v.dot(w) > (kind === 'sulfurOre' ? 0.8 : 0.86)) c.lerp(vein, 0.85);
     c.toArray(colors, i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  const rockMat = mat(`boulder-${ore}`, () =>
-    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.75 : 1, metalness: ore ? 0.25 : 0, flatShading: true }),
+  const rockMat = mat(`boulder-${kind}`, () =>
+    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.75 : 1, metalness: kind === 'metalOre' || kind === 'hqmOre' ? 0.25 : 0, flatShading: true }),
   );
   const body = mesh(geo, rockMat, 0, 0.45, 0);
   g.add(body);
@@ -93,8 +103,11 @@ export function buildHemp(rand: () => number): THREE.Group {
 export function buildDeployable(kind: DeployableKind): THREE.Group {
   const g = new THREE.Group();
   const [w, h, l] = DEPLOYABLE_INFO[kind].size;
-  if (kind === 'workbench') {
-    const top = mesh(new RoundedBoxGeometry(w, 0.09, l, 2, 0.02), plankMat(), 0, h - 0.045, 0);
+  if (kind === 'workbench' || kind === 'workbench2' || kind === 'workbench3') {
+    const level = kind === 'workbench' ? 1 : kind === 'workbench2' ? 2 : 3;
+    const topMat = level === 1 ? plankMat() : level === 2 ? rustMat() : metalMat();
+    const legMat = level === 1 ? plankMat() : metalMat();
+    const top = mesh(new RoundedBoxGeometry(w, 0.09, l, 2, 0.02), topMat, 0, h - 0.045, 0);
     g.add(top);
     for (const [x, z] of [
       [-1, -1],
@@ -102,9 +115,20 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
       [-1, 1],
       [1, 1],
     ]) {
-      g.add(mesh(new THREE.BoxGeometry(0.09, h - 0.09, 0.09), plankMat(), x * (w / 2 - 0.08), (h - 0.09) / 2, z * (l / 2 - 0.08)));
+      g.add(mesh(new THREE.BoxGeometry(0.09, h - 0.09, 0.09), legMat, x * (w / 2 - 0.08), (h - 0.09) / 2, z * (l / 2 - 0.08)));
     }
-    g.add(mesh(new THREE.BoxGeometry(w - 0.2, 0.05, l - 0.2), plankMat(), 0, 0.3, 0));
+    g.add(mesh(new THREE.BoxGeometry(w - 0.2, 0.05, l - 0.2), level === 1 ? plankMat() : rustMat(), 0, 0.3, 0));
+    if (level >= 2) {
+      // A pegboard of tools at the back, and a drill press.
+      const board = mesh(new THREE.BoxGeometry(w - 0.1, 0.6, 0.04), level === 3 ? metalMat() : plankMat(), 0, h + 0.3, -l / 2 + 0.04);
+      g.add(board);
+      for (let n = 0; n < 4; n++) g.add(mesh(new THREE.BoxGeometry(0.03, 0.22, 0.03), metalMat(), -0.5 + n * 0.3, h + 0.35, -l / 2 + 0.08));
+      g.add(mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 10), plain(0x8a3a2a, 0.6, 0.4), -w / 2 + 0.25, h + 0.25, -0.05));
+    }
+    if (level === 3) {
+      g.add(mesh(new THREE.BoxGeometry(0.4, 0.3, 0.3), plain(0x3a4048, 0.5, 0.6), w / 2 - 0.35, h + 0.15, -0.1));
+      g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.06, 10), plain(0x4fd06a, 0.3, 0), w / 2 - 0.35, h + 0.33, 0.06));
+    }
     // A vice, a saw blade and a scrap sheet on top.
     g.add(mesh(new THREE.BoxGeometry(0.16, 0.14, 0.22), metalMat(), w / 2 - 0.2, h + 0.07, l / 2 - 0.18));
     const blade = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.01, 20), metalMat(), -0.35, h + 0.01, -0.05);
@@ -141,6 +165,13 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
       fireMat.emissiveIntensity = on ? 2.2 : 0;
       light.intensity = on ? 6 : 0;
     };
+  } else if (kind === 'lootBag') {
+    // A stuffed canvas sack left where someone died.
+    const sack = mesh(new THREE.SphereGeometry(0.34, 14, 10), plain(0x6a5d44, 1), 0, 0.26, 0);
+    sack.scale.set(1, 0.75, 0.9);
+    g.add(sack);
+    g.add(mesh(new THREE.CylinderGeometry(0.06, 0.1, 0.14, 10), plain(0x5a4e38, 1), 0, 0.55, 0));
+    g.add(mesh(new THREE.TorusGeometry(0.07, 0.015, 6, 12).rotateX(Math.PI / 2), plain(0x3a3026, 1), 0, 0.5, 0));
   } else {
     // A plank crate with metal corners.
     g.add(mesh(new RoundedBoxGeometry(w, h, l, 2, 0.02), plankMat(), 0, h / 2, 0));
@@ -175,10 +206,27 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'salvagedPickaxe':
       g.add(handle(0.5, rustMat()), mesh(new THREE.BoxGeometry(0.03, 0.05, 0.42), metalMat(), 0, 0.33, 0));
       return g;
+    case 'bandage':
+    case 'syringe':
+      return buildOtherWeapon(item)?.rotateX(-Math.PI / 2) ?? null;
     case 'buildingPlan':
       g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 10).rotateX(Math.PI / 2), plain(0x3f78b8, 0.8), 0, 0.02, 0.05));
       return g;
-    default:
-      return null;
+    default: {
+      // Guns, bows and melee weapons are modelled along +z; turn them to point along +y like the tools.
+      const gun = buildGun(item);
+      const weapon = gun ?? buildOtherWeapon(item);
+      if (!weapon) return null;
+      weapon.rotation.x = -Math.PI / 2;
+      g.add(weapon);
+      if (gun) {
+        // Where muzzle flashes appear.
+        const muzzle = new THREE.Object3D();
+        muzzle.position.copy(muzzleOffset(item));
+        gun.add(muzzle);
+        g.userData.muzzle = muzzle;
+      }
+      return g;
+    }
   }
 }

@@ -4,7 +4,7 @@ import { HALF_WORLD } from './constants.ts';
 import type { ItemId } from './items.ts';
 import { mulberry32, terrainHeight } from './terrain.ts';
 
-export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'hemp';
+export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre' | 'hemp';
 /** Building materials, weakest to strongest is wood, stone, scrap. Each is also an item. */
 export type Material = 'wood' | 'stone' | 'scrap';
 export const MATERIALS: Material[] = ['wood', 'stone', 'scrap'];
@@ -35,6 +35,8 @@ export const RESOURCE_INFO: Record<
   scrap: { yields: 'scrap', tool: 'scrap', amount: 40, perHit: 4, radius: 0.9, respawn: 120 },
   stone: { yields: 'stone', tool: 'stone', amount: 120, perHit: 6, radius: 0.9, respawn: 180 },
   metalOre: { yields: 'metalOre', tool: 'stone', amount: 90, perHit: 4, radius: 0.85, respawn: 240 },
+  sulfurOre: { yields: 'sulfurOre', tool: 'stone', amount: 90, perHit: 4, radius: 0.85, respawn: 240 },
+  hqmOre: { yields: 'hqmOre', tool: 'stone', amount: 24, perHit: 1, radius: 0.85, respawn: 420 },
   hemp: { yields: 'cloth', tool: 'pickup', amount: 10, perHit: 10, radius: 0.2, respawn: 150 },
 };
 
@@ -70,6 +72,8 @@ export function generateResources(seed: number): ResourceNode[] {
   for (let i = 0; i < 26; i++) add('scrap', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
   for (let i = 0; i < 22; i++) add('stone', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
   for (let i = 0; i < 14; i++) add('metalOre', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  for (let i = 0; i < 12; i++) add('sulfurOre', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  for (let i = 0; i < 6; i++) add('hqmOre', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
   // Hemp grows in a few small patches.
   for (let patch = 0; patch < 6; patch++) {
     const px = (rand() - 0.5) * 2 * span;

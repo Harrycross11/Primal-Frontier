@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import type { ItemId } from '../../shared/items.ts';
+import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { buildHeldItem } from './props.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
@@ -72,6 +72,15 @@ export class Avatar {
   private last = new THREE.Vector3(NaN, 0, 0);
   private hand: THREE.Group;
   private held: ItemId | null | undefined = undefined;
+  /** How the arms hold what is in the hands. */
+  private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
+  private muzzle: THREE.Object3D | null = null;
+  private recoilTimer = 0;
+  private reloadTimer = 0;
+  private dead = false;
+  private tag: THREE.Sprite | null = null;
+  /** Aim pitch (radians, up is positive), so others see where a survivor points their gun. */
+  aimPitch = 0;
 
   constructor(color: number, name?: string) {
     // Each survivor gets a different but always muted outfit, picked from their colour.
@@ -207,6 +216,7 @@ export class Avatar {
       const tag = nameTag(name, color);
       tag.position.y = 2.1;
       this.root.add(tag);
+      this.tag = tag;
     }
   }
 
@@ -217,6 +227,48 @@ export class Avatar {
     this.hand.clear();
     const model = buildHeldItem(item);
     if (model) this.hand.add(model);
+    this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
+    const w = item ? ITEMS[item].weapon : undefined;
+    this.pose = !w || w.class === 'melee' ? 'normal' : w.class === 'bow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
+  }
+
+  /** World position of the gun's muzzle, for flashes and tracers. */
+  muzzlePosition(out = new THREE.Vector3()): THREE.Vector3 {
+    if (this.muzzle) return this.muzzle.getWorldPosition(out);
+    return out.copy(this.root.position).add(new THREE.Vector3(0, 1.5, 0));
+  }
+
+  /** A kick back from firing. */
+  recoil() {
+    this.recoilTimer = 0.12;
+  }
+
+  reloadAnim(seconds: number) {
+    this.reloadTimer = seconds;
+  }
+
+  /**
+   * Turns the hand so the gun points where the survivor looks, whatever the arm bones did:
+   * the weapon's barrel (its +y here) along the facing pitched by `pitch`, its top upward.
+   */
+  private pointWeapon(pitch: number) {
+    this.root.updateMatrixWorld(true);
+    const forward = new THREE.Vector3(0, Math.sin(pitch), Math.cos(pitch));
+    const top = new THREE.Vector3(0, Math.cos(pitch), -Math.sin(pitch)).negate();
+    const side = new THREE.Vector3().crossVectors(forward, top);
+    const local = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, forward, top));
+    const want = this.root.getWorldQuaternion(new THREE.Quaternion()).multiply(local);
+    const parent = this.hand.parent!.getWorldQuaternion(new THREE.Quaternion());
+    this.hand.quaternion.copy(parent.invert().multiply(want));
+  }
+
+  /** Lies the body on the ground, or stands it back up. */
+  setDead(dead: boolean) {
+    if (dead === this.dead) return;
+    this.dead = dead;
+    if (this.tag) this.tag.visible = !dead;
+    this.bones.root.rotation.set(dead ? -Math.PI / 2 : 0, 0, 0);
+    this.bones.root.position.z = 0;
   }
 
   /** Plays a chopping swing, used when gathering or building. */
@@ -272,6 +324,47 @@ export class Avatar {
     b.torso.rotation.set(lean, s * 0.1 * w, 0);
     b.torso.scale.setScalar(1 + breathe * 0.006 * (1 - w));
     b.head.rotation.set(-lean * 0.7, Math.sin(this.time * 0.4) * 0.15 * (1 - w), 0);
+
+    if (this.dead) {
+      // Limp: arms out, knees slightly bent, lying on the back.
+      b.root.position.set(0, 0.18, 0);
+      b.shoulderL.rotation.set(0, 0, ARM_REST - 0.6);
+      b.shoulderR.rotation.set(0, 0, -ARM_REST + 0.6);
+      b.hipL.rotation.x = b.hipR.rotation.x = 0;
+      b.kneeL.rotation.x = 0.3;
+      b.kneeR.rotation.x = 0.1;
+      b.torso.rotation.set(0, 0, 0);
+      b.head.rotation.set(0, 0.5, 0);
+      return;
+    }
+
+    // Holding a gun or bow up to aim: right arm forward, left hand supporting it.
+    this.hand.rotation.set(Math.PI / 2 - 0.2, 0, 0);
+    if (this.pose !== 'normal') {
+      const kick = this.recoilTimer > 0 ? Math.sin((this.recoilTimer / 0.12) * Math.PI) * 0.12 : 0;
+      this.recoilTimer = Math.max(0, this.recoilTimer - dt);
+      const reloading = this.reloadTimer > 0;
+      this.reloadTimer = Math.max(0, this.reloadTimer - dt);
+      // Lowered while reloading or sprinting.
+      const lower = reloading ? 0.6 : r * 0.7;
+      const pitch = THREE.MathUtils.clamp(this.aimPitch, -0.9, 0.9) * (1 - lower);
+      const up = 1.45 - lower + pitch + kick;
+      if (this.pose === 'pistol') {
+        b.shoulderR.rotation.set(-up, -0.15, -0.12);
+        b.elbowR.rotation.x = -0.1;
+        b.shoulderL.rotation.set(-up + 0.05, 0.5, 0.35);
+        b.elbowL.rotation.x = -0.35;
+      } else {
+        b.shoulderR.rotation.set(-up + 0.55, -0.05, -0.35);
+        b.elbowR.rotation.x = -1.2;
+        b.shoulderL.rotation.set(-up - 0.05, 0.55, 0.45);
+        b.elbowL.rotation.x = -0.25;
+      }
+      if (reloading) b.shoulderL.rotation.x += Math.sin(this.time * 14) * 0.15;
+      b.torso.rotation.y += 0.1;
+      b.head.rotation.y -= 0.1;
+      this.pointWeapon(pitch + kick * 0.5 - lower * 0.8);
+    }
 
     if (this.swingTimer > 0) {
       this.swingTimer = Math.max(0, this.swingTimer - dt);
