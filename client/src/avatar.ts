@@ -1,9 +1,11 @@
-// Wasteland survivor: realistic proportions, worn layered clothing in dusty tones, a hood,
-// goggles and a respirator, and a loaded backpack. Each player's colour shows only as a
-// faded accent (scarf and armband) so characters belong in the world instead of glowing in it.
+// Wasteland survivor: one smooth, continuous body (see survivorMesh.ts) in worn clothing of
+// dusty tones, with a hood, goggles, a respirator, a loaded backpack and a hatchet attached to
+// its bones. Each player's colour shows only as a faded accent (scarf and armband) so
+// characters belong in the world instead of glowing in it.
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
 const JACKETS = [0x6b6a4e, 0x7d6c55, 0x585b5a, 0x80705a, 0x5a6458, 0x6e5a4a];
@@ -45,39 +47,20 @@ function plain(color: number, roughness: number, metalness = 0): THREE.MeshStand
   return m;
 }
 
-function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  return m;
+/** The body's material: one cloth texture, tinted per region by vertex colours. */
+let bodyMaterial: THREE.MeshStandardMaterial | null = null;
+function bodyMat(): THREE.MeshStandardMaterial {
+  if (!bodyMaterial) {
+    const s = clothSurface();
+    bodyMaterial = new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, vertexColors: true, roughness: 0.92 });
+    bodyMaterial.normalScale.set(0.6, 0.6);
+  }
+  return bodyMaterial;
 }
-
-/** Torso shape (radius by height, from the jacket hem to the collar), turned on a lathe. */
-const TORSO_PROFILE = [
-  [0.0, -0.1],
-  [0.165, -0.1],
-  [0.17, 0.0],
-  [0.178, 0.12],
-  [0.192, 0.26],
-  [0.2, 0.38],
-  [0.19, 0.45],
-  [0.15, 0.5],
-  [0.085, 0.54],
-  [0.0, 0.55],
-].map(([r, y]) => new THREE.Vector2(r, y));
 
 export class Avatar {
   readonly root = new THREE.Group();
-  private body = new THREE.Group();
-  private torso = new THREE.Group();
-  private head = new THREE.Group();
-  private hipL: THREE.Object3D;
-  private hipR: THREE.Object3D;
-  private kneeL: THREE.Object3D;
-  private kneeR: THREE.Object3D;
-  private shoulderL: THREE.Object3D;
-  private shoulderR: THREE.Object3D;
-  private elbowL: THREE.Object3D;
-  private elbowR: THREE.Object3D;
+  private bones = {} as Record<BoneName, THREE.Bone>;
   private phase = 0;
   private walk = 0;
   private run = 0;
@@ -89,10 +72,9 @@ export class Avatar {
   constructor(color: number, name?: string) {
     // Each survivor gets a different but always muted outfit, picked from their colour.
     const pick = (list: number[], salt: number) => list[Math.abs(Math.imul((color >> salt) ^ color, 2654435761)) % list.length];
-    const jacket = cloth(pick(JACKETS, 3));
-    const trousers = cloth(pick(TROUSERS, 7));
+    const jacketColor = pick(JACKETS, 3);
     const accent = cloth(color, 0.9);
-    const hood = cloth(pick(JACKETS, 11)).clone();
+    const hood = cloth(new THREE.Color(jacketColor).multiplyScalar(0.7).getHex()).clone();
     hood.side = THREE.DoubleSide;
     const darkLeather = leather(0x5a4634);
     const brownLeather = leather(0x6a5038);
@@ -101,153 +83,123 @@ export class Avatar {
     const metal = plain(0x55524a, 0.45, 0.7);
     const rubber = plain(0x2a2927, 0.8);
     const glass = plain(0x1a2326, 0.12, 0.4);
-    const skin = plain(0xa47a5f, 0.75);
     const wood = plain(0x6b5136, 0.85);
 
-    this.root.add(this.body);
-    const body = this.body;
-
-    // Hips, belt and pouches.
-    const hips = new THREE.Group();
-    hips.position.y = 0.95;
-    body.add(hips);
-    const pelvis = mesh(new THREE.SphereGeometry(0.16, 20, 12), trousers);
-    pelvis.scale.set(1, 0.62, 0.74);
-    hips.add(pelvis);
-    const belt = mesh(new THREE.TorusGeometry(0.158, 0.024, 6, 28), darkLeather, 0, 0.05, 0);
-    belt.rotation.x = Math.PI / 2;
-    belt.scale.set(1, 0.76, 1);
-    hips.add(belt);
-    hips.add(mesh(new RoundedBoxGeometry(0.05, 0.04, 0.02, 2, 0.006), metal, 0, 0.05, 0.123));
-    for (const [x, z, ry] of [
-      [0.14, 0.05, 1.2],
-      [-0.12, -0.08, -2.2],
-      [0.06, -0.12, 2.8],
-    ]) {
-      const pouch = mesh(new RoundedBoxGeometry(0.1, 0.09, 0.05, 2, 0.015), brownLeather, x, 0.02, z);
-      pouch.rotation.y = ry;
-      hips.add(pouch);
+    // Skeleton, in the same pose the body mesh was modelled in.
+    const world = new Map<BoneName, THREE.Vector3>();
+    for (const [boneName, parent, pos] of BONES) {
+      const bone = new THREE.Bone();
+      bone.name = boneName;
+      world.set(boneName, new THREE.Vector3(...pos));
+      bone.position.set(...pos);
+      if (parent) {
+        bone.position.sub(world.get(parent)!);
+        this.bones[parent].add(bone);
+      }
+      this.bones[boneName] = bone;
     }
 
-    // Legs: hip and knee joints, cargo pockets, laced boots.
-    const leg = (side: number): [THREE.Object3D, THREE.Object3D] => {
-      const hip = new THREE.Group();
-      hip.position.set(side * 0.092, 0.93, 0);
-      body.add(hip);
-      hip.add(mesh(new THREE.CapsuleGeometry(0.078, 0.3, 6, 14), trousers, 0, -0.21, 0));
-      hip.add(mesh(new RoundedBoxGeometry(0.05, 0.12, 0.11, 2, 0.015), trousers, side * 0.072, -0.25, 0));
-      const knee = new THREE.Group();
-      knee.position.y = -0.44;
-      hip.add(knee);
-      knee.add(mesh(new THREE.CapsuleGeometry(0.064, 0.28, 6, 14), trousers, 0, -0.19, 0));
-      knee.add(mesh(new THREE.SphereGeometry(0.058, 12, 8), darkLeather, 0, -0.02, 0.035));
-      knee.add(mesh(new THREE.CylinderGeometry(0.072, 0.068, 0.1, 14), darkLeather, 0, -0.36, 0));
-      knee.add(mesh(new RoundedBoxGeometry(0.125, 0.12, 0.27, 3, 0.04), darkLeather, 0, -0.425, 0.045));
-      knee.add(mesh(new RoundedBoxGeometry(0.13, 0.028, 0.28, 2, 0.01), rubber, 0, -0.48, 0.045));
-      return [hip, knee];
+    // The body: shared shape, with this survivor's clothing colours.
+    const shared = survivorGeometry();
+    const geometry = new THREE.BufferGeometry();
+    for (const key of ['position', 'normal', 'uv', 'skinIndex', 'skinWeight']) geometry.setAttribute(key, shared.geometry.getAttribute(key));
+    geometry.setIndex(shared.geometry.index);
+    geometry.boundingSphere = shared.geometry.boundingSphere;
+    const palette: Record<number, THREE.Color> = {
+      [Region.Jacket]: new THREE.Color(jacketColor),
+      [Region.Trousers]: new THREE.Color(pick(TROUSERS, 7)),
+      [Region.Boots]: new THREE.Color(0x4f3e2f),
+      [Region.Gloves]: new THREE.Color(0x3e342b),
+      [Region.Skin]: new THREE.Color(0x9c735a),
+      [Region.Belt]: new THREE.Color(0x3d3026),
     };
-    [this.hipL, this.kneeL] = leg(-1);
-    [this.hipR, this.kneeR] = leg(1);
+    const colors = new Float32Array(shared.regions.length * 3);
+    shared.regions.forEach((r, i) => palette[r].toArray(colors, i * 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const body = new THREE.SkinnedMesh(geometry, bodyMat());
+    body.add(this.bones.root);
+    body.updateMatrixWorld(true);
+    body.bind(new THREE.Skeleton(BONES.map(([n]) => this.bones[n])));
+    this.root.add(body);
 
-    // Torso: jacket, chest pockets, scarf, backpack straps.
-    const torso = this.torso;
-    torso.position.y = 0.95;
-    body.add(torso);
-    const coat = mesh(new THREE.LatheGeometry(TORSO_PROFILE, 28), jacket);
-    coat.scale.set(1, 1, 0.7);
-    torso.add(coat);
-    for (const x of [-0.085, 0.085]) {
-      const pocket = mesh(new RoundedBoxGeometry(0.1, 0.09, 0.03, 2, 0.01), jacket, x, 0.3, 0.128);
-      pocket.rotation.x = -0.12;
-      torso.add(pocket);
+    // Gear is placed in the modelled pose's coordinates, then hung on the nearest bone.
+    const attach = (boneName: BoneName, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z).sub(world.get(boneName)!);
+      this.bones[boneName].add(m);
+      return m;
+    };
+    const box = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 2, r);
+
+    // Belt buckle and pouches.
+    attach('pelvis', box(0.05, 0.04, 0.02, 0.006), metal, 0, 0.95, 0.122);
+    for (const [x, z, ry] of [
+      [0.158, 0.055, 1.2],
+      [-0.14, -0.09, -2.2],
+      [0.07, -0.13, 2.8],
+    ]) {
+      attach('pelvis', box(0.1, 0.09, 0.05, 0.015), brownLeather, x, 0.94, z).rotation.y = ry;
     }
-    torso.add(mesh(new THREE.BoxGeometry(0.014, 0.5, 0.01), darkLeather, 0, 0.18, 0.13));
-    for (const x of [-0.11, 0.11]) {
-      const strap = mesh(new THREE.BoxGeometry(0.045, 0.42, 0.016), brownLeather, x, 0.27, 0.125);
-      strap.rotation.x = -0.18;
-      torso.add(strap);
-      torso.add(mesh(new THREE.BoxGeometry(0.045, 0.016, 0.3), brownLeather, x, 0.49, -0.04));
+    // Cargo pockets and boot soles.
+    for (const [side, s] of [
+      [-1, 'L'],
+      [1, 'R'],
+    ] as const) {
+      attach(`hip${s}`, box(0.045, 0.12, 0.1, 0.015), cloth(pick(TROUSERS, 7)), side * 0.158, 0.67, 0);
+      attach(`knee${s}`, box(0.125, 0.026, 0.27, 0.01), rubber, side * 0.092, 0.012, 0.04);
     }
-    const scarf = mesh(new THREE.TorusGeometry(0.095, 0.045, 10, 20), accent, 0, 0.53, 0.01);
+
+    // Chest: pockets, backpack straps and the scarf.
+    for (const x of [-0.075, 0.075]) attach('torso', box(0.09, 0.08, 0.03, 0.01), cloth(jacketColor), x, 1.25, 0.113).rotation.x = -0.1;
+    for (const x of [-0.1, 0.1]) {
+      attach('torso', new THREE.BoxGeometry(0.045, 0.34, 0.016), brownLeather, x, 1.22, 0.1).rotation.x = -0.12;
+      attach('torso', new THREE.BoxGeometry(0.045, 0.016, 0.26), brownLeather, x, 1.455, -0.04);
+    }
+    const scarf = attach('torso', new THREE.TorusGeometry(0.08, 0.042, 10, 22), accent, 0, 1.47, 0.012);
     scarf.rotation.x = Math.PI / 2 - 0.15;
-    torso.add(scarf);
-    const tail = mesh(new RoundedBoxGeometry(0.07, 0.2, 0.025, 2, 0.01), accent, 0.06, 0.42, 0.13);
-    tail.rotation.set(-0.25, 0, 0.12);
-    torso.add(tail);
-    torso.add(mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.1, 12), skin, 0, 0.58, 0));
+    attach('torso', box(0.07, 0.18, 0.025, 0.01), accent, 0.05, 1.37, 0.1).rotation.set(-0.3, 0, 0.12);
 
     // Backpack with a rolled bedroll and a canteen.
-    const pack = new THREE.Group();
-    pack.position.set(0, 0.27, -0.2);
-    torso.add(pack);
-    pack.add(mesh(new RoundedBoxGeometry(0.32, 0.4, 0.17, 3, 0.045), canvas));
-    pack.add(mesh(new RoundedBoxGeometry(0.34, 0.1, 0.19, 2, 0.03), canvas, 0, 0.17, 0.005));
-    pack.add(mesh(new RoundedBoxGeometry(0.22, 0.14, 0.05, 2, 0.015), canvas, 0, -0.06, -0.1));
-    const roll = mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.42, 16), bedroll, 0, 0.27, 0);
-    roll.rotation.z = Math.PI / 2;
-    pack.add(roll);
-    for (const x of [-0.12, 0.12]) {
-      const tie = mesh(new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 0.27, 0);
-      tie.rotation.z = Math.PI / 2;
-      pack.add(tie);
-    }
-    pack.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, -0.06, 0.01));
+    attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
+    attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
+    attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
+    attach('torso', new THREE.CylinderGeometry(0.075, 0.075, 0.42, 16), bedroll, 0, 1.51, -0.2).rotation.z = Math.PI / 2;
+    for (const x of [-0.12, 0.12]) attach('torso', new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 1.51, -0.2).rotation.z = Math.PI / 2;
+    attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
+
+    // Armband in the player's colour, around the left upper arm.
+    const band = attach('shoulderL', new THREE.CylinderGeometry(0.066, 0.064, 0.05, 16), accent, ...HAND(-1));
+    band.position.copy(new THREE.Vector3(...HAND(-1)).sub(world.get('shoulderL')!).multiplyScalar(0.27));
+    band.rotation.z = -ARM_REST;
 
     // Head: hood, goggles and respirator, so the face reads as a gritty survivor.
-    const head = this.head;
-    head.position.y = 0.6;
-    torso.add(head);
-    const skull = mesh(new THREE.SphereGeometry(0.105, 20, 16), skin, 0, 0.1, 0);
-    skull.scale.set(0.92, 1.1, 1);
-    head.add(skull);
-    const hoodMesh = mesh(new THREE.SphereGeometry(0.13, 24, 16, Math.PI / 2 + 0.72, Math.PI * 2 - 1.44, 0, Math.PI * 0.78), hood, 0, 0.11, -0.008);
-    hoodMesh.scale.set(1, 1.08, 1.06);
-    head.add(hoodMesh);
-    const strap = mesh(new THREE.TorusGeometry(0.104, 0.011, 6, 24), darkLeather, 0, 0.125, 0);
+    const hoodMesh = attach('head', new THREE.SphereGeometry(0.13, 24, 16, Math.PI / 2 + 0.72, Math.PI * 2 - 1.44, 0, Math.PI * 0.78), hood, 0, 1.705, -0.012);
+    hoodMesh.scale.set(1.06, 1.1, 1.14);
+    const strap = attach('head', new THREE.TorusGeometry(0.094, 0.011, 6, 24), darkLeather, 0, 1.718, 0.005);
     strap.rotation.x = Math.PI / 2;
-    head.add(strap);
+    strap.scale.set(1, 1.1, 1);
     for (const x of [-0.042, 0.042]) {
-      const rim = mesh(new THREE.CylinderGeometry(0.031, 0.034, 0.035, 16), metal, x, 0.128, 0.09);
-      rim.rotation.x = Math.PI / 2;
-      head.add(rim);
-      const lens = mesh(new THREE.CircleGeometry(0.026, 16), glass, x, 0.128, 0.108);
-      head.add(lens);
+      attach('head', new THREE.CylinderGeometry(0.031, 0.034, 0.035, 16), metal, x, 1.718, 0.095).rotation.x = Math.PI / 2;
+      attach('head', new THREE.CircleGeometry(0.026, 16), glass, x, 1.718, 0.113);
     }
-    const mask = mesh(new THREE.SphereGeometry(0.068, 16, 12), rubber, 0, 0.05, 0.068);
-    mask.scale.set(1.15, 0.85, 0.95);
-    head.add(mask);
+    attach('head', new THREE.SphereGeometry(0.068, 16, 12), rubber, 0, 1.63, 0.073).scale.set(1.15, 0.85, 0.95);
     for (const x of [-0.055, 0.055]) {
-      const filter = mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), metal, x, 0.035, 0.115);
-      filter.rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
-      head.add(filter);
+      attach('head', new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), metal, x, 1.615, 0.12).rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
     }
-
-    // Arms: shoulder and elbow joints, gloves, and a faded armband in the player's colour.
-    const arm = (side: number): [THREE.Object3D, THREE.Object3D] => {
-      const shoulder = new THREE.Group();
-      shoulder.position.set(side * 0.235, 0.45, 0);
-      torso.add(shoulder);
-      shoulder.add(mesh(new THREE.SphereGeometry(0.072, 14, 10), jacket));
-      shoulder.add(mesh(new THREE.CapsuleGeometry(0.06, 0.2, 6, 12), jacket, 0, -0.14, 0));
-      if (side < 0) shoulder.add(mesh(new THREE.CylinderGeometry(0.066, 0.066, 0.05, 14), accent, 0, -0.15, 0));
-      const elbow = new THREE.Group();
-      elbow.position.y = -0.28;
-      shoulder.add(elbow);
-      elbow.add(mesh(new THREE.CapsuleGeometry(0.052, 0.17, 6, 12), jacket, 0, -0.11, 0));
-      elbow.add(mesh(new THREE.CylinderGeometry(0.056, 0.05, 0.05, 12), darkLeather, 0, -0.21, 0));
-      elbow.add(mesh(new RoundedBoxGeometry(0.06, 0.1, 0.075, 2, 0.02), darkLeather, 0, -0.28, 0.005));
-      return [shoulder, elbow];
-    };
-    [this.shoulderL, this.elbowL] = arm(-1);
-    [this.shoulderR, this.elbowR] = arm(1);
 
     // A crude hatchet in the right hand, for chopping and hammering.
+    const grip = new THREE.Group();
+    grip.position.set(...HAND(1)).sub(world.get('elbowR')!);
+    grip.rotation.z = ARM_REST;
+    this.bones.elbowR.add(grip);
     const hatchet = new THREE.Group();
-    hatchet.position.set(0, -0.29, 0.03);
     hatchet.rotation.x = Math.PI / 2 - 0.2;
-    this.elbowR.add(hatchet);
-    hatchet.add(mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.42, 8), wood, 0, 0.08, 0));
-    hatchet.add(mesh(new RoundedBoxGeometry(0.02, 0.07, 0.11, 1, 0.006), metal, 0, 0.26, 0.045));
+    grip.add(hatchet);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.42, 8), wood);
+    handle.position.y = 0.08;
+    const blade = new THREE.Mesh(box(0.02, 0.07, 0.11, 0.006), metal);
+    blade.position.set(0, 0.26, 0.045);
+    hatchet.add(handle, blade);
 
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
@@ -268,6 +220,7 @@ export class Avatar {
   update(dt: number, moving: boolean) {
     dt = Math.min(dt, 0.1);
     this.time += dt;
+    const b = this.bones;
 
     // Speed comes from how far the avatar actually moved, so remote players animate
     // correctly too and a sprint reads differently from a walk.
@@ -291,34 +244,37 @@ export class Avatar {
     const stride = (0.5 + 0.3 * r) * w;
 
     // Legs: thighs swing, knees bend as each foot comes forward.
-    this.hipL.rotation.x = -s * stride;
-    this.hipR.rotation.x = s * stride;
-    this.kneeL.rotation.x = w * (0.08 + Math.max(0, c) * (0.75 + 0.6 * r));
-    this.kneeR.rotation.x = w * (0.08 + Math.max(0, -c) * (0.75 + 0.6 * r));
+    b.hipL.rotation.x = -s * stride;
+    b.hipR.rotation.x = s * stride;
+    b.kneeL.rotation.x = w * (0.08 + Math.max(0, c) * (0.75 + 0.6 * r));
+    b.kneeR.rotation.x = w * (0.08 + Math.max(0, -c) * (0.75 + 0.6 * r));
 
-    // Arms counter-swing with bent elbows; idle arms hang loosely and sway with breathing.
+    // Arms come down from the modelled pose to hang at the sides, counter-swing with bent
+    // elbows, and sway slightly with breathing when idle.
     const breathe = Math.sin(this.time * 1.8);
     const armSwing = (0.45 + 0.35 * r) * w;
-    this.shoulderL.rotation.set(s * armSwing, 0, -0.1 - breathe * 0.01);
-    this.shoulderR.rotation.set(-s * armSwing, 0, 0.1 + breathe * 0.01);
-    this.elbowL.rotation.x = -(0.2 + 0.25 * w + 0.9 * r);
-    this.elbowR.rotation.x = -(0.35 + 0.2 * w + 0.9 * r);
+    const hang = ARM_REST - 0.13 - breathe * 0.01;
+    b.shoulderL.rotation.set(s * armSwing, 0, hang);
+    b.shoulderR.rotation.set(-s * armSwing, 0, -hang);
+    b.elbowL.rotation.x = -(0.2 + 0.25 * w + 0.9 * r);
+    b.elbowR.rotation.x = -(0.35 + 0.2 * w + 0.9 * r);
 
     // Body: bob each step, lean forward when running, slight hip twist, idle breathing.
-    this.body.position.y = Math.abs(c) * (0.035 + 0.03 * r) * w - 0.02 * w;
+    b.root.position.y = Math.abs(c) * (0.035 + 0.03 * r) * w - 0.02 * w;
     const lean = 0.05 * w + 0.2 * r;
-    this.torso.rotation.set(lean, s * 0.1 * w, 0);
-    this.torso.scale.y = 1 + breathe * 0.008 * (1 - w);
-    this.head.rotation.set(-lean * 0.7, Math.sin(this.time * 0.4) * 0.15 * (1 - w), 0);
+    b.torso.rotation.set(lean, s * 0.1 * w, 0);
+    b.torso.scale.setScalar(1 + breathe * 0.006 * (1 - w));
+    b.head.rotation.set(-lean * 0.7, Math.sin(this.time * 0.4) * 0.15 * (1 - w), 0);
 
     if (this.swingTimer > 0) {
       this.swingTimer = Math.max(0, this.swingTimer - dt);
       const t = 1 - this.swingTimer / 0.35;
       // Wind up over the head, then chop down and forward.
       const lift = t < 0.4 ? t / 0.4 : 1 - (t - 0.4) / 0.6;
-      this.shoulderR.rotation.x = -2.6 * lift - 0.4 * (1 - lift) * Math.sin(t * Math.PI);
-      this.elbowR.rotation.x = -0.9 * lift - 0.3;
-      this.torso.rotation.y += -0.25 * Math.sin(t * Math.PI);
+      b.shoulderR.rotation.x = -2.6 * lift - 0.4 * (1 - lift) * Math.sin(t * Math.PI);
+      b.shoulderR.rotation.z = -hang * (1 - lift * 0.7);
+      b.elbowR.rotation.x = -0.9 * lift - 0.3;
+      b.torso.rotation.y += -0.25 * Math.sin(t * Math.PI);
     }
   }
 }
