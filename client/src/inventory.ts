@@ -365,7 +365,12 @@ export class InventoryUi {
 /** Damage, fire rate and magazine for weapons, shown in tooltips and the crafting menu. */
 function statsText(item: ItemId): string {
   const a = ITEMS[item].armour;
-  if (a) return `<div class="stats">Worn on the ${a.slot} · Blocks ${Math.round(a.protection * 100)}% of damage there · Right click to wear</div>`;
+  if (a) return `<div class="stats">Worn on the ${a.slot} · Blocks ${Math.round(a.protection * 100)}% of damage there · ${Math.round(a.radiation * 100)}% of radiation · Right click to wear</div>`;
+  const c = ITEMS[item].consume;
+  if (c) {
+    const parts = [c.food && `Food +${c.food}`, c.water && `Water +${c.water}`, c.rads && `Radiation −${c.rads}`].filter(Boolean);
+    return `<div class="stats">${parts.join(' · ')}</div>`;
+  }
   const w = ITEMS[item].weapon;
   if (!w || ITEMS[item].kind !== 'weapon') return ITEMS[item].heal ? `<div class="stats">Heals ${ITEMS[item].heal}</div>` : '';
   const dmg = w.pellets ? `${w.damage} × ${w.pellets} pellets` : `${w.damage}`;

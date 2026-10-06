@@ -42,6 +42,8 @@ const RESOURCE_NAMES = {
   sulfurOre: 'Sulfur ore',
   hqmOre: 'High quality metal ore',
   hemp: 'Hemp',
+  mushroom: 'Mushrooms',
+  waterBarrel: 'Rain barrel',
 } as const;
 const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
 const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
@@ -58,7 +60,11 @@ const RESOURCE_SURFACE: Record<ResourceNode['kind'], Surface> = {
   sulfurOre: 'ore',
   hqmOre: 'ore',
   hemp: 'hemp',
+  mushroom: 'hemp',
+  waterBarrel: 'dirt',
 };
+const SURVIVAL_DEATHS = { starvation: 'You starved to death.', thirst: 'You died of thirst.', radiation: 'Radiation poisoning killed you.' } as const;
+const SURVIVAL_FEED = { starvation: 'starved', thirst: 'died of thirst', radiation: 'died of radiation poisoning' } as const;
 
 interface Remote {
   state: PlayerState;
@@ -139,6 +145,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let hp = welcome.hp;
   let dead = false;
   hud.setHealth(hp);
+  let vitals = { ...welcome.vitals, level: 0 };
+  hud.setVitals(vitals);
   /** Left button held, for automatic guns. */
   let triggerHeld = false;
   /** Right button held with a gun: aiming down sights. */
@@ -213,8 +221,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           const at = new THREE.Vector3(node.x, node.y + (node.kind === 'tree' || node.kind === 'deadTree' ? 1.1 : 0.6), node.z);
           if (who) at.add(new THREE.Vector3(who.x - node.x, 0, who.z - node.z).setLength(RESOURCE_INFO[node.kind].radius * node.scale * 0.9));
           const surface = RESOURCE_SURFACE[node.kind];
-          effects.gatherSound(surface, at, m.amount === 0);
-          effects.chipsAt(at, surface, node.y, m.amount === 0 ? 16 : 7, m.amount === 0 ? 1.5 : 1);
+          if (node.kind === 'waterBarrel') effects.consumeSound('drink', at);
+          else {
+            effects.gatherSound(surface, at, m.amount === 0);
+            effects.chipsAt(at, surface, node.y, m.amount === 0 ? 16 : 7, m.amount === 0 ? 1.5 : 1);
+          }
           if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         }
         break;
@@ -238,6 +249,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         break;
       case 'crafted':
         effects.craftedSound();
+        break;
+      case 'vitals':
+        vitals = m;
+        hud.setVitals(m);
         break;
       case 'piece': {
         const old = world.pieces.get(m.key);
@@ -278,7 +293,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         effects.hitSound(m.head, m.kill, m.armour);
         break;
       case 'health':
-        if (m.hp < hp) {
+        // Flash red for a real hit; hunger, thirst and radiation chip away more quietly.
+        if (m.hp < hp && (m.from || hp - m.hp >= 3)) {
           hud.hurt();
           if (m.from) {
             effects.hurtSound(!!m.armour);
@@ -303,7 +319,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         ui.hide();
         document.exitPointerLock?.();
         const how = m.item ? ` with a ${ITEMS[m.item].name}` : '';
-        hud.showDeath(m.by ? `${m.by} killed you${how}.` : 'You died.', () => net.send({ t: 'respawn' }));
+        hud.showDeath(m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.', () => net.send({ t: 'respawn' }));
         break;
       }
       case 'notice':
@@ -311,7 +327,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         break;
       case 'kill': {
         const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
-        hud.killFeed(m.killer, m.victim, m.item ? ITEMS[m.item].name : null, m.head, mine);
+        hud.killFeed(m.killer, m.victim, m.item ? ITEMS[m.item].name : null, m.head, mine, m.cause ? SURVIVAL_FEED[m.cause] : null);
         break;
       }
     }
@@ -591,9 +607,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const item = held();
     if (heldGun()) return fire();
     if (item && ITEMS[item].armour) return net.send({ t: 'use', slot: ui.active });
-    if (item && ITEMS[item].heal) {
+    if (item && (ITEMS[item].heal || ITEMS[item].consume)) {
       net.send({ t: 'use', slot: ui.active });
       me.swing();
+      const c = ITEMS[item].consume;
+      if (c) effects.consumeSound(c.rads ? 'pills' : c.food ? 'eat' : 'drink', null);
       return;
     }
     if (aimPlayer && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
@@ -636,7 +654,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
       return openScreen(aimDeployable);
     }
-    if (aimResource?.kind === 'hemp' && resourceInRange(aimResource)) {
+    if (aimResource && RESOURCE_INFO[aimResource.kind].tool === 'pickup' && resourceInRange(aimResource)) {
       net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
       me.swing();
     }
@@ -718,6 +736,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   function describeTarget(): { text: string; health?: number } {
     const item = held();
+    if (aimResource?.kind === 'waterBarrel') {
+      const r = aimResource;
+      if (r.amount <= 0) return { text: 'Rain barrel: dry, it will refill' };
+      const label = `Rain barrel: ${Math.round((r.amount / RESOURCE_INFO.waterBarrel.amount) * 100)}% full`;
+      return { text: resourceInRange(r) ? `${label}  ·  E to drink` : `${label}  ·  Get closer` };
+    }
     if (aimResource && aimResource.amount > 0) {
       const info = RESOURCE_INFO[aimResource.kind];
       const label = `${RESOURCE_NAMES[aimResource.kind]}: ${aimResource.amount} ${ITEMS[info.yields].name.toLowerCase()}`;
@@ -907,6 +931,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     updateBuildInfo();
     ui.tick();
     effects.update(dt);
+    effects.geiger(dead ? 0 : vitals.level, dt);
     hud.setTarget(dead ? { text: '' } : describeTarget());
     const stack = slots[ui.active];
     hud.setAmmo(

@@ -44,6 +44,8 @@ const http = createServer((req, res) => {
 
 // START_KIT=500 gives everyone 500 of each basic resource; START_ITEMS='{"metal":3000}' gives exact items.
 const game = new Game(SEED, process.env.START_ITEMS ? JSON.parse(process.env.START_ITEMS) : Number(process.env.START_KIT ?? 0));
+// START_AT='x,z' spawns everyone at one spot, for screenshots.
+if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 

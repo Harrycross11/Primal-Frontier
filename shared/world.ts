@@ -2,9 +2,9 @@
 
 import { HALF_WORLD } from './constants.ts';
 import type { ItemId } from './items.ts';
-import { mulberry32, terrainHeight } from './terrain.ts';
+import { craters, mulberry32, terrainHeight } from './terrain.ts';
 
-export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre' | 'hemp';
+export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre' | 'hemp' | 'mushroom' | 'waterBarrel';
 /** Building materials, weakest to strongest is wood, stone, scrap. Each is also an item. */
 export type Material = 'wood' | 'stone' | 'scrap';
 export const MATERIALS: Material[] = ['wood', 'stone', 'scrap'];
@@ -38,7 +38,15 @@ export const RESOURCE_INFO: Record<
   sulfurOre: { yields: 'sulfurOre', tool: 'stone', amount: 90, perHit: 4, radius: 0.85, respawn: 240 },
   hqmOre: { yields: 'hqmOre', tool: 'stone', amount: 24, perHit: 1, radius: 0.85, respawn: 420 },
   hemp: { yields: 'cloth', tool: 'pickup', amount: 10, perHit: 10, radius: 0.2, respawn: 150 },
+  mushroom: { yields: 'mushroom', tool: 'pickup', amount: 3, perHit: 3, radius: 0.2, respawn: 200 },
+  // Rainwater: drunk on the spot rather than carried, a few gulps at a time. Refills slowly.
+  waterBarrel: { yields: 'bottledWater', tool: 'pickup', amount: 100, perHit: 25, radius: 0.45, respawn: 240 },
 };
+
+/** Water you gain from one drink at a barrel. */
+export const BARREL_DRINK = 25;
+/** Chance per hit on a wreck of finding a can of beans, and a bottle of water, in the glove box. */
+export const WRECK_LOOT = { cannedBeans: 0.1, bottledWater: 0.08 } as const;
 
 /**
  * Lays out the map's resources. Living trees only grow in one small "overgrowth" pocket;
@@ -79,6 +87,21 @@ export function generateResources(seed: number): ResourceNode[] {
     const px = (rand() - 0.5) * 2 * span;
     const pz = (rand() - 0.5) * 2 * span;
     for (let i = 0; i < 4; i++) add('hemp', px + (rand() - 0.5) * 6, pz + (rand() - 0.5) * 6);
+  }
+  // Survival: rain barrels to drink from and mushroom clumps to eat, added after everything
+  // else so older nodes keep their ids and places.
+  for (let i = 0; i < 12; i++) add('waterBarrel', (rand() - 0.5) * 2 * span, (rand() - 0.5) * 2 * span);
+  for (let patch = 0; patch < 7; patch++) {
+    const px = (rand() - 0.5) * 2 * span;
+    const pz = (rand() - 0.5) * 2 * span;
+    for (let i = 0; i < 3; i++) add('mushroom', px + (rand() - 0.5) * 4, pz + (rand() - 0.5) * 4);
+  }
+  // The richest ore sits in the hot craters: worth the radiation if you come prepared.
+  for (const c of craters(seed)) {
+    for (let i = 0; i < 2; i++) {
+      const a = rand() * Math.PI * 2;
+      add('hqmOre', c.x + Math.cos(a) * c.radius * 0.35, c.z + Math.sin(a) * c.radius * 0.35);
+    }
   }
   return nodes;
 }

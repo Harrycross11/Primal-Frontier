@@ -104,6 +104,110 @@ export function buildHemp(rand: () => number): THREE.Group {
   return g;
 }
 
+/** A clump of pale wasteland mushrooms with brown, speckled caps. */
+export function buildMushrooms(rand: () => number): THREE.Group {
+  const g = new THREE.Group();
+  const stemMat = plain(0xd8cdb4, 0.9);
+  const capMat = mat('mushroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));
+  const gillMat = plain(0xb8a888, 1);
+  for (let n = 0; n < 5; n++) {
+    const h = 0.16 + rand() * 0.22;
+    const r = 0.08 + rand() * 0.08;
+    const x = (rand() - 0.5) * 0.6;
+    const z = (rand() - 0.5) * 0.6;
+    const tilt = (rand() - 0.5) * 0.4;
+    const m = new THREE.Group();
+    m.position.set(x, 0, z);
+    m.rotation.set(tilt, rand() * 3, (rand() - 0.5) * 0.4);
+    m.add(mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.4, h, 8).translate(0, h / 2, 0), stemMat));
+    const cap = mesh(new THREE.SphereGeometry(r, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1), capMat, 0, h - 0.004, 0);
+    m.add(cap);
+    m.add(mesh(new THREE.CircleGeometry(r * 0.98, 12).rotateX(Math.PI / 2), gillMat, 0, h - 0.003, 0));
+    g.add(m);
+  }
+  return g;
+}
+
+/**
+ * A blue plastic drum catching rain under a tarp funnel. `setLevel` (0 to 1) raises or lowers
+ * the water inside as people drink from it.
+ */
+export function buildWaterBarrel(): THREE.Group {
+  const g = new THREE.Group();
+  const plastic = mat('drum-plastic', () => new THREE.MeshStandardMaterial({ color: 0x2c5a80, roughness: 0.5 }));
+  const body = mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, true), plastic, 0, 0.45, 0);
+  (body.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  g.add(body);
+  g.add(mesh(new THREE.CircleGeometry(0.3, 20).rotateX(-Math.PI / 2), plastic, 0, 0.02, 0));
+  for (const y of [0.22, 0.68]) g.add(mesh(new THREE.TorusGeometry(0.305, 0.015, 6, 24).rotateX(Math.PI / 2), plastic, 0, y, 0));
+  g.add(mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 24).rotateX(Math.PI / 2), plastic, 0, 0.9, 0));
+  // A torn tarp tied round the rim as a funnel.
+  const tarp = mat('tarp', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x5a6a4a, roughness: 1, side: THREE.DoubleSide }));
+  const funnel = mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.16, 10, 1, true), tarp, 0, 0.97, 0);
+  funnel.rotation.z = 0.08;
+  g.add(funnel);
+  for (const a of [0.4, 2.5, 4.4]) g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), ropeMat(), Math.cos(a) * 0.4, 0.9, Math.sin(a) * 0.4));
+  const water = mesh(
+    new THREE.CircleGeometry(0.29, 20).rotateX(-Math.PI / 2),
+    mat('barrel-water', () => new THREE.MeshStandardMaterial({ color: 0x3a5058, roughness: 0.08, metalness: 0.2 })),
+    0,
+    0.82,
+    0,
+  );
+  water.castShadow = false;
+  g.add(water);
+  g.userData.setLevel = (k: number) => {
+    water.visible = k > 0.01;
+    water.position.y = 0.1 + 0.72 * k;
+  };
+  return g;
+}
+
+/** A yellow radiation warning sign on a leaning post, at the edge of a hot crater. */
+export function buildRadSign(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.8, 6).translate(0, 0.9, 0), rustMat()));
+  const face = mat('rad-sign', () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#d8b42a';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = '#1e1a14';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(6, 6, 116, 116);
+    // The trefoil: three blades round a centre dot.
+    ctx.fillStyle = '#1e1a14';
+    ctx.translate(64, 64);
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const a = (i * 2 * Math.PI) / 3 - Math.PI / 2;
+      ctx.moveTo(Math.cos(a - 0.52) * 14, Math.sin(a - 0.52) * 14);
+      ctx.arc(0, 0, 46, a - 0.52, a + 0.52);
+      ctx.arc(0, 0, 14, a + 0.52, a - 0.52, true);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    // Weathering: rust streaks and flaked paint.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#7a4a24';
+    for (let i = 0; i < 9; i++) ctx.fillRect(10 + i * 13, 70 + (i % 3) * 12, 3, 40 + (i % 4) * 10);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.2 });
+  });
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.02), [rustMat(), rustMat(), rustMat(), rustMat(), face, rustMat()]);
+  board.position.set(0, 1.45, 0.05);
+  board.rotation.z = 0.12;
+  board.castShadow = true;
+  g.add(board);
+  g.rotation.z = 0.06;
+  return g;
+}
+
 /** The object for a deployable, sitting on y = 0, facing +z. Furnaces get a fire that can be lit. */
 export function buildDeployable(kind: DeployableKind): THREE.Group {
   const g = new THREE.Group();
@@ -261,6 +365,12 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'bandage':
     case 'syringe':
       return buildOtherWeapon(item)?.rotateX(-Math.PI / 2) ?? null;
+    case 'cannedBeans':
+    case 'bottledWater':
+    case 'antiRadPills':
+    case 'mushroom':
+      // Held upright in the palm.
+      return buildOtherWeapon(item)?.rotateX(-Math.PI / 2).translateY(-0.03) ?? null;
     case 'buildingPlan': {
       // A rolled blueprint tied with string.
       g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));

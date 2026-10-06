@@ -304,6 +304,55 @@ export class Effects {
     this.wind = level;
   }
 
+  /** Eating (crunchy chews), drinking (gulps) or swallowing pills (a rattle and a gulp). */
+  consumeSound(kind: 'eat' | 'drink' | 'pills', at: THREE.Vector3 | null) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 4);
+    if (near < 0.05) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.01, 0.2);
+    if (kind === 'eat') {
+      for (let i = 0; i < 3; i++) {
+        this.noiseHit(bus, noise, now + i * 0.17, 'bandpass', 1800 + Math.random() * 900, 1.2, 0.3 * near, 0.06);
+        this.thud(bus, now + i * 0.17, 140, 0.15 * near);
+      }
+    } else {
+      if (kind === 'pills') for (let i = 0; i < 5; i++) this.click(bus, now + i * 0.03 + Math.random() * 0.02, 3800, 0.12 * near);
+      const start = kind === 'pills' ? now + 0.3 : now;
+      // Gulps: a low resonant bloop that bends up as the throat closes.
+      for (let i = 0; i < (kind === 'pills' ? 1 : 3); i++) {
+        const t = start + i * 0.28;
+        this.tone(bus, t, 'sine', 180, 320, 0.3 * near, 0.09);
+        this.noiseHit(bus, noise, t, 'lowpass', 600, 1, 0.12 * near, 0.08);
+      }
+    }
+  }
+
+  private geigerWait = 0;
+  /**
+   * A Geiger counter: random clicks, more of them the hotter the ground you stand on. Call
+   * every frame with the radiation level (0 is silent).
+   */
+  geiger(level: number, dt: number) {
+    if (level <= 0) {
+      this.geigerWait = 0;
+      return;
+    }
+    this.geigerWait -= dt;
+    if (this.geigerWait > 0) return;
+    const a = this.context();
+    if (!a) return;
+    const rate = 3 + level * 9;
+    // Random gaps, like real decays: some clicks bunch up, some are spread out.
+    this.geigerWait = -Math.log(1 - Math.random()) / rate;
+    const bus = this.voiceBus(0, 0, 0.4);
+    const now = a.ctx.currentTime + 0.005;
+    this.noiseHit(bus, a.noise, now, 'highpass', 2500, 0.7, 0.35, 0.004);
+    this.noiseHit(bus, a.noise, now, 'bandpass', 4200, 3, 0.25, 0.006);
+  }
+
   /** A tree creaking and crashing down when its last wood is taken. */
   private creakAndFall(bus: AudioNode, at: number, v: number) {
     const { ctx, noise } = this.audio!;

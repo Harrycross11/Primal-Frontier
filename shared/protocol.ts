@@ -5,6 +5,7 @@ import type { Piece, PieceKind, WallEdit } from './building.ts';
 import type { Vec3 } from './combat.ts';
 import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
+import type { SurvivalCause, Vitals } from './survival.ts';
 import type { Material, ResourceNode } from './world.ts';
 
 export interface PlayerState {
@@ -57,7 +58,7 @@ export type ClientMessage =
   | { t: 'reload'; slot: number }
   /** Swing a melee weapon or tool (or your fists) at whoever is in front of you along `d`. */
   | { t: 'melee'; slot: number; d: Vec3 }
-  /** Use a bandage or syringe. */
+  /** Use a bandage or syringe, eat, drink or take pills. */
   | { t: 'use'; slot: number }
   | { t: 'respawn' };
 
@@ -74,6 +75,7 @@ export type ServerMessage =
       slots: Slots;
       wear: Slots;
       hp: number;
+      vitals: Vitals;
     }
   | { t: 'state'; players: PlayerState[] }
   | { t: 'joined'; player: PlayerState }
@@ -92,7 +94,9 @@ export type ServerMessage =
   | { t: 'correct'; x: number; y: number; z: number }
   | { t: 'notice'; text: string }
   /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
-  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean }
+  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: SurvivalCause }
+  /** Your hunger, thirst and radiation poisoning, and the radiation per second where you stand (after protection). */
+  | { t: 'vitals'; food: number; water: number; rads: number; level: number }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
   | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
   /** You hit someone (for the hit marker); `armour` when the hit landed on armour. */
@@ -100,5 +104,5 @@ export type ServerMessage =
   /** Your health changed; `from` is where the damage came from, if anywhere, and `armour` if your armour took some of it. */
   | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
-  | { t: 'died'; by: string | null; item: ItemId | null }
+  | { t: 'died'; by: string | null; item: ItemId | null; cause?: SurvivalCause }
   | { t: 'full' };

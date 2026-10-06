@@ -79,6 +79,23 @@ export class Hud {
     $('health-text').textContent = String(Math.max(0, Math.round(hp)));
   }
 
+  /** Food and water bars, and radiation poisoning with a warning while you stand somewhere hot. */
+  setVitals(v: { food: number; water: number; rads: number; level: number }) {
+    const bar = (id: string, n: number) => {
+      ($(`${id}-fill`) as HTMLElement).style.width = `${Math.max(0, Math.min(100, n))}%`;
+      $(`${id}-text`).textContent = String(Math.round(n));
+      $(id).classList.toggle('low', n < 20);
+    };
+    bar('food', v.food);
+    bar('water', v.water);
+    bar('rads', v.rads);
+    $('rads').hidden = v.rads < 1 && v.level <= 0;
+    const warn = $('rad-warning');
+    warn.hidden = v.level <= 0;
+    if (v.level > 0) warn.textContent = `☢ Radiation ${v.level.toFixed(1)}/s`;
+    ($('rad-tint') as HTMLElement).style.opacity = String(Math.min(0.55, v.level * 0.08 + v.rads * 0.002));
+  }
+
   /** A red flash at the edges of the screen when you take damage. */
   hurt() {
     const el = $('damage');
@@ -99,14 +116,14 @@ export class Hud {
   }
 
   /** A line in the kill feed; `mine` when you were the killer or the one killed. */
-  killFeed(killer: string | null, victim: string, weapon: string | null, head: boolean, mine: boolean) {
+  killFeed(killer: string | null, victim: string, weapon: string | null, head: boolean, mine: boolean, how: string | null = null) {
     const feed = $('kill-feed');
     const row = document.createElement('div');
     row.className = `kill${mine ? ' me' : ''}`;
     const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     row.innerHTML = killer
       ? `<b>${esc(killer)}</b> killed <b>${esc(victim)}</b>${weapon ? ` <span class="with">· ${esc(weapon)}</span>` : ''}${head ? ' <span class="hs">headshot</span>' : ''}`
-      : `<b>${esc(victim)}</b> died`;
+      : `<b>${esc(victim)}</b> ${how ?? 'died'}`;
     feed.prepend(row);
     while (feed.children.length > 5) feed.lastElementChild!.remove();
     fadeOut(row, 6000);

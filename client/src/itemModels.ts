@@ -240,12 +240,17 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
     return { model: wrap(gun), view: 'side' };
   }
   const kind = ITEMS[item].kind;
-  if (kind === 'weapon' || kind === 'medical') {
+  if (kind === 'weapon' || kind === 'medical' || kind === 'food') {
     const w = buildOtherWeapon(item);
     if (w) {
-      w.rotation.x = kind === 'medical' ? -0.4 : -0.75;
+      w.rotation.x = kind === 'weapon' ? -0.75 : -0.4;
       // Lay the crossbow's limbs toward the camera so they show.
       if (item === 'crossbow') w.rotation.set(-0.6, 0, 1.2);
+      // Cans, bottles and pills stand upright, seen from the front.
+      if (kind === 'food' || item === 'antiRadPills') {
+        w.rotation.x = 0.25;
+        return { model: wrap(w), view: 'front' };
+      }
       return { model: wrap(w), view: item === 'bandage' ? 'top' : 'side' };
     }
   }

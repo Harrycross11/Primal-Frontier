@@ -5,10 +5,11 @@ import { WORLD_SIZE } from '../../shared/constants.ts';
 import { MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
-import { generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
+import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
-import { buildBoulder, buildDeployable, buildHemp } from './props.ts';
+import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel } from './props.ts';
+import { radZones } from '../../shared/survival.ts';
 import { buildScenery } from './scenery.ts';
 import {
   barkSurface,
@@ -97,6 +98,7 @@ export class World {
     this.pickables.push(this.terrain);
     this.cameraBlockers.push(this.terrain);
     this.buildGrass();
+    this.buildRadSigns();
     const decor = generateDecor(seed);
     for (const d of decor) this.addDecor(d);
     buildScenery(this.scene, seed, decor);
@@ -183,6 +185,21 @@ export class World {
     mesh.receiveShadow = true;
     mesh.name = 'terrain';
     return mesh;
+  }
+
+  /** Warning signs round each radioactive crater, facing out so you see them on the way in. */
+  private buildRadSigns() {
+    for (const zone of radZones(this.seed)) {
+      for (let n = 0; n < 5; n++) {
+        const a = (n / 5) * Math.PI * 2 + zone.x * 0.1;
+        const x = zone.x + Math.cos(a) * zone.radius;
+        const z = zone.z + Math.sin(a) * zone.radius;
+        const sign = buildRadSign();
+        sign.position.set(x, terrainHeight(this.seed, x, z) - 0.05, z);
+        sign.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
+        this.scene.add(sign);
+      }
+    }
   }
 
   private buildGrass() {
@@ -368,7 +385,13 @@ export class World {
               ? this.wreck(rand)
               : node.kind === 'hemp'
                 ? buildHemp(rand)
-                : buildBoulder(rand, node.kind);
+                : node.kind === 'mushroom'
+                  ? buildMushrooms(rand)
+                  : node.kind === 'waterBarrel'
+                    ? buildWaterBarrel()
+                    : buildBoulder(rand, node.kind);
+      // A barrel stays put when drunk dry; only its water level changes.
+      if (node.kind === 'waterBarrel') g.userData.keep = true;
       g.position.set(node.x, node.y, node.z);
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);
@@ -390,6 +413,10 @@ export class World {
   setResourceAmount(id: number, amount: number) {
     const g = this.resourceMeshes.get(id);
     if (!g) return;
+    if (g.userData.keep) {
+      g.userData.setLevel?.(amount / RESOURCE_INFO.waterBarrel.amount);
+      return;
+    }
     const was = g.visible;
     g.visible = amount > 0;
     if (was && g.visible) this.bounce.set(id, 0.25);

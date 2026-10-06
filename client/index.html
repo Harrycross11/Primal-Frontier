@@ -53,7 +53,7 @@
       .kill .with { opacity: .7; }
       .kill .hs { color: #ff8a70; font-weight: 800; }
       .kill.fade, .pickup.fade { opacity: 0; }
-      #pickups { position: fixed; right: 16px; bottom: 176px; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 4px; pointer-events: none; }
+      #pickups { position: fixed; right: 16px; bottom: 222px; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 4px; pointer-events: none; }
       .pickup { display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; background: var(--panel); border-radius: 8px;
         font-size: 13px; font-weight: 700; animation: slide-in .2s ease-out; transition: opacity .6s; }
       .pickup svg, .pickup .icon { width: 24px; height: 24px; }
@@ -71,7 +71,24 @@
       .vital .bar { flex: 1; height: 16px; margin: 0; border-radius: 4px; position: relative; }
       .vital .bar i { background: #8fbf4a; transition: width .2s; }
       .vital .bar span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; text-shadow: 0 1px 2px #000; }
-      #ammo { position: fixed; right: 16px; bottom: 66px; padding: 6px 12px; background: var(--panel); border-radius: 10px; text-align: right; }
+      .vital + .vital { margin-top: 5px; }
+      .vital[hidden] { display: none; }
+      .vital .vi { width: 16px; height: 16px; display: grid; place-items: center; font-size: 13px; }
+      .vital .vi svg { width: 16px; height: 16px; }
+      #food .bar i { background: #c98a3e; }
+      #water .bar i { background: #4f9fd6; }
+      #rads .bar i { background: #b8d23a; }
+      #rads .vi { color: #d8e04a; }
+      .vital.low .bar { animation: pulse-low 1s ease-in-out infinite; }
+      @keyframes pulse-low { 50% { box-shadow: 0 0 0 2px rgba(255, 90, 60, .7); } }
+      #rad-tint { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1s;
+        background: radial-gradient(ellipse at center, rgba(150, 190, 40, .08) 30%, rgba(120, 170, 20, .55) 100%); mix-blend-mode: multiply; }
+      #rad-warning { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); padding: 5px 12px; border-radius: 8px;
+        background: rgba(60, 60, 10, .75); color: #e8f05a; font-weight: 800; font-size: 14px; letter-spacing: .5px; pointer-events: none;
+        animation: rad-blink 1.6s ease-in-out infinite; }
+      #rad-warning[hidden] { display: none; }
+      @keyframes rad-blink { 50% { opacity: .65; } }
+      #ammo { position: fixed; right: 16px; bottom: 112px; padding: 6px 12px; background: var(--panel); border-radius: 10px; text-align: right; }
       #ammo[hidden] { display: none; }
       #ammo b { font-size: 26px; }
       #ammo small { display: block; font-size: 11px; opacity: .75; }
@@ -120,7 +137,7 @@
         border-radius: 10px; font-size: 13px; text-align: center; white-space: nowrap; }
       #build-info[hidden] { display: none; }
       #build-info b { color: #ffb45e; }
-      #craft-progress { position: fixed; bottom: 128px; right: 16px; width: 210px; padding: 8px 10px; background: var(--panel);
+      #craft-progress { position: fixed; bottom: 174px; right: 16px; width: 210px; padding: 8px 10px; background: var(--panel);
         border-radius: 10px; font-size: 12px; }
       #craft-progress[hidden] { display: none; }
       .bar { height: 5px; margin-top: 5px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
@@ -228,7 +245,14 @@
       <div id="craft-progress" hidden></div>
       <div id="belt"></div>
       <div id="ammo" hidden></div>
-      <div id="vitals"><div class="vital">❤<div class="bar"><i id="health-fill" style="width:100%"></i><span id="health-text">100</span></div></div></div>
+      <div id="rad-tint"></div>
+      <div id="rad-warning" hidden></div>
+      <div id="vitals">
+        <div class="vital" id="rads" hidden><span class="vi">☢</span><div class="bar"><i id="rads-fill"></i><span id="rads-text">0</span></div></div>
+        <div class="vital" id="water"><span class="vi"><svg viewBox="0 0 16 16"><path d="M8 1.5 C5 6 3.5 8.2 3.5 10.3 A4.5 4.5 0 0 0 12.5 10.3 C12.5 8.2 11 6 8 1.5Z" fill="#7cc4f0"/></svg></span><div class="bar"><i id="water-fill" style="width:60%"></i><span id="water-text">60</span></div></div>
+        <div class="vital" id="food"><span class="vi"><svg viewBox="0 0 16 16"><path d="M3 9 C3 5 6 3.5 9.5 4 C13 4.5 14 7.5 12.5 10 C11 12.5 6.5 13 4.5 11.5 Z" fill="#d79a52"/><circle cx="12.6" cy="4.2" r="1.6" fill="#efe2c8"/><path d="M11.6 5.2 L10 6.8" stroke="#efe2c8" stroke-width="1.4"/></svg></span><div class="bar"><i id="food-fill" style="width:60%"></i><span id="food-text">60</span></div></div>
+        <div class="vital"><span class="vi">❤</span><div class="bar"><i id="health-fill" style="width:100%"></i><span id="health-text">100</span></div></div>
+      </div>
       <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><button id="respawn">Respawn</button></div></div>
       <div id="notice"></div>
       <div id="help">

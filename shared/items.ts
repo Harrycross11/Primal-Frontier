@@ -61,6 +61,10 @@ export type ItemId =
   // Medical
   | 'bandage'
   | 'syringe'
+  | 'antiRadPills'
+  | 'mushroom'
+  | 'cannedBeans'
+  | 'bottledWater'
   // Armour
   | 'burlapHeadwrap'
   | 'burlapShirt'
@@ -121,11 +125,21 @@ export interface ArmourInfo {
   protection: number;
   /** Hits it absorbs before it falls apart. */
   durability: number;
+  /** Fraction of radiation it keeps out, 0 to 1; pieces add up. */
+  radiation: number;
+}
+
+/** What eating, drinking or swallowing something does: food and water gained, radiation removed. */
+export interface ConsumeInfo {
+  food?: number;
+  water?: number;
+  /** Radiation poisoning removed. */
+  rads?: number;
 }
 
 export interface ItemInfo {
   name: string;
-  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour';
+  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour' | 'food';
   stack: number;
   description: string;
   tool?: ToolInfo;
@@ -133,6 +147,8 @@ export interface ItemInfo {
   /** Medical items: health restored. */
   heal?: number;
   armour?: ArmourInfo;
+  /** Food, drink and anti-rad pills. */
+  consume?: ConsumeInfo;
 }
 
 const res = (name: string, description: string): ItemInfo => ({ name, kind: 'resource', stack: 1000, description });
@@ -143,12 +159,12 @@ const melee = (name: string, description: string, damage: number, delay: number,
   description,
   weapon: { class: 'melee', damage, delay, range, durability },
 });
-const armour = (name: string, description: string, slot: ArmourSlot, protection: number, durability: number): ItemInfo => ({
+const armour = (name: string, description: string, slot: ArmourSlot, protection: number, durability: number, radiation: number): ItemInfo => ({
   name,
   kind: 'armour',
   stack: 1,
   description,
-  armour: { slot, protection, durability },
+  armour: { slot, protection, durability, radiation },
 });
 const gun = (name: string, description: string, weapon: Omit<WeaponInfo, 'class'> & { class?: 'bow' }): ItemInfo => ({
   name,
@@ -284,15 +300,20 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   bandage: { name: 'Bandage', kind: 'medical', stack: 3, heal: 15, description: 'Heals 15 health. Left click to use.' },
   syringe: { name: 'Medical Syringe', kind: 'medical', stack: 2, heal: 35, description: 'Heals 35 health. Left click to use.' },
 
-  burlapHeadwrap: armour('Burlap Headwrap', 'Sacking wound round the head. Better than nothing.', 'head', 0.1, 60),
-  burlapShirt: armour('Burlap Shirt', 'A rough cloth shirt that takes the sting off a hit.', 'chest', 0.1, 60),
-  burlapTrousers: armour('Burlap Trousers', 'Rough cloth trousers, padded at the knees.', 'legs', 0.1, 60),
-  coffeeCanHelmet: armour('Coffee Can Helmet', 'A dented can with a leather strap. Turns a few bullets.', 'head', 0.3, 120),
-  roadsignJacket: armour('Road Sign Jacket', 'Road signs riveted to a jacket. Heavy, loud and it works.', 'chest', 0.3, 120),
-  roadsignKilt: armour('Road Sign Kilt', 'Hammered road signs hung from a belt to guard the legs.', 'legs', 0.3, 120),
-  metalFacemask: armour('Metal Facemask', 'A welded steel face plate. Headshots stop being lucky.', 'head', 0.5, 200),
-  metalChestplate: armour('Metal Chest Plate', 'Thick steel front and back. The best a survivor can wear.', 'chest', 0.5, 200),
-  metalLegPlates: armour('Metal Leg Plates', 'Steel plates strapped over the thighs and shins.', 'legs', 0.45, 200),
+  burlapHeadwrap: armour('Burlap Headwrap', 'Sacking wound round the head. Keeps some fallout off your face.', 'head', 0.1, 60, 0.12),
+  burlapShirt: armour('Burlap Shirt', 'A rough cloth shirt that takes the sting off a hit and keeps some fallout off.', 'chest', 0.1, 60, 0.12),
+  burlapTrousers: armour('Burlap Trousers', 'Rough cloth trousers, padded at the knees.', 'legs', 0.1, 60, 0.12),
+  coffeeCanHelmet: armour('Coffee Can Helmet', 'A dented can with a leather strap. Turns a few bullets.', 'head', 0.3, 120, 0.05),
+  roadsignJacket: armour('Road Sign Jacket', 'Road signs riveted to a jacket. Heavy, loud and it works.', 'chest', 0.3, 120, 0.05),
+  roadsignKilt: armour('Road Sign Kilt', 'Hammered road signs hung from a belt to guard the legs.', 'legs', 0.3, 120, 0.05),
+  metalFacemask: armour('Metal Facemask', 'A welded steel face plate. Headshots stop being lucky.', 'head', 0.5, 200, 0.06),
+  metalChestplate: armour('Metal Chest Plate', 'Thick steel front and back. The best a survivor can wear.', 'chest', 0.5, 200, 0.06),
+  metalLegPlates: armour('Metal Leg Plates', 'Steel plates strapped over the thighs and shins.', 'legs', 0.45, 200, 0.06),
+
+  antiRadPills: { name: 'Anti-Radiation Pills', kind: 'medical', stack: 10, consume: { rads: 40 }, description: 'Flushes out 40 radiation. Left click to take.' },
+  mushroom: { name: 'Mushroom', kind: 'food', stack: 20, consume: { food: 10, water: 3 }, description: 'Grows in the shade of ruins. Chewy, but it is food. Left click to eat.' },
+  cannedBeans: { name: 'Can of Beans', kind: 'food', stack: 10, consume: { food: 40, water: 5 }, description: 'Still sealed. Found in the glove boxes of old wrecks. Left click to eat.' },
+  bottledWater: { name: 'Bottled Water', kind: 'food', stack: 10, consume: { water: 35 }, description: 'Clean water from before the bombs. Found in old wrecks. Left click to drink.' },
 };
 
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -470,6 +491,7 @@ export const RECIPES: Recipe[] = [
 
   { item: 'bandage', count: 1, cost: { cloth: 4 }, time: 2, category: 'Medical' },
   { item: 'syringe', count: 1, cost: { cloth: 15, metal: 10 }, time: 4, workbench: 1, category: 'Medical' },
+  { item: 'antiRadPills', count: 1, cost: { charcoal: 15, mushroom: 2 }, time: 3, category: 'Medical' },
 
   { item: 'gunpowder', count: 10, cost: { charcoal: 30, sulfur: 20 }, time: 3, category: 'Resources' },
 ];

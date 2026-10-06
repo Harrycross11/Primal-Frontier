@@ -222,7 +222,7 @@ export class Controller {
 
   private hitsResource(x: number, z: number): boolean {
     for (const n of this.resources()) {
-      if (n.amount <= 0 || n.kind === 'hemp') continue;
+      if (n.amount <= 0 || n.kind === 'hemp' || n.kind === 'mushroom') continue;
       const r = RESOURCE_INFO[n.kind].radius * n.scale + PLAYER_RADIUS;
       const was = Math.hypot(this.position.x - n.x, this.position.z - n.z);
       // Only block movement that goes further into the obstacle, so nobody gets stuck.
