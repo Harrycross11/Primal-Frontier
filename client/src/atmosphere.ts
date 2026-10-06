@@ -9,7 +9,7 @@ import { SUN_DIRECTION } from './graphics.ts';
 export const FOG_FALLOFF = 0.055;
 export const FOG_BASE = -2;
 /** The colour of the haze toward the sun, in linear light. */
-export const SUN_HAZE = new THREE.Color(0xffc690);
+export const SUN_HAZE = new THREE.Color(0xffd2a4);
 
 const v = (c: { x: number; y: number; z: number } | THREE.Color) =>
   'r' in c ? `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})` : `vec3(${c.x.toFixed(4)}, ${c.y.toFixed(4)}, ${c.z.toFixed(4)})`;

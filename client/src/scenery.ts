@@ -7,6 +7,7 @@ import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
 import { asphaltSurface, barkSurface, concreteSurface } from './textures.ts';
+import { rockGeometry, rockMaterial } from './rocks.ts';
 
 export function buildScenery(scene: THREE.Scene, seed: number, decor: Decor[]) {
   buildRoad(scene, seed, decor);
@@ -89,18 +90,6 @@ function buildPuddles(scene: THREE.Scene, seed: number) {
   }
 }
 
-/** Fills a lumpy rock shape with random dents, so every instance reads as a stone. */
-function stone(detail: number, rand: () => number): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, detail);
-  const p = geo.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const k = 0.75 + rand() * 0.4;
-    p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.6, p.getZ(i) * k);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-
 /** Scattered pebbles, rubble, bricks, old tyres, planks and dead shrubs. */
 function buildScatter(scene: THREE.Scene, seed: number) {
   const rand = mulberry32(seed ^ 0x5eed);
@@ -148,8 +137,9 @@ function buildScatter(scene: THREE.Scene, seed: number) {
   };
 
   // Pebbles and small stones.
-  const rockMat = new THREE.MeshStandardMaterial({ ...concrete, color: 0x766e62, roughness: 1, flatShading: true });
-  scatter(stone(0, rand), rockMat, 3000, () => ({ ...anywhere(), size: 0.04 + rand() * rand() * 0.22, lift: 0.1 }));
+  const pebble = rockGeometry(rand, { detail: 1, stretch: [1.1, 0.7, 1], cuts: 3 });
+  const rockMat = rockMaterial('pebble', { color: 0x857c70 });
+  scatter(pebble.geo, rockMat, 3000, () => ({ ...anywhere(), size: 0.04 + rand() * rand() * 0.22, lift: 0.1 }));
 
   // Broken concrete rubble and bricks.
   const rubble = clusters(30, 8);

@@ -244,6 +244,39 @@ export function concreteSurface(): Surface {
   return surface('concrete', 256, draw, bump, 3);
 }
 
+/**
+ * Weathered rock for boulders, one tile covering about 2 m: broad stains, grain you can see
+ * from a few metres, strata, chips and fractures, and faint lichen.
+ */
+export function rockSurface(): Surface {
+  const draw: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#9a958c';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 120, ['#7a746a', '#b4ada1', '#6c665d', '#a69a86'], 20, 90, 0.35);
+    ctx.globalAlpha = 0.16;
+    for (let y = 0; y < size; y += 10 + rand() * 30) {
+      ctx.fillStyle = rand() < 0.5 ? '#5a544c' : '#c8c1b4';
+      ctx.fillRect(0, y, size, 3 + rand() * 9);
+    }
+    ctx.globalAlpha = 1;
+    blotches(ctx, size, rand, 900, ['#5f5a52', '#c4bdb0', '#4e4a44', '#aea697'], 2, 7, 0.5);
+    blotches(ctx, size, rand, 3000, ['#4a4640', '#d0c9bc'], 0.8, 2.4, 0.6);
+    blotches(ctx, size, rand, 50, ['#9c9d78', '#b39a62'], 4, 14, 0.3);
+    cracks(ctx, size, rand, 22, 'rgba(34,31,28,0.75)', 2.4);
+    cracks(ctx, size, rand, 40, 'rgba(40,37,33,0.5)', 1.2);
+  };
+  const bump: Draw = (ctx, size, rand) => {
+    ctx.fillStyle = '#888';
+    ctx.fillRect(0, 0, size, size);
+    blotches(ctx, size, rand, 140, ['#6a6a6a', '#a4a4a4'], 20, 90, 0.45);
+    blotches(ctx, size, rand, 900, ['#555', '#bbb'], 2, 7, 0.55);
+    blotches(ctx, size, rand, 3000, ['#4a4a4a', '#c4c4c4'], 0.8, 2.4, 0.6);
+    cracks(ctx, size, rand, 22, '#141414', 3.5);
+    cracks(ctx, size, rand, 40, '#2a2a2a', 1.6);
+  };
+  return surface('rock-granite', 512, draw, bump, 3);
+}
+
 /** Rough charred bark for trees and poles. */
 export function barkSurface(dark = false): Surface {
   const base = dark ? ['#4a4038', '#5a4d42', '#3a322c'] : ['#5b4334', '#6b5040', '#4a362a'];
@@ -542,7 +575,16 @@ export function grassTexture(): THREE.Texture {
     ctx.quadraticCurveTo(x + lean * 0.3, size - h * 0.6, x + lean, size - h);
     ctx.stroke();
   }
-  const src = ctx.getImageData(0, 0, size, size).data;
+  return cutout(canvas, [0x93, 0x84, 0x58]);
+}
+
+/**
+ * Turns a canvas drawing with a transparent background into a texture whose see-through
+ * pixels carry `fill` instead of black, so shrinking it with distance doesn't darken the edges.
+ */
+function cutout(canvas: HTMLCanvasElement, fill: [number, number, number]): THREE.Texture {
+  const size = canvas.width;
+  const src = canvas.getContext('2d')!.getImageData(0, 0, size, size).data;
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     // Flip rows: canvas rows run top down, texture rows bottom up.
@@ -551,10 +593,10 @@ export function grassTexture(): THREE.Texture {
       const i = from + x * 4;
       const o = (y * size + x) * 4;
       const a = src[i + 3];
-      // Fully clear pixels take the average blade colour; partly clear keep their own.
-      data[o] = a ? src[i] : 0x93;
-      data[o + 1] = a ? src[i + 1] : 0x84;
-      data[o + 2] = a ? src[i + 2] : 0x58;
+      // Fully clear pixels take the fill colour; partly clear keep their own.
+      data[o] = a ? src[i] : fill[0];
+      data[o + 1] = a ? src[i + 1] : fill[1];
+      data[o + 2] = a ? src[i + 2] : fill[2];
       data[o + 3] = a;
     }
   }
@@ -563,8 +605,71 @@ export function grassTexture(): THREE.Texture {
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
   tex.needsUpdate = true;
   return tex;
+}
+
+/**
+ * A round spray of small leaves on twigs, for the foliage cards on living trees. Leaves thin
+ * out towards the edge so a card reads as a clump rather than a square.
+ */
+export function leafTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const rand = mulberry32(4242);
+  const c = size / 2;
+  // Twigs from the centre outwards, which the leaves hang off.
+  ctx.strokeStyle = '#4a3c2c';
+  ctx.lineCap = 'round';
+  const twigs: [number, number, number][] = [];
+  for (let n = 0; n < 9; n++) {
+    const a = (n / 9) * Math.PI * 2 + rand() * 0.5;
+    const len = size * (0.3 + rand() * 0.14);
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(c, c);
+    ctx.lineTo(c + Math.cos(a) * len, c + Math.sin(a) * len);
+    ctx.stroke();
+    twigs.push([a, len, 0]);
+  }
+  const shades = ['#5d6a32', '#6b7838', '#4e5a2a', '#76803e', '#828a48', '#59642c', '#8a8248'];
+  for (let n = 0; n < 420; n++) {
+    const [a0, len] = twigs[Math.floor(rand() * twigs.length)];
+    const along = 0.2 + rand() * 0.85;
+    const spread = (rand() - 0.5) * 30;
+    const a = a0 + (rand() - 0.5) * 0.35;
+    const x = c + Math.cos(a) * len * along - Math.sin(a) * spread * 0.4;
+    const y = c + Math.sin(a) * len * along + Math.cos(a) * spread * 0.4;
+    const l = 9 + rand() * 9;
+    const w = 3.5 + rand() * 3;
+    const tilt = a + (rand() - 0.5) * 2.2;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.fillStyle = shades[Math.floor(rand() * shades.length)];
+    ctx.beginPath();
+    ctx.moveTo(-l / 2, 0);
+    ctx.quadraticCurveTo(0, -w, l / 2, 0);
+    ctx.quadraticCurveTo(0, w, -l / 2, 0);
+    ctx.fill();
+    // A lighter midrib and a darker underside on half the leaf give it some shape.
+    ctx.fillStyle = 'rgba(30,34,14,0.28)';
+    ctx.beginPath();
+    ctx.moveTo(-l / 2, 0);
+    ctx.quadraticCurveTo(0, w, l / 2, 0);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,200,140,0.25)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-l / 2, 0);
+    ctx.lineTo(l / 2, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+  return cutout(canvas, [0x62, 0x6c, 0x34]);
 }
 
 /** A soft round dot for ash particles. */

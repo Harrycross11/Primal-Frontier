@@ -14,8 +14,8 @@ export type Quality = 'high' | 'low';
 
 /** Low, hazy sun: late afternoon on a dead planet. */
 export const SUN_DIRECTION = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 16), THREE.MathUtils.degToRad(215));
-export const HAZE = new THREE.Color(0xb4a084);
-const ZENITH = new THREE.Color(0x5f6a76);
+export const HAZE = new THREE.Color(0xbcb09c);
+const ZENITH = new THREE.Color(0x56708e);
 
 /**
  * A dusty sky dome: hazy brown at the horizon (matching the fog, so distant land melts into
@@ -31,7 +31,7 @@ function skyDome(radius: number, time: { value: number }): THREE.Mesh {
       horizon: { value: HAZE },
       zenith: { value: ZENITH },
       sunDir: { value: SUN_DIRECTION },
-      sunColor: { value: new THREE.Color(0xffd2a0) },
+      sunColor: { value: new THREE.Color(0xffdcb4) },
       time,
     },
     vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`,
@@ -126,15 +126,15 @@ const GradeShader = {
       c.r = texture2D(tDiffuse, vUv + ca).r;
       c.b = texture2D(tDiffuse, vUv - ca).b;
       float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-      vec3 graded = mix(vec3(l), c.rgb, 0.9);
+      vec3 graded = mix(vec3(l), c.rgb, 0.96);
       // Warm highlights, slightly cool shadows.
       graded *= mix(vec3(0.95, 0.98, 1.04), vec3(1.05, 1.0, 0.9), smoothstep(0.1, 0.7, l));
       graded = (graded - 0.5) * 1.1 + 0.5;
       float v = smoothstep(0.95, 0.3, length(fromCentre));
-      graded *= mix(0.7, 1.0, v);
+      graded *= mix(0.8, 1.0, v);
       // Film grain, stronger in the shadows.
       float g = hash(vUv * 1000.0 + fract(time) * 100.0) - 0.5;
-      graded += g * 0.035 * (1.0 - l * 0.6);
+      graded += g * 0.022 * (1.0 - l * 0.6);
       c.rgb = mix(c.rgb, graded, amount);
       gl_FragColor = c;
     }`,
@@ -188,6 +188,18 @@ export class Graphics {
     this.gtao = new GTAOPass(scene, this.camera, innerWidth, innerHeight);
     this.gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.5, scale: 1.1 });
     this.gtao.blendIntensity = 0.85;
+    // The occlusion pass draws everything with one plain material, so cut-out leaf cards would
+    // shade as solid squares. Leave anything marked noAO out of it.
+    const gtao = this.gtao as unknown as { _overrideVisibility(): void; _visibilityCache: THREE.Object3D[] };
+    gtao._overrideVisibility = () => {
+      scene.traverse((o) => {
+        const line = (o as THREE.Points).isPoints || (o as THREE.Line).isLine;
+        if ((line || o.userData.noAO) && o.visible) {
+          o.visible = false;
+          gtao._visibilityCache.push(o);
+        }
+      });
+    };
     this.composer.addPass(this.gtao);
     this.shafts = new ShaderPass(SunShaftShader);
     this.composer.addPass(this.shafts);

@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
+import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 const cache = new Map<string, THREE.Material>();
@@ -42,42 +43,25 @@ const BOULDER_COLORS: Record<BoulderKind, [number, number]> = {
   hqmOre: [0x7c838c, 0xb4cde2],
 };
 
-/** A lumpy boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
+/** A weathered boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
 export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group {
   const ore = kind !== 'stone';
   const g = new THREE.Group();
-  const geo = new THREE.IcosahedronGeometry(1, 2);
-  const p = geo.attributes.position;
-  const colors = new Float32Array(p.count * 3);
-  const base = new THREE.Color(BOULDER_COLORS[kind][0]);
-  const vein = new THREE.Color(BOULDER_COLORS[kind][1]);
-  const c = new THREE.Color();
-  const bumps = [...Array(6)].map(() => new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize());
-  const veins = [...Array(5)].map(() => new THREE.Vector3(rand() - 0.5, rand() * 0.6, rand() - 0.5).normalize());
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i).normalize();
-    let k = 0.85;
-    for (const b of bumps) k += Math.max(0, v.dot(b) - 0.6) * 0.5;
-    k += (rand() - 0.5) * 0.08;
-    p.setXYZ(i, v.x * k * 1.1, v.y * k * 0.75, v.z * k);
-    c.copy(base).multiplyScalar(0.85 + rand() * 0.25);
-    if (ore) for (const w of veins) if (v.dot(w) > (kind === 'sulfurOre' ? 0.8 : 0.86)) c.lerp(vein, 0.85);
-    c.toArray(colors, i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-  const rockMat = mat(`boulder-${kind}`, () =>
-    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.8 : 1, metalness: 0, flatShading: true }),
-  );
-  const body = mesh(geo, rockMat, 0, 0.45, 0);
+  const { geo, cavity } = rockGeometry(rand, { detail: 4, stretch: [1.15, 0.85, 1], cuts: 8 });
+  paintRock(geo, cavity, new THREE.Color(BOULDER_COLORS[kind][0]), rand, ore ? { color: new THREE.Color(BOULDER_COLORS[kind][1]), count: 4, width: kind === 'sulfurOre' ? 0.22 : 0.16 } : undefined);
+  const rockMat = rockMaterial(`boulder-${kind}`, { vertexColors: true, roughness: ore ? 0.82 : 0.95 });
+  const body = mesh(geo, rockMat, 0, 0.36, 0);
   g.add(body);
-  // A couple of smaller stones around the base.
+  // A few smaller stones broken off around the base.
   for (let n = 0; n < 3; n++) {
-    const small = mesh(new THREE.DodecahedronGeometry(0.22 + rand() * 0.15, 0), ore ? rockMat : stoneMat());
+    const piece = rockGeometry(rand, { detail: 2, stretch: [1, 0.7, 0.9], cuts: 3 });
+    paintRock(piece.geo, piece.cavity, new THREE.Color(BOULDER_COLORS[kind][0]), rand);
+    const small = mesh(piece.geo, rockMat, 0, 0, 0);
     const a = rand() * Math.PI * 2;
-    small.position.set(Math.cos(a) * 1.1, 0.08, Math.sin(a) * 1.0);
-    small.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+    const s = 0.2 + rand() * 0.16;
+    small.scale.setScalar(s);
+    small.position.set(Math.cos(a) * 1.15, s * 0.3, Math.sin(a) * 1.05);
+    small.rotation.set((rand() - 0.5) * 0.4, rand() * 6, (rand() - 0.5) * 0.4);
     g.add(small);
   }
   return g;

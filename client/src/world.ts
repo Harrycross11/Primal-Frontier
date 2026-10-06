@@ -10,12 +10,14 @@ import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
+import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery } from './scenery.ts';
 import {
   barkSurface,
   concreteSurface,
   dotTexture,
   grassTexture,
+  leafTexture,
   groundSurface,
   macroNoiseTexture,
   metalSurface,
@@ -52,10 +54,12 @@ export class World {
   private materials: Record<string, THREE.MeshStandardMaterial>;
 
   constructor(readonly seed: number) {
-    this.scene.fog = new THREE.FogExp2(HAZE, 0.0125);
+    this.scene.fog = new THREE.FogExp2(HAZE, 0.0085);
 
-    this.scene.add(new THREE.HemisphereLight(0xcdbca2, 0x3c342c, 0.45));
-    this.sun = new THREE.DirectionalLight(0xffd6a0, 2.4);
+    // Shade is lit by the sky, so it runs cool and blue against the warm sun, with a little
+    // warm light bounced up off the ground.
+    this.scene.add(new THREE.HemisphereLight(0xa9bad0, 0x4a3e32, 0.6));
+    this.sun = new THREE.DirectionalLight(0xffe0b8, 2.8);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
     // Soft-edged shadows: wider filtering, like a sun seen through dust.
@@ -87,9 +91,7 @@ export class World {
       rebar: std({ color: 0x5a3a28, roughness: 0.7, metalness: 0.6 }),
       bark: std({ ...bark, roughness: 0.95 }),
       barkDark: std({ ...barkDark, roughness: 0.95 }),
-      leaves: std({ color: 0x5f6b34, roughness: 0.9, flatShading: true }),
       barrel: std({ ...barrel, roughness: 0.7, metalness: 0.5 }),
-      rock: std({ ...concrete, color: 0x8a8278, roughness: 1, flatShading: true }),
       pole: std({ ...bark, color: 0x8a7a6a, roughness: 0.95 }),
     };
 
@@ -336,14 +338,9 @@ export class World {
       g.rotation.x = (rand() - 0.5) * 0.2;
       this.decorColliders.push({ min: [d.x - 0.2, d.y, d.z - 0.2], max: [d.x + 0.2, d.y + 8, d.z + 0.2] });
     } else if (d.kind === 'rock') {
-      const geo = new THREE.IcosahedronGeometry(1, 1);
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const k = 0.75 + rand() * 0.45;
-        p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.7, p.getZ(i) * k);
-      }
-      geo.computeVertexNormals();
-      const rock = solid(new THREE.Mesh(geo, this.materials.rock), d.scale > 1);
+      const { geo, cavity } = rockGeometry(rand, { detail: d.scale > 1 ? 4 : 3, stretch: [1.2, 0.75, 1], cuts: 5 });
+      paintRock(geo, cavity, new THREE.Color(0x8a8278), rand);
+      const rock = solid(new THREE.Mesh(geo, rockMaterial('decor-rock', { vertexColors: true })), d.scale > 1);
       rock.scale.setScalar(d.scale);
       rock.position.y = d.scale * 0.25;
       if (d.scale > 1) {
@@ -422,50 +419,128 @@ export class World {
     if (was && g.visible) this.bounce.set(id, 0.25);
   }
 
-  private branch(parent: THREE.Object3D, mat: THREE.Material, len: number, radius: number, depth: number, rand: () => number) {
-    const geo = new THREE.CylinderGeometry(radius * 0.6, radius, len, 6);
+  /**
+   * A tapering limb that forks into smaller ones. Each limb starts as wide as its parent is at
+   * that height, so joints don't step. Tips are collected so leaves can hang off them.
+   */
+  private branch(parent: THREE.Object3D, mat: THREE.Material, len: number, radius: number, depth: number, rand: () => number, tips?: THREE.Object3D[]) {
+    const top = radius * (depth > 0 ? 0.62 : 0.3);
+    const geo = new THREE.CylinderGeometry(top, radius, len, depth > 1 ? 9 : 6, 4);
     geo.translate(0, len / 2, 0);
+    // A slight random bend so limbs aren't ruler-straight.
+    const p = geo.attributes.position;
+    const bendX = (rand() - 0.5) * 0.18 * len;
+    const bendZ = (rand() - 0.5) * 0.18 * len;
+    for (let i = 0; i < p.count; i++) {
+      const t = p.getY(i) / len;
+      const k = Math.sin(t * Math.PI);
+      p.setXYZ(i, p.getX(i) + bendX * k, p.getY(i), p.getZ(i) + bendZ * k);
+    }
+    geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
     parent.add(mesh);
-    if (depth <= 0) return mesh;
+    if (depth <= 0) {
+      const tip = new THREE.Object3D();
+      tip.position.y = len;
+      mesh.add(tip);
+      tips?.push(tip);
+      return mesh;
+    }
     const kids = 2 + Math.floor(rand() * 2);
     for (let n = 0; n < kids; n++) {
       const pivot = new THREE.Group();
-      pivot.position.y = len * (0.55 + rand() * 0.4);
-      pivot.rotation.set((rand() - 0.5) * 0.4, rand() * Math.PI * 2, 0.5 + rand() * 0.5);
-      pivot.rotateZ(0);
+      const at = 0.55 + rand() * 0.4;
+      pivot.position.set(bendX * Math.sin(at * Math.PI), len * at, bendZ * Math.sin(at * Math.PI));
+      pivot.rotation.set((rand() - 0.5) * 0.4, (n / kids) * Math.PI * 2 + rand() * 1.2, 0.45 + rand() * 0.5);
       mesh.add(pivot);
-      this.branch(pivot, mat, len * (0.5 + rand() * 0.2), radius * 0.55, depth - 1, rand);
+      this.branch(pivot, mat, len * (0.5 + rand() * 0.2), (radius + (top - radius) * at) * 0.72, depth - 1, rand, tips);
     }
     return mesh;
   }
 
+  private leafMat?: THREE.MeshStandardMaterial;
+
+  /** Leaf cards: cut-out sprays of leaves that sway, lit as if the crown were one soft ball. */
+  private foliageMaterial(): THREE.MeshStandardMaterial {
+    if (this.leafMat) return this.leafMat;
+    const m = new THREE.MeshStandardMaterial({ map: leafTexture(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.85, color: 0xdedcc8 });
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.windTime = this.windTime;
+      // Keep the crown's outward normals on both sides of each card (see the grass for why).
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
+        // Light through the leaves: the shaded side of a crown still glows a little.
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vec3(0.05, 0.06, 0.02);');
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float windTime;').replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vec4 rootW = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        float h = max(0.0, position.y - 1.5);
+        float gust = sin(windTime * 0.9 + rootW.x * 0.11 + rootW.z * 0.05) * 0.5 + 0.5;
+        float flutter = sin(windTime * 4.0 + position.x * 3.0 + position.z * 2.0) * 0.025;
+        transformed.x += (sin(windTime * 1.7 + rootW.z * 0.3) * (0.03 + gust * 0.05) + flutter) * h;
+        transformed.z += (cos(windTime * 1.3 + rootW.x * 0.3) * 0.02 + flutter) * h;`,
+      );
+    };
+    return (this.leafMat = m);
+  }
+
   private livingTree(rand: () => number): THREE.Group {
     const g = new THREE.Group();
-    const trunk = this.branch(g, this.materials.bark, 2.6, 0.26, 2, rand);
+    const tips: THREE.Object3D[] = [];
+    const trunk = this.branch(g, this.materials.bark, 2.4 + rand() * 0.8, 0.28, 3, rand, tips);
     trunk.rotation.z = (rand() - 0.5) * 0.1;
-    // Sparse, sickly foliage clumps: alive, but only just.
-    for (let n = 0; n < 6; n++) {
-      const geo = new THREE.IcosahedronGeometry(0.7 + rand() * 0.6, 1);
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const k = 0.8 + rand() * 0.35;
-        p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.8, p.getZ(i) * k);
+    // Root flare: a short wide cone where the trunk meets the ground.
+    const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, 0.45, 9, 1, true).translate(0, 0.2, 0), this.materials.bark);
+    g.add(flare);
+    g.updateMatrixWorld(true);
+    // A spray of crossed leaf cards at every twig tip, merged into one mesh per tree.
+    const crown = new THREE.Vector3();
+    const points = tips.map((t) => t.getWorldPosition(new THREE.Vector3()));
+    for (const pt of points) crown.add(pt);
+    crown.divideScalar(Math.max(1, points.length));
+    crown.y -= 0.4;
+    const cards: THREE.BufferGeometry[] = [];
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    // The sickliest trees keep only some of their leaves.
+    const keep = 0.65 + rand() * 0.35;
+    for (const pt of points) {
+      if (rand() > keep) continue;
+      const size = 1.5 + rand() * 0.9;
+      for (let n = 0; n < 3; n++) {
+        const card = new THREE.PlaneGeometry(size, size);
+        e.set(rand() * Math.PI, (n / 3) * Math.PI + rand() * 0.5, rand() * Math.PI);
+        card.applyQuaternion(q.setFromEuler(e));
+        card.translate(pt.x, pt.y, pt.z);
+        cards.push(card);
       }
-      geo.computeVertexNormals();
-      const clump = new THREE.Mesh(geo, this.materials.leaves);
-      const a = rand() * Math.PI * 2;
-      const r = rand() * 1.2;
-      clump.position.set(Math.cos(a) * r, 2.8 + rand() * 1.4, Math.sin(a) * r);
-      g.add(clump);
+    }
+    if (cards.length) {
+      const geo = mergeCards(cards);
+      // Normals point out from the crown's centre, so light falls across it like a soft ball.
+      const pos = geo.attributes.position;
+      const nrm = geo.attributes.normal;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).sub(crown);
+        v.y *= 1.4;
+        v.normalize();
+        nrm.setXYZ(i, v.x, v.y, v.z);
+      }
+      const leaves = new THREE.Mesh(geo, this.foliageMaterial());
+      leaves.userData.noAO = true;
+      g.add(leaves);
     }
     return g;
   }
 
   private deadTree(rand: () => number): THREE.Group {
     const g = new THREE.Group();
-    const trunk = this.branch(g, this.materials.barkDark, 2.4 + rand(), 0.2, 2, rand);
+    const trunk = this.branch(g, this.materials.barkDark, 2.4 + rand(), 0.22, 3, rand);
     trunk.rotation.z = (rand() - 0.5) * 0.25;
+    const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.4, 0.4, 9, 1, true).translate(0, 0.18, 0), this.materials.barkDark);
+    g.add(flare);
     return g;
   }
 
@@ -689,6 +764,30 @@ function mergeCross(plane: THREE.PlaneGeometry): THREE.BufferGeometry {
   const index = [...a.index!.array, ...[...b.index!.array].map((i) => i + offset)];
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  return geo;
+}
+
+/** Joins plane geometries (position, normal, uv only) into one. */
+function mergeCards(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const count = parts.reduce((n, p) => n + p.attributes.position.count, 0);
+  const pos = new Float32Array(count * 3);
+  const nrm = new Float32Array(count * 3);
+  const uv = new Float32Array(count * 2);
+  const index: number[] = [];
+  let at = 0;
+  for (const p of parts) {
+    pos.set(p.attributes.position.array as Float32Array, at * 3);
+    nrm.set(p.attributes.normal.array as Float32Array, at * 3);
+    uv.set(p.attributes.uv.array as Float32Array, at * 2);
+    for (const i of p.index!.array) index.push(i + at);
+    at += p.attributes.position.count;
+    p.dispose();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(index);
   return geo;
