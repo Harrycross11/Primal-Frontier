@@ -7,6 +7,7 @@ import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
 import { asphaltSurface, barkSurface, concreteSurface } from './textures.ts';
+import { model } from './models.ts';
 import { rockGeometry, rockMaterial } from './rocks.ts';
 
 export function buildScenery(scene: THREE.Scene, seed: number, decor: Decor[]) {
@@ -149,9 +150,17 @@ function buildScatter(scene: THREE.Scene, seed: number) {
   scatter(new THREE.BoxGeometry(2.2, 0.7, 1), brickMat, 400, () => ({ ...rubble(), size: 0.1, flat: rand() < 0.6, lift: 0.35 }));
 
   // Old tyres lying flat.
-  const tyreMat = new THREE.MeshStandardMaterial({ color: 0x1f1d1b, roughness: 0.95 });
-  const tyreGeo = new THREE.TorusGeometry(0.3, 0.12, 8, 18).rotateX(Math.PI / 2);
-  scatter(tyreGeo, tyreMat, 45, () => ({ ...anywhere(), size: 0.9 + rand() * 0.2, flat: true, lift: 0.1 }), true);
+  const tyre = model('tyre');
+  if (tyre) scatter(tyre.geometry, tyre.material, 45, () => ({ ...anywhere(), size: 0.9 + rand() * 0.2, flat: true, lift: -0.02 }), true);
+  else {
+    const tyreMat = new THREE.MeshStandardMaterial({ color: 0x1f1d1b, roughness: 0.95 });
+    const tyreGeo = new THREE.TorusGeometry(0.3, 0.12, 8, 18).rotateX(Math.PI / 2);
+    scatter(tyreGeo, tyreMat, 45, () => ({ ...anywhere(), size: 0.9 + rand() * 0.2, flat: true, lift: 0.1 }), true);
+  }
+
+  // Fallen, bleached dead trunks.
+  const log = model('log');
+  if (log) scatter(log.geometry, log.material, 40, () => ({ ...anywhere(), size: 0.7 + rand() * 0.6, flat: true, lift: -0.08 }), true);
 
   // Weathered planks.
   const plankMat = new THREE.MeshStandardMaterial({ ...bark, color: 0x9a8a78, roughness: 0.95 });

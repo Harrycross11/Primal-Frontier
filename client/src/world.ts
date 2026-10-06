@@ -8,8 +8,9 @@ import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
-import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel } from './props.ts';
+import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
+import { BOULDERS, model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery } from './scenery.ts';
 import {
@@ -366,6 +367,14 @@ export class World {
       g.rotation.z = (rand() - 0.5) * 0.25;
       g.rotation.x = (rand() - 0.5) * 0.2;
       this.decorColliders.push({ min: [d.x - 0.2, d.y, d.z - 0.2], max: [d.x + 0.2, d.y + 8, d.z + 0.2] });
+    } else if (d.kind === 'rock' && model(BOULDERS[0])) {
+      const rock = solid(scannedRock(rand, new THREE.Color(1, 1, 1))!, d.scale > 1);
+      rock.scale.setScalar(d.scale);
+      rock.position.y = -0.1 * d.scale;
+      if (d.scale > 1) {
+        const r = d.scale * 0.7;
+        this.decorColliders.push({ min: [d.x - r, d.y - 1, d.z - r], max: [d.x + r, d.y + d.scale * 0.8, d.z + r] });
+      }
     } else if (d.kind === 'rock') {
       const { geo, cavity } = rockGeometry(rand, { detail: d.scale > 1 ? 4 : 3, stretch: [1.2, 0.75, 1], cuts: 5 });
       paintRock(geo, cavity, new THREE.Color(0x8a8278), rand);
@@ -378,9 +387,19 @@ export class World {
       }
     } else {
       const tipped = rand() < 0.4;
-      const barrel = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 14), this.materials.barrel), false);
-      barrel.position.y = tipped ? 0.3 : 0.45;
-      if (tipped) barrel.rotation.z = Math.PI / 2;
+      const scan = model('barrel');
+      if (scan) {
+        const barrel = solid(new THREE.Mesh(scan.geometry, scan.material), false);
+        // The scan stands on its base; tipped over, it lies on its side.
+        if (tipped) {
+          barrel.rotation.z = Math.PI / 2;
+          barrel.position.set(0.45, 0.3, 0);
+        }
+      } else {
+        const barrel = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 14), this.materials.barrel), false);
+        barrel.position.y = tipped ? 0.3 : 0.45;
+        if (tipped) barrel.rotation.z = Math.PI / 2;
+      }
     }
     this.scene.add(g);
   }

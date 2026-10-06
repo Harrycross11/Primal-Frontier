@@ -25,6 +25,7 @@ import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Graphics } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
@@ -74,6 +75,9 @@ interface Remote {
 
 const hud = new Hud();
 
+// Start loading the scanned models straight away; joining waits for them.
+const modelsReady = loadModels();
+
 hud.onPlay(async (name) => {
   const net = new Net();
   try {
@@ -92,6 +96,7 @@ hud.onPlay(async (name) => {
     hud.showJoinError('This server is full (8 players). Try again later.');
     return;
   }
+  await modelsReady;
   hud.hideJoin();
   startGame(net, welcome);
 });
