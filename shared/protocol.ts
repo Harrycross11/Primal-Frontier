@@ -78,16 +78,21 @@ export type ServerMessage =
   | { t: 'state'; players: PlayerState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }
-  | { t: 'resource'; id: number; amount: number }
+  /** A node's amount changed: `by` gathered from it, or it grew back (no `by`). */
+  | { t: 'resource'; id: number; amount: number; by?: number }
   /** Your inventory and the armour you wear (head, chest, legs). */
   | { t: 'inventory'; slots: Slots; wear: Slots }
   | { t: 'crafting'; queue: CraftJob[] }
+  /** A craft finished and went into your inventory. */
+  | { t: 'crafted'; item: ItemId; count: number }
   /** A piece was placed, changed or damaged (piece set), or destroyed (piece null). */
   | { t: 'piece'; key: string; piece: Piece | null; by: number }
   /** A deployable was placed or changed (set), or destroyed (null). */
   | { t: 'deployable'; id: number; d: Deployable | null; by: number }
   | { t: 'correct'; x: number; y: number; z: number }
   | { t: 'notice'; text: string }
+  /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
+  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
   | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
   /** You hit someone (for the hit marker); `armour` when the hit landed on armour. */

@@ -98,6 +98,52 @@ export class Hud {
     }, 90);
   }
 
+  /** A line in the kill feed; `mine` when you were the killer or the one killed. */
+  killFeed(killer: string | null, victim: string, weapon: string | null, head: boolean, mine: boolean) {
+    const feed = $('kill-feed');
+    const row = document.createElement('div');
+    row.className = `kill${mine ? ' me' : ''}`;
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    row.innerHTML = killer
+      ? `<b>${esc(killer)}</b> killed <b>${esc(victim)}</b>${weapon ? ` <span class="with">· ${esc(weapon)}</span>` : ''}${head ? ' <span class="hs">headshot</span>' : ''}`
+      : `<b>${esc(victim)}</b> died`;
+    feed.prepend(row);
+    while (feed.children.length > 5) feed.lastElementChild!.remove();
+    fadeOut(row, 6000);
+  }
+
+  /** "+6 Wood" in the corner when items arrive in your inventory (or "-" when they leave a stack). */
+  pickup(icon: string, name: string, n: number) {
+    const list = $('pickups');
+    // Add to a recent line for the same item rather than stacking duplicates.
+    const key = `${name}:${n > 0 ? '+' : '-'}`;
+    let row = [...list.children].find((r) => (r as HTMLElement).dataset.key === key && !r.classList.contains('fade')) as HTMLElement | undefined;
+    if (row) {
+      const total = Number(row.dataset.n) + n;
+      row.dataset.n = String(total);
+      row.querySelector('.n')!.textContent = `${total > 0 ? '+' : ''}${total}`;
+      clearTimeout(Number(row.dataset.timer));
+    } else {
+      row = document.createElement('div');
+      row.className = `pickup${n < 0 ? ' lost' : ''}`;
+      row.dataset.key = key;
+      row.dataset.n = String(n);
+      row.innerHTML = `${icon}<span class="n">${n > 0 ? '+' : ''}${n}</span> ${name}`;
+      list.append(row);
+      while (list.children.length > 6) list.firstElementChild!.remove();
+    }
+    row.dataset.timer = String(fadeOut(row, 3000));
+  }
+
+  /** A red arc round the crosshair pointing to where a hit came from; `angle` 0 is ahead, clockwise. */
+  damageFrom(angle: number) {
+    const el = document.createElement('div');
+    el.className = 'dmg-dir';
+    el.style.transform = `rotate(${angle}rad)`;
+    $('damage-dirs').append(el);
+    fadeOut(el, 700);
+  }
+
   /** Rounds loaded and carried for the gun in your hands, or nothing. */
   setAmmo(a: { loaded: number; mag: number; carried: number; name: string; reloading: boolean } | null) {
     const el = $('ammo');
@@ -125,4 +171,12 @@ export class Hud {
   disconnected() {
     $('disconnected').hidden = false;
   }
+}
+
+/** Fades an element out after `ms`, then removes it. Returns the timer. */
+function fadeOut(el: HTMLElement, ms: number): number {
+  return window.setTimeout(() => {
+    el.classList.add('fade');
+    setTimeout(() => el.remove(), 650);
+  }, ms);
 }

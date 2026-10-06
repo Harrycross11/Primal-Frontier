@@ -88,6 +88,9 @@ export class Avatar {
   private wornMeshes: THREE.Object3D[][] = [[], [], []];
   /** Aim pitch (radians, up is positive), so others see where a survivor points their gun. */
   aimPitch = 0;
+  /** Called as each foot comes down while walking or running; `sprint` when running. */
+  onStep: ((sprint: boolean) => void) | null = null;
+  private stepSign = 0;
 
   constructor(color: number, name?: string) {
     // Each survivor gets a different but always muted outfit, picked from their colour.
@@ -332,6 +335,12 @@ export class Avatar {
     const w = this.walk;
     const r = this.run;
     const s = Math.sin(this.phase);
+    // A foot lands each time the stride swings through the middle.
+    const sign = Math.sign(s);
+    if (sign !== 0 && sign !== this.stepSign) {
+      if (this.stepSign !== 0 && w > 0.5 && !this.dead && this.speed > 1) this.onStep?.(r > 0.5);
+      this.stepSign = sign;
+    }
     const c = Math.cos(this.phase);
     const stride = (0.5 + 0.3 * r) * w;
 

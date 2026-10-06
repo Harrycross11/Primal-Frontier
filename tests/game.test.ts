@@ -74,8 +74,9 @@ test('gathering takes from the node, fills the inventory and respects range and 
   assert.equal(have(game, id, 'wood'), 0, 'too far away');
 
   standAt(game, id, tree.x + 1.5, tree.z);
-  game.gather(id, tree.id, 2000, 0);
+  const out = game.gather(id, tree.id, 2000, 0);
   assert.equal(have(game, id, 'wood'), 6, 'the starting rock chops at the base rate');
+  assert.ok(out.some((o) => o.to === 'all' && o.msg.t === 'resource' && o.msg.by === id), 'everyone hears who chopped it');
   game.gather(id, tree.id, 2100, 0);
   assert.equal(have(game, id, 'wood'), 6, 'cooldown');
   game.gather(id, tree.id, 3000, 0);
@@ -250,8 +251,14 @@ test('crafting takes ingredients, takes time, and can be cancelled for a refund'
   assert.equal(have(game, id, 'wood'), 200 - 2 * recipeFor('stoneHatchet')!.cost.wood!);
   let t = run(game, 0, 1);
   assert.equal(have(game, id, 'stoneHatchet'), 0, 'not done yet');
-  t = run(game, t, recipeFor('stoneHatchet')!.time - 0.5);
+  let crafted = false;
+  const end = t + (recipeFor('stoneHatchet')!.time - 0.5) * 1000;
+  while (t < end) {
+    const out = game.tick((t += 250));
+    if (out.some((o) => o.to === id && o.msg.t === 'crafted' && o.msg.item === 'stoneHatchet')) crafted = true;
+  }
   assert.equal(have(game, id, 'stoneHatchet'), 1);
+  assert.ok(crafted, 'the crafter is told it finished');
   game.cancelCraft(id, 0);
   assert.equal(have(game, id, 'wood'), 200 - recipeFor('stoneHatchet')!.cost.wood!, 'second one refunded');
   assert.equal(game.players.get(id)!.queue.length, 0);
@@ -435,9 +442,10 @@ test('dying drops everything in a loot bag, and you respawn with a rock', () => 
   const { game, a, b, target, shooter } = duel('l96');
   give(game, b, 'metal', 300);
   shooter.slots[2]!.ammo = 5;
-  game.fire(a, 2, AT_BODY, true, 1000);
-  game.fire(a, 2, AT_BODY, true, 4000);
+  const out = [...game.fire(a, 2, AT_BODY, true, 1000), ...game.fire(a, 2, AT_BODY, true, 4000)];
   assert.equal(target.dead, true);
+  const feed = out.find((o) => o.msg.t === 'kill');
+  assert.deepEqual(feed, { to: 'all', msg: { t: 'kill', killer: 'Ash', victim: 'Bo', item: 'l96', head: false } }, 'everyone sees it in the kill feed');
   const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
   assert.ok(bag, 'a loot bag was left');
   assert.equal(bag.label, 'Bo');

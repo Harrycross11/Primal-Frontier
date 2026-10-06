@@ -1,5 +1,6 @@
-// Short-lived combat effects: bullet tracers, muzzle flashes, dust puffs where shots land,
-// and synthesised combat sounds (no audio files: layered noise and tones shaped per weapon).
+// Short-lived effects: bullet tracers, muzzle flashes, dust puffs where shots land, chips
+// flying off whatever you hit, and every sound in the game, synthesised (no audio files:
+// layered noise and tones shaped per weapon, tool, material and footstep).
 
 import * as THREE from 'three';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
@@ -12,6 +13,26 @@ interface Tracer {
 /** A unit-length streak along +y, stretched and turned to fit each shot. */
 const TRACER_GEO = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true).translate(0, 0.5, 0);
 const UP = new THREE.Vector3(0, 1, 0);
+
+interface Chip {
+  mesh: THREE.Mesh;
+  v: THREE.Vector3;
+  spin: THREE.Vector3;
+  life: number;
+  floor: number;
+}
+
+/** What a hit or footstep sounds like. */
+export type Surface = 'wood' | 'stone' | 'scrap' | 'ore' | 'hemp' | 'dirt';
+const CHIP_GEO = new THREE.BoxGeometry(1, 1, 1);
+const CHIP_COLORS: Record<Surface, number[]> = {
+  wood: [0x8a6a44, 0xb08a5a, 0x5e4630],
+  stone: [0x9a958c, 0x7d7870, 0xb5afa4],
+  ore: [0x8a837a, 0xc4823a, 0x6e6860],
+  scrap: [0x7a5a40, 0x9a6a3a, 0x55524a],
+  hemp: [0x7d8a4a, 0x9aa060, 0x5e6a38],
+  dirt: [0x7a6a52, 0x5e5040, 0x9a8a6a],
+};
 
 interface Puff {
   sprite: THREE.Sprite;
@@ -31,9 +52,300 @@ export class Effects {
   private flashTex = radialTexture('rgba(255,236,170,1)', 'rgba(255,140,40,0.6)', 'rgba(255,120,30,0)');
   private dustTex = radialTexture('rgba(150,135,110,0.75)', 'rgba(120,110,95,0.35)', 'rgba(120,110,95,0)');
   private audio: { ctx: AudioContext; noise: AudioBuffer; out: AudioNode; reverb: ConvolverNode } | null = null;
+  private chips: Chip[] = [];
+  private chipMats = new Map<number, THREE.MeshStandardMaterial>();
+  private wind: GainNode | null = null;
+  /** The camera, so world sounds are panned and fade with distance. */
+  listener: THREE.Camera | null = null;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.flashLight);
+  }
+
+  /** Bits of wood, stone or metal knocked off whatever was hit, falling with gravity. */
+  chipsAt(at: THREE.Vector3, surface: Surface, floor: number, count = 7, power = 1) {
+    const colors = CHIP_COLORS[surface];
+    for (let n = 0; n < count; n++) {
+      const color = colors[n % colors.length];
+      let m = this.chipMats.get(color);
+      if (!m) this.chipMats.set(color, (m = new THREE.MeshStandardMaterial({ color, roughness: 0.9, transparent: true })));
+      const mesh = new THREE.Mesh(CHIP_GEO, m);
+      const size = (surface === 'hemp' ? 0.03 : 0.04) + Math.random() * 0.05;
+      mesh.scale.set(size, size * (surface === 'wood' || surface === 'hemp' ? 0.35 : 0.8), size * (surface === 'wood' ? 1.8 : 1));
+      mesh.position.copy(at);
+      mesh.castShadow = false;
+      this.scene.add(mesh);
+      const v = new THREE.Vector3(Math.random() - 0.5, 0.6 + Math.random() * 0.9, Math.random() - 0.5).multiplyScalar(3.2 * power);
+      const spin = new THREE.Vector3(Math.random(), Math.random(), Math.random()).multiplyScalar(14);
+      this.chips.push({ mesh, v, spin, life: 0.7 + Math.random() * 0.5, floor });
+    }
+    this.puff(at, 0.3 * power);
+  }
+
+  /** How loud a sound at `at` is (1 close, falling off with distance) and where it sits left to right. */
+  private placed(at: THREE.Vector3 | null, reach = 8): { near: number; pan: number; distance: number } {
+    if (!at || !this.listener) return { near: 1, pan: 0, distance: 0 };
+    const distance = this.listener.position.distanceTo(at);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.listener.quaternion);
+    const pan = distance < 0.5 ? 0 : at.clone().sub(this.listener.position).normalize().dot(right) * 0.8;
+    return { near: Math.min(1, reach / Math.max(reach, distance)), pan, distance };
+  }
+
+  /** A tool or fist striking a tree, boulder, wreck or hemp plant (`depleted` when it is used up). */
+  gatherSound(surface: Surface, at: THREE.Vector3 | null, depleted = false) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan, distance } = this.placed(at);
+    if (near < 0.04) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.06 + Math.min(0.3, distance / 80));
+    const v = near * (0.85 + Math.random() * 0.3);
+    const tune = 0.93 + Math.random() * 0.14;
+    if (surface === 'wood') {
+      // An axe biting into dry wood: a hollow knock with a woody resonance.
+      this.thud(bus, now, 170 * tune, 0.5 * v);
+      this.tone(bus, now, 'triangle', 330 * tune, 210 * tune, 0.32 * v, 0.09);
+      this.noiseHit(bus, noise, now, 'bandpass', 1100 * tune, 2.2, 0.55 * v, 0.07);
+      this.noiseHit(bus, noise, now + 0.003, 'highpass', 3500, 0.7, 0.2 * v, 0.025);
+      if (depleted) this.creakAndFall(bus, now + 0.08, v);
+    } else if (surface === 'stone' || surface === 'ore') {
+      // A pick on rock: a hard click, grit, and a little ring from the ore.
+      this.click(bus, now, 3200 * tune, 0.55 * v);
+      this.noiseHit(bus, noise, now, 'bandpass', 2300 * tune, 2.5, 0.5 * v, 0.05);
+      this.thud(bus, now, 120 * tune, 0.35 * v);
+      if (surface === 'ore') this.ping(bus, now, [1870 * tune, 2790 * tune, 4120 * tune], 0.07 * v, 0.18);
+      this.gravel(bus, now + 0.03, 0.18 * v, 5);
+      if (depleted) this.gravel(bus, now + 0.05, 0.4 * v, 14);
+    } else if (surface === 'scrap') {
+      // Rusty sheet metal: a clang with a few wobbly partials.
+      this.ping(bus, now, [410 * tune, 1130 * tune, 1720 * tune, 2650 * tune], 0.08 * v, 0.55);
+      this.noiseHit(bus, noise, now, 'bandpass', 1500 * tune, 1.4, 0.4 * v, 0.06);
+      this.thud(bus, now, 140 * tune, 0.3 * v);
+    } else if (surface === 'hemp') {
+      // Pulling a plant: a rustle of leaves.
+      for (let i = 0; i < 4; i++) this.noiseHit(bus, noise, now + i * 0.04, 'bandpass', 3800 + Math.random() * 1600, 0.8, 0.13 * v, 0.07);
+    } else {
+      this.thud(bus, now, 110, 0.4 * v);
+      this.noiseHit(bus, noise, now, 'lowpass', 900, 0.7, 0.35 * v, 0.08);
+    }
+  }
+
+  /** A building piece going up: a solid knock of timber, a grind of stone, or a sheet of metal clanking into place. */
+  buildSound(material: 'wood' | 'stone' | 'scrap', at: THREE.Vector3 | null) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan, distance } = this.placed(at, 10);
+    if (near < 0.04) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.1 + Math.min(0.3, distance / 80));
+    const v = near * 0.7;
+    if (material === 'wood') {
+      this.thud(bus, now, 120, 0.35 * v);
+      this.tone(bus, now, 'triangle', 240, 150, 0.3 * v, 0.14);
+      this.noiseHit(bus, noise, now, 'bandpass', 800, 1.5, 0.45 * v, 0.12);
+      this.thud(bus, now + 0.11, 150, 0.2 * v);
+      this.noiseHit(bus, noise, now + 0.11, 'bandpass', 1300, 2, 0.25 * v, 0.05);
+    } else if (material === 'stone') {
+      this.thud(bus, now, 75, 0.85 * v);
+      this.noiseHit(bus, noise, now, 'lowpass', 700, 0.8, 0.6 * v, 0.2);
+      this.gravel(bus, now + 0.04, 0.3 * v, 10);
+    } else {
+      this.thud(bus, now, 95, 0.6 * v);
+      this.ping(bus, now, [230, 610, 1180, 1790], 0.11 * v, 0.8);
+      this.noiseHit(bus, noise, now, 'bandpass', 1100, 1, 0.4 * v, 0.1);
+    }
+  }
+
+  /** Something you built (or a workbench, furnace or box) breaking apart. */
+  breakSound(material: 'wood' | 'stone' | 'scrap', at: THREE.Vector3 | null) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan, distance } = this.placed(at, 12);
+    if (near < 0.03) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.2 + Math.min(0.3, distance / 80), 0.35);
+    this.thud(bus, now, material === 'stone' ? 60 : 85, 0.9 * near);
+    this.noiseHit(bus, noise, now, 'lowpass', material === 'wood' ? 1400 : 900, 0.7, 0.7 * near, 0.45);
+    if (material === 'wood') for (let i = 0; i < 6; i++) this.noiseHit(bus, noise, now + 0.04 + i * 0.05 * Math.random(), 'bandpass', 900 + Math.random() * 900, 3, 0.35 * near, 0.05);
+    else if (material === 'stone') this.gravel(bus, now + 0.03, 0.55 * near, 22);
+    else this.ping(bus, now + 0.02, [180, 520, 1010, 1640], 0.11 * near, 1);
+  }
+
+  /** The whoosh of a swing through the air. */
+  swingSound(heavy = false) {
+    const a = this.context();
+    if (!a) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 1.6;
+    filter.frequency.setValueAtTime(500, now);
+    filter.frequency.exponentialRampToValueAtTime(heavy ? 1500 : 2200, now + 0.09);
+    filter.frequency.exponentialRampToValueAtTime(700, now + 0.2);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.22, now + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.22);
+    src.connect(filter).connect(gain).connect(this.voiceBus(0, 0.02));
+    src.start(now, Math.random() * 0.6, 0.3);
+  }
+
+  /** One footstep on dirt, a wood, stone or metal floor; quieter for others further away. */
+  footstep(surface: Surface, at: THREE.Vector3 | null, sprint = false) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 3);
+    if (near < 0.08) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.015);
+    const v = near * (sprint ? 1.2 : 0.85) * (0.8 + Math.random() * 0.4);
+    const tune = 0.9 + Math.random() * 0.2;
+    if (surface === 'wood') {
+      this.thud(bus, now, 135 * tune, 0.32 * v);
+      this.noiseHit(bus, noise, now, 'bandpass', 1000 * tune, 1.8, 0.16 * v, 0.05);
+    } else if (surface === 'stone') {
+      this.thud(bus, now, 110 * tune, 0.2 * v);
+      this.noiseHit(bus, noise, now, 'bandpass', 2600 * tune, 2, 0.16 * v, 0.03);
+      this.gravel(bus, now + 0.01, 0.05 * v, 3);
+    } else if (surface === 'scrap') {
+      this.thud(bus, now, 120 * tune, 0.22 * v);
+      this.ping(bus, now, [540 * tune, 1390 * tune], 0.035 * v, 0.2);
+    } else {
+      // Ash and dry dirt: a soft crunch.
+      this.thud(bus, now, 90 * tune, 0.16 * v);
+      this.noiseHit(bus, noise, now, 'lowpass', 1300 * tune, 0.6, 0.2 * v, 0.06);
+      this.noiseHit(bus, noise, now + 0.012, 'bandpass', 3800 * tune, 1, 0.08 * v, 0.04);
+    }
+  }
+
+  /** Feet hitting the ground after a jump or fall. */
+  landSound(surface: Surface, hard: number) {
+    const a = this.context();
+    if (!a) return;
+    const bus = this.voiceBus(0, 0.02);
+    const now = a.ctx.currentTime + 0.005;
+    this.thud(bus, now, surface === 'wood' ? 120 : 80, Math.min(0.7, 0.3 + hard * 0.05));
+    this.noiseHit(bus, a.noise, now, 'lowpass', surface === 'dirt' ? 1100 : 1600, 0.7, Math.min(0.5, 0.2 + hard * 0.04), 0.1);
+  }
+
+  /** A finished craft dropping into your inventory: a soft double knock of something solid. */
+  craftedSound() {
+    const a = this.context();
+    if (!a) return;
+    const bus = this.voiceBus(0, 0.04, 0.3);
+    const now = a.ctx.currentTime + 0.005;
+    this.tone(bus, now, 'triangle', 520, 500, 0.16, 0.12);
+    this.tone(bus, now + 0.09, 'triangle', 780, 760, 0.14, 0.18);
+    this.noiseHit(bus, a.noise, now, 'bandpass', 1400, 2, 0.12, 0.04);
+  }
+
+  /** Picking up or dropping an item in the inventory. */
+  uiSound(kind: 'move' | 'click' = 'click') {
+    const a = this.context();
+    if (!a) return;
+    const bus = this.voiceBus(0, 0);
+    const now = a.ctx.currentTime + 0.005;
+    if (kind === 'move') {
+      this.noiseHit(bus, a.noise, now, 'bandpass', 1300, 1.2, 0.14, 0.05);
+      this.thud(bus, now, 180, 0.12);
+    } else this.click(bus, now, 2400, 0.16);
+  }
+
+  /**
+   * The wasteland's background: a low wind that rises and falls in gusts. Starts once and runs
+   * for the rest of the game.
+   */
+  startAmbience() {
+    const a = this.context();
+    if (!a || this.wind) return;
+    const { ctx } = a;
+    // Four seconds of brown-ish noise, looped.
+    const buf = ctx.createBuffer(2, ctx.sampleRate * 4, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let last = 0;
+      for (let i = 0; i < d.length; i++) {
+        last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+        d[i] = last * 3.5;
+      }
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 420;
+    filter.Q.value = 0.9;
+    // Gusts: slow wobbles on the level and the brightness.
+    const gust = ctx.createOscillator();
+    gust.frequency.value = 0.07;
+    const gustDepth = ctx.createGain();
+    gustDepth.gain.value = 260;
+    gust.connect(gustDepth).connect(filter.frequency);
+    const swell = ctx.createOscillator();
+    swell.frequency.value = 0.045;
+    const swellDepth = ctx.createGain();
+    swellDepth.gain.value = 0.025;
+    const level = ctx.createGain();
+    level.gain.value = 0.05;
+    swell.connect(swellDepth).connect(level.gain);
+    // Straight to the output, past the compressor, so gunfire does not pump the wind.
+    src.connect(filter).connect(level).connect(ctx.destination);
+    src.start();
+    gust.start();
+    swell.start();
+    this.wind = level;
+  }
+
+  /** A tree creaking and crashing down when its last wood is taken. */
+  private creakAndFall(bus: AudioNode, at: number, v: number) {
+    const { ctx, noise } = this.audio!;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(95, at);
+    osc.frequency.linearRampToValueAtTime(70, at + 0.5);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 600;
+    f.Q.value = 4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.08 * v, at + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0005, at + 0.55);
+    osc.connect(f).connect(g).connect(bus);
+    osc.start(at);
+    osc.stop(at + 0.6);
+    this.thud(bus, at + 0.6, 60, 0.2 * v);
+    this.noiseHit(bus, noise, at + 0.6, 'lowpass', 900, 0.7, 0.2 * v, 0.4);
+  }
+
+  /** Little stones skittering: a run of tiny random clicks. */
+  private gravel(bus: AudioNode, at: number, level: number, count: number) {
+    for (let i = 0; i < count; i++) {
+      this.noiseHit(bus, this.audio!.noise, at + Math.random() * 0.012 * count, 'bandpass', 2500 + Math.random() * 3500, 4, level * (0.4 + Math.random() * 0.6), 0.012);
+    }
+  }
+
+  /** A short pitched tone sliding from one frequency to another. */
+  private tone(bus: AudioNode, at: number, type: OscillatorType, from: number, to: number, level: number, length: number) {
+    const ctx = this.audio!.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(from, at);
+    osc.frequency.exponentialRampToValueAtTime(to, at + length);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(level, at);
+    gain.gain.exponentialRampToValueAtTime(0.0005, at + length);
+    osc.connect(gain).connect(bus);
+    osc.start(at);
+    osc.stop(at + length + 0.02);
   }
 
   /** A streak from the muzzle to where the bullet stopped, and dust where it landed. */
@@ -94,6 +406,21 @@ export class Effects {
       f.sprite.material.dispose();
       return false;
     });
+    this.chips = this.chips.filter((c) => {
+      c.life -= dt;
+      c.v.y -= 9.8 * dt;
+      c.mesh.position.addScaledVector(c.v, dt);
+      if (c.mesh.position.y < c.floor) {
+        c.mesh.position.y = c.floor;
+        c.v.multiplyScalar(0.3).setY(Math.abs(c.v.y) * 0.3);
+      }
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      if (c.life < 0.2) c.mesh.scale.multiplyScalar(0.85);
+      if (c.life > 0) return true;
+      this.scene.remove(c.mesh);
+      return false;
+    });
     this.puffs = this.puffs.filter((p) => {
       p.life -= dt;
       const k = 1 - p.life / p.max;
@@ -121,7 +448,8 @@ export class Effects {
     const now = ctx.currentTime + 0.005;
     const near = Math.min(1, 8 / Math.max(8, distance));
     if (near < 0.015) return;
-    const bus = this.voiceBus(pan, 0.22 + Math.min(0.6, distance / 120));
+    // Guns are the loudest thing in the wasteland: driven hard so a shot cracks over everything else.
+    const bus = this.voiceBus(pan, 0.22 + Math.min(0.6, distance / 120), w.class === 'bow' ? 1.4 : 2.6);
     if (w.class === 'bow') {
       this.twang(bus, now, near, item === 'crossbow');
       return;
@@ -168,7 +496,7 @@ export class Effects {
     if (!a) return;
     const { ctx, noise } = a;
     const now = ctx.currentTime + 0.005;
-    const bus = this.voiceBus(0, 0.08);
+    const bus = this.voiceBus(0, 0.08, 1.3);
     this.thud(bus, now, 150, 0.45);
     this.noiseHit(bus, noise, now, 'bandpass', 2400, 1.5, 0.25, 0.025);
     if (head) this.ping(bus, now, armour ? [1900, 2870, 4100] : [2350, 3520], armour ? 0.18 : 0.14, armour ? 0.4 : 0.28);
@@ -182,7 +510,7 @@ export class Effects {
     if (!a) return;
     const { ctx, noise } = a;
     const now = ctx.currentTime + 0.005;
-    const bus = this.voiceBus(0, 0.05);
+    const bus = this.voiceBus(0, 0.05, 0.9);
     this.thud(bus, now, 95, 0.6);
     this.noiseHit(bus, noise, now, 'lowpass', 500, 0.7, 0.5, 0.12);
     if (armour) this.ping(bus, now, [880, 1330, 2010], 0.12, 0.3);
@@ -200,7 +528,7 @@ export class Effects {
     const a = this.context();
     if (!a) return;
     const now = a.ctx.currentTime + 0.005;
-    const bus = this.voiceBus(0, 0.05);
+    const bus = this.voiceBus(0, 0.05, 0.3);
     this.click(bus, now + 0.15, 1500, 0.35);
     this.noiseHit(bus, a.noise, now + 0.2, 'bandpass', 600, 1.5, 0.15, 0.08);
     this.click(bus, now + seconds * 0.62, 1800, 0.45);
@@ -210,9 +538,11 @@ export class Effects {
   }
 
   /** A voice's path out: through a little saturation, panned, with some sent to the echo. */
-  private voiceBus(pan: number, echo: number): AudioNode {
+  private voiceBus(pan: number, echo: number, drive = 0.55): AudioNode {
     const { ctx, out, reverb } = this.audio!;
     const input = ctx.createGain();
+    // Drive pushes the voice harder into the saturation: louder and denser, but never past full scale.
+    input.gain.value = drive;
     const shaper = ctx.createWaveShaper();
     shaper.curve = SATURATION;
     const panner = ctx.createStereoPanner();
@@ -270,7 +600,7 @@ export class Effects {
   }
 
   private click(bus: AudioNode, at: number, hz: number, level: number) {
-    this.noiseHit(bus, this.audio!.noise, at, 'bandpass', hz, 6, level * 2.2, 0.018);
+    this.noiseHit(bus, this.audio!.noise, at, 'bandpass', hz, 6, level * 1.5, 0.018);
     this.noiseHit(bus, this.audio!.noise, at, 'highpass', 5000, 0.7, level * 0.5, 0.006);
   }
 
@@ -305,9 +635,16 @@ export class Effects {
         out.ratio.value = 5;
         out.attack.value = 0.002;
         out.release.value = 0.18;
+        // Make-up gain after the compressor, then a limiter so stacked shots never clip.
         const master = ctx.createGain();
-        master.gain.value = 0.8;
-        out.connect(master).connect(ctx.destination);
+        master.gain.value = 2;
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -3;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.001;
+        limiter.release.value = 0.1;
+        out.connect(master).connect(limiter).connect(ctx.destination);
         // The echo: a long, darkening tail like a shot rolling across open ground.
         const reverb = ctx.createConvolver();
         reverb.buffer = echoImpulse(ctx);

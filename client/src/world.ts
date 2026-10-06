@@ -44,6 +44,8 @@ export class World {
   /** Objects the camera should not pass through. */
   readonly cameraBlockers: THREE.Object3D[] = [];
   private bounce = new Map<number, number>();
+  /** Pieces settling into place after being built (rise) or jolted by a hit (shake): seconds left. */
+  private pops = new Map<string, { t: number; kind: 'rise' | 'shake' }>();
   private windTime = { value: 0 };
   private ash: THREE.Points;
   private materials: Record<string, THREE.MeshStandardMaterial>;
@@ -189,6 +191,12 @@ export class World {
     // Tufts sway in gusts: the tips move, the roots stay put, and each clump is out of step.
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.windTime = this.windTime;
+      // Double-sided materials flip the normal on back faces, which points it into the ground
+      // and turns every blade seen from behind black. Keep the upward normal on both sides.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''),
+      );
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float windTime;')
         .replace(
@@ -472,6 +480,11 @@ export class World {
   }
 
   /** Adds, updates or removes a workbench, furnace or box. */
+  /** Animates a piece: rising into place when just built, or a short shake when hit. */
+  popPiece(key: string, kind: 'rise' | 'shake' = 'rise') {
+    if (this.pieceMeshes.has(key)) this.pops.set(key, { t: kind === 'rise' ? 0.28 : 0.18, kind });
+  }
+
   setDeployable(id: number, d: Deployable | null) {
     const old = this.deployableMeshes.get(id);
     if (!d) {
@@ -599,6 +612,25 @@ export class World {
         g.scale.setScalar(g.userData.baseScale);
         this.bounce.delete(id);
       } else this.bounce.set(id, left);
+    }
+
+    for (const [key, pop] of this.pops) {
+      const g = this.pieceMeshes.get(key);
+      pop.t -= dt;
+      if (!g || pop.t <= 0) {
+        g?.position.set(0, 0, 0);
+        this.pops.delete(key);
+        continue;
+      }
+      if (pop.kind === 'rise') {
+        // Ease out with a small overshoot, like the piece thumps down into its frame.
+        const k = 1 - pop.t / 0.28;
+        const back = 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
+        g.position.y = -0.35 * (1 - back);
+      } else {
+        const a = (pop.t / 0.18) * 0.045;
+        g.position.set(Math.sin(pop.t * 90) * a, 0, Math.cos(pop.t * 77) * a);
+      }
     }
   }
 }

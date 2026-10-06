@@ -519,26 +519,51 @@ export function leatherSurface(): Surface {
   return surface('leather', 256, draw, bump, 2.5);
 }
 
-/** A dry grass tuft with transparent background, for instanced ground cover. */
+/**
+ * A dry grass tuft with transparent background, for instanced ground cover. The see-through
+ * pixels carry the grass colour too: a canvas stores them as black, which bleeds into the
+ * blades when the texture is shrunk with distance and turns them into dark scribbles.
+ */
 export function grassTexture(): THREE.Texture {
+  const size = 128;
   const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 64;
+  canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   const rand = mulberry32(99);
-  for (let n = 0; n < 26; n++) {
-    const x = 8 + rand() * 48;
-    const lean = (rand() - 0.5) * 18;
-    const h = 24 + rand() * 38;
-    ctx.strokeStyle = ['#8f7f52', '#a39062', '#6f6444', '#7d6d47'][Math.floor(rand() * 4)];
-    ctx.lineWidth = 1.5 + rand();
+  for (let n = 0; n < 30; n++) {
+    const x = 16 + rand() * 96;
+    const lean = (rand() - 0.5) * 36;
+    const h = 48 + rand() * 76;
+    ctx.strokeStyle = ['#9a8a5a', '#ad9a68', '#857850', '#8f7e52'][Math.floor(rand() * 4)];
+    ctx.lineWidth = 3 + rand() * 2;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(x, 64);
-    ctx.quadraticCurveTo(x + lean * 0.3, 64 - h * 0.6, x + lean, 64 - h);
+    ctx.moveTo(x, size);
+    ctx.quadraticCurveTo(x + lean * 0.3, size - h * 0.6, x + lean, size - h);
     ctx.stroke();
   }
-  const tex = new THREE.CanvasTexture(canvas);
+  const src = ctx.getImageData(0, 0, size, size).data;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    // Flip rows: canvas rows run top down, texture rows bottom up.
+    const from = (size - 1 - y) * size * 4;
+    for (let x = 0; x < size; x++) {
+      const i = from + x * 4;
+      const o = (y * size + x) * 4;
+      const a = src[i + 3];
+      // Fully clear pixels take the average blade colour; partly clear keep their own.
+      data[o] = a ? src[i] : 0x93;
+      data[o + 1] = a ? src[i + 1] : 0x84;
+      data[o + 2] = a ? src[i + 2] : 0x58;
+      data[o + 3] = a;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
   return tex;
 }
 

@@ -37,9 +37,9 @@ function mesh(geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0)
 export type BoulderKind = 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre';
 const BOULDER_COLORS: Record<BoulderKind, [number, number]> = {
   stone: [0xa8a196, 0xa8a196],
-  metalOre: [0x7a736b, 0xc4823a],
-  sulfurOre: [0x8a8478, 0xe0c640],
-  hqmOre: [0x5e646c, 0xa9c2d8],
+  metalOre: [0x9a9289, 0xd08a3e],
+  sulfurOre: [0x9c968a, 0xe6cc48],
+  hqmOre: [0x7c838c, 0xb4cde2],
 };
 
 /** A lumpy boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
@@ -68,7 +68,7 @@ export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
   const rockMat = mat(`boulder-${kind}`, () =>
-    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.75 : 1, metalness: kind === 'metalOre' || kind === 'hqmOre' ? 0.25 : 0, flatShading: true }),
+    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.8 : 1, metalness: 0, flatShading: true }),
   );
   const body = mesh(geo, rockMat, 0, 0.45, 0);
   g.add(body);

@@ -273,7 +273,7 @@ export class Game {
     p.lastGatherAt = now;
     node.amount -= got;
     addItem(p.slots, info.yields, got);
-    const out: Outgoing[] = [{ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount } }];
+    const out: Outgoing[] = [{ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount, by: id } }];
     if (held && tool && info.tool !== 'pickup') {
       held.hp = (held.hp ?? tool.durability) - 1;
       if (held.hp <= 0) {
@@ -624,7 +624,7 @@ export class Game {
       { to: by.id, msg: { t: 'hitmarker', head, kill, armour } },
       { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z], armour } },
     ];
-    if (kill) return [...out, ...this.kill(victim, by, item)];
+    if (kill) return [...out, ...this.kill(victim, by, item, head)];
     if (armour) out.push(...this.wearArmour(victim, zones));
     return out;
   }
@@ -646,7 +646,7 @@ export class Game {
   }
 
   /** Drops everything the victim carried (and their crafting refunds) into a loot bag. */
-  private kill(victim: Player, by: Player | null, item: ItemId | null): Outgoing[] {
+  private kill(victim: Player, by: Player | null, item: ItemId | null, head = false): Outgoing[] {
     for (const job of victim.queue) {
       for (const [ingredient, n] of Object.entries(recipeFor(job.item)!.cost)) addItem(victim.slots, ingredient as ItemId, n!);
     }
@@ -667,13 +667,11 @@ export class Game {
     }
     victim.slots = emptySlots(INVENTORY_SIZE);
     victim.wear = emptySlots(ARMOUR_SLOTS.length);
-    const how = item ? ` with ${ITEMS[item].name.replace(/^an? /i, '')}` : '';
-    const text = by ? `${by.name} killed ${victim.name}${how}` : `${victim.name} died`;
     out.push(
       { to: victim.id, msg: { t: 'died', by: by?.name ?? null, item } },
       this.inventory(victim),
       this.crafting(victim),
-      { to: 'all', msg: { t: 'notice', text } },
+      { to: 'all', msg: { t: 'kill', killer: by?.name ?? null, victim: victim.name, item: by ? item : null, head } },
     );
     return out;
   }
@@ -726,7 +724,7 @@ export class Game {
     p.craftBlocked = false;
     p.queue.shift();
     addItem(p.slots, job.item, recipe.count);
-    return [this.inventory(p), this.crafting(p), notice(p.id, `Crafted ${ITEMS[job.item].name}`)];
+    return [this.inventory(p), this.crafting(p), { to: p.id, msg: { t: 'crafted', item: job.item, count: recipe.count } }];
   }
 
   /**

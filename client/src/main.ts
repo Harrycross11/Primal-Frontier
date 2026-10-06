@@ -8,6 +8,7 @@ import {
   PIECE_COST,
   STOREY,
   WALL_EDITS,
+  pieceBounds,
   pieceKey,
   pieceSupported,
   type Piece,
@@ -24,7 +25,8 @@ import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Graphics } from './graphics.ts';
 import { Hud } from './hud.ts';
-import { Effects } from './effects.ts';
+import { Effects, type Surface } from './effects.ts';
+import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
 import { buildDeployable } from './props.ts';
@@ -46,6 +48,17 @@ const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
 const SCOPED: ItemId[] = ['boltRifle', 'l96'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
+/** What each resource sounds like and sheds when hit. */
+const RESOURCE_SURFACE: Record<ResourceNode['kind'], Surface> = {
+  tree: 'wood',
+  deadTree: 'wood',
+  scrap: 'scrap',
+  stone: 'stone',
+  metalOre: 'ore',
+  sulfurOre: 'ore',
+  hqmOre: 'ore',
+  hemp: 'hemp',
+};
 
 interface Remote {
   state: PlayerState;
@@ -88,17 +101,35 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
   for (const d of welcome.deployables) world.setDeployable(d.id, d);
 
+  const effects = new Effects(world.scene);
+  effects.listener = camera;
+  effects.startAmbience();
   const me = new Avatar(welcome.you.color);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
   const controller = new Controller(world, () => resources, canvas);
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
+  me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint);
+  controller.onLand = (speed) => effects.landSound(surfaceUnder(controller.position), speed);
+
+  /** What a survivor is standing on: a floor or stairs of some material, or the bare ground. */
+  function surfaceUnder(p: THREE.Vector3): Surface {
+    if (p.y - terrainHeight(world.seed, p.x, p.z) < 0.15) return 'dirt';
+    let best: Piece | null = null;
+    for (const piece of world.pieces.values()) {
+      if (piece.kind === 'wall') continue;
+      const b = pieceBounds(piece);
+      if (p.x >= b.min[0] && p.x <= b.max[0] && p.z >= b.min[2] && p.z <= b.max[2] && Math.abs(p.y - b.max[1]) < 3.2) best = piece;
+    }
+    return best ? best.material : 'dirt';
+  }
 
   const remotes = new Map<number, Remote>();
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
     const avatar = new Avatar(p.color, p.name);
     avatar.root.position.set(p.x, p.y, p.z);
+    avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
   };
@@ -108,7 +139,6 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let hp = welcome.hp;
   let dead = false;
   hud.setHealth(hp);
-  const effects = new Effects(world.scene);
   /** Left button held, for automatic guns. */
   let triggerHeld = false;
   /** Right button held with a gun: aiming down sights. */
@@ -123,10 +153,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let material: Material = 'wood';
   const held = (): ItemId | null => slots[ui.active]?.item ?? null;
   const ui = new InventoryUi({
-    move: (from, to, count) => net.send({ t: 'moveItem', from, to, count }),
-    craft: (item, count) => net.send({ t: 'craft', item, count }),
-    cancel: (index) => net.send({ t: 'cancelCraft', index }),
-    furnace: (id, on) => net.send({ t: 'furnace', id, on }),
+    move: (from, to, count) => {
+      effects.uiSound('move');
+      net.send({ t: 'moveItem', from, to, count });
+    },
+    craft: (item, count) => {
+      effects.uiSound('click');
+      net.send({ t: 'craft', item, count });
+    },
+    cancel: (index) => {
+      effects.uiSound('click');
+      net.send({ t: 'cancelCraft', index });
+    },
+    furnace: (id, on) => {
+      effects.uiSound('click');
+      net.send({ t: 'furnace', id, on });
+    },
   });
   ui.slots = slots;
   ui.wear = welcome.wear;
@@ -160,25 +202,54 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         refreshPlayers();
         break;
       }
-      case 'resource':
-        resources[m.id].amount = m.amount;
+      case 'resource': {
+        const node = resources[m.id];
+        const was = node.amount;
+        node.amount = m.amount;
         world.setResourceAmount(m.id, m.amount);
+        if (m.by !== undefined && m.amount < was) {
+          // Chips fly off the side facing whoever hit it.
+          const who = m.by === welcome.id ? controller.position : remotes.get(m.by)?.avatar.root.position;
+          const at = new THREE.Vector3(node.x, node.y + (node.kind === 'tree' || node.kind === 'deadTree' ? 1.1 : 0.6), node.z);
+          if (who) at.add(new THREE.Vector3(who.x - node.x, 0, who.z - node.z).setLength(RESOURCE_INFO[node.kind].radius * node.scale * 0.9));
+          const surface = RESOURCE_SURFACE[node.kind];
+          effects.gatherSound(surface, at, m.amount === 0);
+          effects.chipsAt(at, surface, node.y, m.amount === 0 ? 16 : 7, m.amount === 0 ? 1.5 : 1);
+          if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
+        }
         break;
-      case 'inventory':
+      }
+      case 'inventory': {
+        // "+6 Wood" for whatever arrived.
+        const before = itemTotals(slots);
+        const after = itemTotals(m.slots);
+        for (const [item, n] of Object.entries(after) as [ItemId, number][]) {
+          const gained = n - (before[item] ?? 0);
+          if (gained > 0) hud.pickup(iconSvg(item), ITEMS[item].name, gained);
+        }
         slots = m.slots;
         ui.slots = slots;
         ui.wear = m.wear;
         ui.render();
         break;
+      }
       case 'crafting':
         ui.setQueue(m.queue);
         break;
-      case 'piece':
+      case 'crafted':
+        effects.craftedSound();
+        break;
+      case 'piece': {
+        const old = world.pieces.get(m.key);
         world.setPiece(m.key, m.piece);
+        pieceEffects(old ?? null, m.piece);
         if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         break;
-      case 'deployable':
+      }
+      case 'deployable': {
+        const old = world.deployables.get(m.id);
         world.setDeployable(m.id, m.d);
+        if (m.d?.kind !== 'lootBag' && old?.kind !== 'lootBag') deployableEffects(old ?? null, m.d);
         if (ui.container?.id === m.id) {
           if (m.d) {
             ui.container = m.d;
@@ -187,6 +258,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         }
         if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         break;
+      }
       case 'correct':
         controller.teleport(m.x, m.y, m.z);
         break;
@@ -208,7 +280,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'health':
         if (m.hp < hp) {
           hud.hurt();
-          if (m.from) effects.hurtSound(!!m.armour);
+          if (m.from) {
+            effects.hurtSound(!!m.armour);
+            // Which way the hit came from, relative to where the camera faces.
+            const to = new THREE.Vector3(m.from[0] - controller.position.x, 0, m.from[2] - controller.position.z);
+            const ahead = new THREE.Vector3(-Math.sin(controller.yaw), 0, -Math.cos(controller.yaw));
+            const angle = Math.atan2(ahead.x * to.z - ahead.z * to.x, ahead.x * to.x + ahead.z * to.z);
+            hud.damageFrom(angle);
+          }
         }
         hp = m.hp;
         hud.setHealth(hp);
@@ -230,13 +309,60 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'notice':
         hud.notice(m.text);
         break;
+      case 'kill': {
+        const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
+        hud.killFeed(m.killer, m.victim, m.item ? ITEMS[m.item].name : null, m.head, mine);
+        break;
+      }
     }
   };
   net.onClose = () => hud.disconnected();
 
+  /** Sounds, dust and chips for a building piece going up, taking a hit or breaking. */
+  function pieceEffects(old: Piece | null, piece: Piece | null) {
+    const p = piece ?? old;
+    if (!p) return;
+    const b = pieceBounds(p);
+    const at = new THREE.Vector3((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
+    const surface: Surface = p.material;
+    if (!old && piece) {
+      effects.buildSound(piece.material, at);
+      world.popPiece(pieceKey(piece));
+      effects.puff(new THREE.Vector3(at.x, b.min[1] + 0.1, at.z), 1.6);
+    } else if (old && !piece) {
+      effects.breakSound(old.material, at);
+      effects.chipsAt(at, surface, b.min[1], 22, 1.6);
+      effects.puff(at, 2.4);
+    } else if (old && piece && piece.hp < old.hp) {
+      const hitAt = aim?.piece && pieceKey(aim.piece) === pieceKey(piece) ? aim.point : at;
+      effects.gatherSound(surface, hitAt);
+      effects.chipsAt(hitAt, surface, b.min[1], 6);
+      world.popPiece(pieceKey(piece), 'shake');
+    } else if (old && piece && piece.edit !== old.edit) {
+      effects.buildSound(piece.material, at);
+    }
+  }
+
+  /** The same for a workbench, furnace or box. */
+  function deployableEffects(old: Deployable | null, d: Deployable | null) {
+    const x = d ?? old;
+    if (!x) return;
+    const at = new THREE.Vector3(x.x, x.y + 0.5, x.z);
+    const material = x.kind === 'furnace' ? 'stone' : 'wood';
+    if (!old && d) effects.buildSound(material, at);
+    else if (old && !d) {
+      effects.breakSound(material, at);
+      effects.chipsAt(at, material, x.y, 14, 1.3);
+    } else if (old && d && d.hp < old.hp) {
+      effects.gatherSound(material, at);
+      effects.chipsAt(at, material, x.y, 5);
+    }
+  }
+
   // Input. Click captures the mouse. Left click uses what is in your hands: hit and gather
   // with tools, place with the building plan or a deployable. Tab opens the inventory.
   canvas.addEventListener('click', () => {
+    effects.startAmbience();
     if (document.pointerLockElement !== canvas && !ui.open) canvas.requestPointerLock?.();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -396,6 +522,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     lastAttack = now;
     net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
     me.swing();
+    effects.swingSound(w.damage > 40);
   }
 
   const raycaster = new THREE.Raycaster();
@@ -491,6 +618,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
       net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
       me.swing();
+      effects.swingSound();
     } else if (aimDeployable) {
       if (!deployableInRange(aimDeployable, BUILD_RANGE)) return hud.notice('Too far away');
       net.send({ t: 'hitDeployable', id: aimDeployable.id });
@@ -524,6 +652,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   // Blue see-through preview of the piece about to be placed, red if it can't go there.
   const ghostMat = new THREE.MeshBasicMaterial({ color: 0x4fb3ff, transparent: true, opacity: 0.35, depthWrite: false });
+  const ghostEdgeMat = new THREE.LineBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.9, depthWrite: false });
   let ghost: THREE.Group | null = null;
   let ghostKey = '';
   function updateGhost() {
@@ -537,12 +666,20 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (key !== ghostKey) {
       if (ghost) world.scene.remove(ghost);
       ghost = proposal ? buildPieceMesh(proposal, ghostMat) : null;
+      // Bright edges, so the outline reads against any background.
+      for (const m of ghost?.children ?? []) {
+        const mesh = m as THREE.Mesh;
+        if (mesh.isMesh) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), ghostEdgeMat));
+      }
       if (ghost) world.scene.add(ghost);
       ghostKey = key;
     }
     if (proposal) {
       const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
       ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
+      ghostEdgeMat.color.set(ok ? 0xbfe6ff : 0xffb0a0);
+      // A slow pulse, so the preview reads as a preview and not a built piece.
+      ghostMat.opacity = 0.26 + 0.08 * Math.sin(performance.now() / 260);
     }
   }
 
