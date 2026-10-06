@@ -11,10 +11,15 @@ import { buildHeldItem } from './props.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
-const JACKETS = [0x6b6a4e, 0x7d6c55, 0x585b5a, 0x80705a, 0x5a6458, 0x6e5a4a];
-const TROUSERS = [0x5b5649, 0x625a48, 0x4f5459, 0x6a5e4c];
+// Faded workwear: olive drab, oilskin brown, charcoal, washed-out navy, khaki and rust. Trousers
+// are darker than jackets, as they usually are, so the outfit reads as separate pieces.
+const JACKETS = [0x5a5c3e, 0x6a5440, 0x48494a, 0x46505e, 0x7c7052, 0x6e4e3a];
+const TROUSERS = [0x3f3c35, 0x4a4436, 0x363a3f, 0x544a3b];
 
 const materials = new Map<string, THREE.Material>();
+
+/** Fabric catches a soft, pale sheen along its edges where light grazes the fibres. */
+const CLOTH_SHEEN = { sheen: 0.4, sheenRoughness: 0.7, sheenColor: new THREE.Color(0x4a463e) };
 
 /** Worn cloth tinted to `color`. Cached, since every survivor shares most of these. */
 function cloth(color: number, roughness = 0.95): THREE.MeshStandardMaterial {
@@ -22,8 +27,8 @@ function cloth(color: number, roughness = 0.95): THREE.MeshStandardMaterial {
   let m = materials.get(key) as THREE.MeshStandardMaterial | undefined;
   if (!m) {
     const s = clothSurface();
-    m = new THREE.MeshStandardMaterial({ color, map: s.map, normalMap: s.normalMap, roughness, metalness: 0 });
-    m.normalScale.set(0.7, 0.7);
+    m = new THREE.MeshPhysicalMaterial({ color, map: s.map, normalMap: s.normalMap, roughness, metalness: 0, ...CLOTH_SHEEN });
+    m.normalScale.set(0.9, 0.9);
     materials.set(key, m);
   }
   return m;
@@ -55,8 +60,8 @@ let bodyMaterial: THREE.MeshStandardMaterial | null = null;
 function bodyMat(): THREE.MeshStandardMaterial {
   if (!bodyMaterial) {
     const s = clothSurface();
-    bodyMaterial = new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, vertexColors: true, roughness: 0.92 });
-    bodyMaterial.normalScale.set(0.6, 0.6);
+    bodyMaterial = new THREE.MeshPhysicalMaterial({ map: s.map, normalMap: s.normalMap, vertexColors: true, roughness: 0.9, ...CLOTH_SHEEN });
+    bodyMaterial.normalScale.set(0.85, 0.85);
   }
   return bodyMaterial;
 }
@@ -130,13 +135,24 @@ export class Avatar {
     const palette: Record<number, THREE.Color> = {
       [Region.Jacket]: new THREE.Color(jacketColor),
       [Region.Trousers]: new THREE.Color(pick(TROUSERS, 7)),
-      [Region.Boots]: new THREE.Color(0x4f3e2f),
+      [Region.Boots]: new THREE.Color(0x5a4634),
       [Region.Gloves]: new THREE.Color(0x3e342b),
       [Region.Skin]: new THREE.Color(0x9c735a),
       [Region.Belt]: new THREE.Color(0x3d3026),
     };
     const colors = new Float32Array(shared.regions.length * 3);
-    shared.regions.forEach((r, i) => palette[r].toArray(colors, i * 3));
+    // Dust caked on the boots and lower legs, and uneven fading over the whole outfit.
+    const dust = new THREE.Color(0xa0927a);
+    const pos = shared.geometry.getAttribute('position');
+    const c = new THREE.Color();
+    shared.regions.forEach((r, i) => {
+      c.copy(palette[r]);
+      const y = pos.getY(i);
+      const fade = Math.sin(pos.getX(i) * 23 + y * 17) * Math.sin(pos.getZ(i) * 19 - y * 11);
+      if (r !== Region.Skin) c.multiplyScalar(1 + fade * 0.06);
+      if (r === Region.Trousers || r === Region.Boots) c.lerp(dust, THREE.MathUtils.smoothstep(0.6 - y, 0, 0.55) * 0.45);
+      c.toArray(colors, i * 3);
+    });
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const body = new THREE.SkinnedMesh(geometry, bodyMat());
     body.add(this.bones.root);
@@ -206,9 +222,15 @@ export class Avatar {
       attach('head', new THREE.CylinderGeometry(0.031, 0.034, 0.035, 16), metal, x, 1.718, 0.095).rotation.x = Math.PI / 2;
       attach('head', new THREE.CircleGeometry(0.026, 16), glass, x, 1.718, 0.113);
     }
-    attach('head', new THREE.SphereGeometry(0.068, 16, 12), rubber, 0, 1.63, 0.073).scale.set(1.15, 0.85, 0.95);
+    attach('head', new THREE.SphereGeometry(0.068, 20, 14), rubber, 0, 1.63, 0.08).scale.set(1.2, 0.9, 1.1);
+    // A short olive filter canister on the front of the mask, with a dark grille.
+    const filter = attach('head', new THREE.CylinderGeometry(0.03, 0.034, 0.05, 18), plain(0x3e4232, 0.55, 0.35), 0, 1.612, 0.15);
+    filter.rotation.x = Math.PI / 2 + 0.35;
+    const grille = attach('head', new THREE.CircleGeometry(0.026, 18), plain(0x1c1d1a, 0.7, 0.4), 0, 1.603, 0.174);
+    grille.rotation.x = 0.35;
     for (const x of [-0.055, 0.055]) {
-      attach('head', new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), metal, x, 1.615, 0.12).rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
+      // Painted canisters: bare metal here mirrored the bright sky as a pale disc.
+      attach('head', new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), plain(0x3e4232, 0.55, 0.35), x, 1.615, 0.12).rotation.set(Math.PI / 2, x * 10, 0, 'YXZ');
     }
     this.gear.face.push(...this.bones.head.children.slice(faceStart).filter((o) => o !== hoodMesh && o !== strap));
     for (const [n, pos] of world) this.boneAt.set(n, pos);

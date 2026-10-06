@@ -306,8 +306,8 @@ export function rustSurface(paint = '#5f6b5a'): Surface {
   const draw: Draw = (ctx, size, rand) => {
     ctx.fillStyle = paint;
     ctx.fillRect(0, 0, size, size);
-    blotches(ctx, size, rand, 160, ['#8a4b2a', '#a35d32', '#5e2f18', '#7a4024'], 4, 26, 0.75);
-    blotches(ctx, size, rand, 1200, ['#4a2412', '#b56a3a', '#3a3a3a'], 0.5, 2, 0.6);
+    rustOver(ctx, size, rand, 0.42);
+    blotches(ctx, size, rand, 1200, ['#4a2412', '#b56a3a', '#3a3a3a'], 0.5, 2, 0.5);
   };
   const bump: Draw = (ctx, size, rand) => {
     ctx.fillStyle = '#888';
@@ -315,6 +315,43 @@ export function rustSurface(paint = '#5f6b5a'): Surface {
     blotches(ctx, size, rand, 1400, ['#555', '#aaa'], 0.5, 3, 0.6);
   };
   return surface(`rust-${paint}`, 256, draw, bump, 2);
+}
+
+/**
+ * Rust eating through paint in ragged, branching patches (thresholded noise, not circles),
+ * with a darker rim of bubbled paint round each one. `coverage` is about the share rusted.
+ */
+function rustOver(ctx: CanvasRenderingContext2D, size: number, rand: () => number, coverage: number) {
+  const a = tilingNoise(rand, 4);
+  const b = tilingNoise(rand, 9);
+  const c = tilingNoise(rand, 23);
+  const tone = tilingNoise(rand, 7);
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  const edge = 0.5 + (0.5 - coverage) * 0.35;
+  const ss = (e0: number, e1: number, x: number) => {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const n = a(u, v) * 0.55 + b(u, v) * 0.3 + c(u, v) * 0.15;
+      const rust = ss(edge, edge + 0.04, n);
+      const rim = ss(edge - 0.035, edge, n) * (1 - rust);
+      const t = tone(u, v);
+      const i = (y * size + x) * 4;
+      // Orange-brown fresh rust through to dark, flaking old rust.
+      const rr = 58 + t * 62;
+      const rg = 36 + t * 32;
+      const rb = 24 + t * 14;
+      d[i] = d[i] * (1 - rust) * (1 - rim * 0.35) + rr * rust;
+      d[i + 1] = d[i + 1] * (1 - rust) * (1 - rim * 0.4) + rg * rust;
+      d[i + 2] = d[i + 2] * (1 - rust) * (1 - rim * 0.45) + rb * rust;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
 }
 
 /** Wind-rippled fine sand and grit, blended into the ground in drifts. */
@@ -403,24 +440,8 @@ export function carPaintSurface(paint: string): Surface {
     ctx.fillStyle = paint;
     ctx.fillRect(0, 0, size, size);
     blotches(ctx, size, rand, 120, ['rgba(255,250,235,0.5)', 'rgba(0,0,0,0.35)'], 6, 30, 0.18);
-    // Irregular rust patches: clusters of small spots that wander, not neat circles.
-    blotches(ctx, size, rand, 40, ['#6e4a30', '#5e4434', '#7a5a40'], 20, 60, 0.28);
-    for (let patch = 0; patch < 22; patch++) {
-      let x = rand() * size;
-      let y = rand() * size;
-      const spots = 40 + Math.floor(rand() * 90);
-      for (let n = 0; n < spots; n++) {
-        x += (rand() - 0.5) * 7;
-        y += (rand() - 0.5) * 7;
-        ctx.globalAlpha = 0.35 + rand() * 0.4;
-        ctx.fillStyle = ['#6e3c20', '#7f4a28', '#5e3420', '#8a5530', '#4e2c18'][Math.floor(rand() * 5)];
-        ctx.beginPath();
-        ctx.arc(((x % size) + size) % size, ((y % size) + size) % size, 2 + rand() * 7, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    ctx.globalAlpha = 1;
-    blotches(ctx, size, rand, 900, ['#5a2c14', '#b0662f', '#3e2010'], 0.5, 2.4, 0.5);
+    rustOver(ctx, size, rand, 0.38);
+    blotches(ctx, size, rand, 900, ['#5a2c14', '#b0662f', '#3e2010'], 0.5, 2.4, 0.4);
     // Rust streaks running down.
     for (let n = 0; n < 60; n++) {
       const x = rand() * size;
@@ -558,22 +579,50 @@ export function leatherSurface(): Surface {
  * blades when the texture is shrunk with distance and turns them into dark scribbles.
  */
 export function grassTexture(): THREE.Texture {
-  const size = 128;
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   const rand = mulberry32(99);
-  for (let n = 0; n < 30; n++) {
-    const x = 16 + rand() * 96;
-    const lean = (rand() - 0.5) * 36;
-    const h = 48 + rand() * 76;
-    ctx.strokeStyle = ['#9a8a5a', '#ad9a68', '#857850', '#8f7e52'][Math.floor(rand() * 4)];
-    ctx.lineWidth = 3 + rand() * 2;
-    ctx.lineCap = 'round';
+  const shades = [
+    ['#6f6440', '#b8a774'],
+    ['#5f5a38', '#a89a62'],
+    ['#7a6a44', '#c9b685'],
+    ['#55573a', '#99956a'],
+    ['#6a5c3c', '#b39d6c'],
+  ];
+  // Back blades first, darker and shorter, then the front ones over them.
+  for (let n = 0; n < 70; n++) {
+    const back = n < 30;
+    const x = 30 + rand() * 196;
+    const lean = (rand() - 0.5) * 80;
+    const h = (back ? 70 : 100) + rand() * (back ? 90 : 150);
+    const w = 3 + rand() * 4;
+    const [root, tip] = shades[Math.floor(rand() * shades.length)];
+    const grad = ctx.createLinearGradient(0, size, 0, size - h);
+    grad.addColorStop(0, back ? '#3e3826' : root);
+    grad.addColorStop(1, tip);
+    ctx.fillStyle = grad;
+    // A tapering blade that bends over as it rises.
+    const tx = x + lean;
+    const ty = size - h;
+    const cx = x + lean * 0.25;
+    const cy = size - h * 0.55;
     ctx.beginPath();
-    ctx.moveTo(x, size);
-    ctx.quadraticCurveTo(x + lean * 0.3, size - h * 0.6, x + lean, size - h);
-    ctx.stroke();
+    ctx.moveTo(x - w / 2, size);
+    ctx.quadraticCurveTo(cx - w * 0.35, cy, tx, ty);
+    ctx.quadraticCurveTo(cx + w * 0.35, cy, x + w / 2, size);
+    ctx.closePath();
+    ctx.fill();
+    // A few dry seed heads.
+    if (!back && rand() < 0.12) {
+      ctx.fillStyle = '#c8b27e';
+      for (let k = 0; k < 6; k++) {
+        ctx.beginPath();
+        ctx.ellipse(tx - lean * 0.02 * k, ty + k * 4, 2.2, 3.4, lean * 0.01, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
   return cutout(canvas, [0x93, 0x84, 0x58]);
 }

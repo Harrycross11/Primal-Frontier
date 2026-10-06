@@ -212,10 +212,10 @@ export class World {
       shader.uniforms.windTime = this.windTime;
       // Double-sided materials flip the normal on back faces, which points it into the ground
       // and turns every blade seen from behind black. Keep the upward normal on both sides.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_begin>',
-        THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''),
-      );
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
+        // Darker down among the roots, where the tuft shades itself.
+        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= mix(0.5, 1.05, smoothstep(0.0, 0.55, vMapUv.y));');
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float windTime;')
         .replace(
@@ -230,14 +230,16 @@ export class World {
           #endif`,
         );
     };
-    const blade = new THREE.PlaneGeometry(0.7, 0.55);
-    blade.translate(0, 0.27, 0);
-    const cross = mergeCross(blade);
+    const blade = new THREE.PlaneGeometry(0.75, 0.6);
+    blade.translate(0, 0.29, 0);
+    // Three cards at 60 degrees, so a tuft looks full from every side.
+    const cross = mergeCards([0, 1, 2].map((k) => blade.clone().rotateY((k * Math.PI) / 3)));
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
-    const count = 4500;
+    const count = 16000;
     const mesh = new THREE.InstancedMesh(cross, mat, count);
+    const tint = new THREE.Color();
     const rand = mulberry32(this.seed ^ 0xabcdef);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -249,12 +251,18 @@ export class World {
       const x = (rand() - 0.5) * WORLD_SIZE * 0.85;
       const z = (rand() - 0.5) * WORLD_SIZE * 0.85;
       const patch = Math.sin(x * 0.08) * Math.cos(z * 0.06) + Math.sin((x + z) * 0.05);
-      if (patch < 0.3) continue;
+      // Thick in the patches, thinning out around them, with the odd lone tuft elsewhere.
+      if (patch < 0.3 && rand() > Math.max(0.04, (patch + 0.2) * 1.4)) continue;
       const y = terrainHeight(this.seed, x, z);
       if (y < 1) continue;
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
-      s.setScalar(0.6 + rand() * 0.9);
+      const k = 0.55 + rand() * 0.9;
+      s.set(k * (0.9 + rand() * 0.3), k * (0.75 + rand() * 0.5), k);
       p.set(x, y - 0.02, z);
+      // Each tuft a little drier or greener, lighter or darker than its neighbours.
+      const dry = rand();
+      tint.setRGB(0.86 + dry * 0.2, 0.93 + dry * 0.07, 0.8 + dry * 0.05).multiplyScalar(0.85 + rand() * 0.3);
+      mesh.setColorAt(placed, tint);
       mesh.setMatrixAt(placed++, m.compose(p, q, s));
     }
     mesh.count = placed;
@@ -271,7 +279,7 @@ export class World {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const pts = new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ size: 0.07, map: dotTexture(), color: 0xe8e2d8, transparent: true, opacity: 0.75, depthWrite: false }),
+      new THREE.PointsMaterial({ size: 0.04, map: dotTexture(), color: 0xe8e2d8, transparent: true, opacity: 0.55, depthWrite: false }),
     );
     pts.frustumCulled = false;
     this.scene.add(pts);
@@ -750,23 +758,6 @@ export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Gr
   }
   g.userData.pieceKey = pieceKey(piece);
   return g;
-}
-
-/** Two crossed planes from one, so grass looks full from every angle. */
-function mergeCross(plane: THREE.PlaneGeometry): THREE.BufferGeometry {
-  const a = plane.clone();
-  const b = plane.clone().rotateY(Math.PI / 2);
-  const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array([...a.attributes.position.array, ...b.attributes.position.array]);
-  const norm = new Float32Array([...a.attributes.normal.array, ...b.attributes.normal.array]);
-  const uv = new Float32Array([...a.attributes.uv.array, ...b.attributes.uv.array]);
-  const offset = a.attributes.position.count;
-  const index = [...a.index!.array, ...[...b.index!.array].map((i) => i + offset)];
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
-  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  geo.setIndex(index);
-  return geo;
 }
 
 /** Joins plane geometries (position, normal, uv only) into one. */
