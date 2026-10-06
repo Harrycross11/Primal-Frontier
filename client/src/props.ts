@@ -6,7 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
-import { BOULDERS, model } from './models.ts';
+import { BOULDERS, model, soleMaterial } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -84,11 +84,12 @@ export function scannedRock(rand: () => number, base: THREE.Color, vein?: { colo
   geo.translate(0, -0.5, 0);
   paintRock(geo, new Float32Array(geo.attributes.position.count), base, rand, vein);
   geo.translate(0, 0.5, 0);
-  let mat = scannedMats.get(m.material.uuid);
+  const source = soleMaterial(m);
+  let mat = scannedMats.get(source.uuid);
   if (!mat) {
-    mat = m.material.clone();
+    mat = source.clone();
     mat.vertexColors = true;
-    scannedMats.set(m.material.uuid, mat);
+    scannedMats.set(source.uuid, mat);
   }
   const out = new THREE.Mesh(geo, mat);
   out.castShadow = true;

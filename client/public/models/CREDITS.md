@@ -10,3 +10,9 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - log: https://polyhaven.com/a/dead_tree_trunk_02
 - barrel: https://polyhaven.com/a/barrel_03
 - tyre: https://polyhaven.com/a/old_tyre
+- dry-grass: https://polyhaven.com/a/grass_medium_02
+- dry-bush: https://polyhaven.com/a/wild_rooibos_bush
+- branches: https://polyhaven.com/a/dry_branches_medium_01
+- dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
+- stones: https://polyhaven.com/a/namaqualand_stones_01
+- stump: https://polyhaven.com/a/tree_stump_01

@@ -5,13 +5,15 @@ simplified to roughly the triangle budget below with gltf-transform (fetched by 
 normal map keeps the fine surface detail. The output is committed, so this only needs running
 again to change or add a model. Needs Node (npx) and network access to Poly Haven.
 
-    python3 scripts/fetch-models.py
+    python3 scripts/fetch-models.py            # every model
+    python3 scripts/fetch-models.py tyre log   # just these
 """
 
 import json
 import os
 import struct
 import subprocess
+import sys
 import tempfile
 import urllib.request
 
@@ -28,6 +30,13 @@ MODELS = {
     'log': ('dead_tree_trunk_02', 6000),
     'barrel': ('barrel_03', 3000),
     'tyre': ('old_tyre', 2000),
+    # Ground cover, drawn many times over, so kept light.
+    'dry-grass': ('grass_medium_02', 1500),
+    'dry-bush': ('wild_rooibos_bush', 2500),
+    'branches': ('dry_branches_medium_01', 1500),
+    'dead-branch': ('dead_quiver_branch_01', 1500),
+    'stones': ('namaqualand_stones_01', 1500),
+    'stump': ('tree_stump_01', 2000),
 }
 
 
@@ -48,9 +57,17 @@ def triangles(path: str) -> int:
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    credits = []
+    credits = [f'- {name}: https://polyhaven.com/a/{asset}' for name, (asset, _) in MODELS.items()]
+    only = sys.argv[1:]
     for name, (asset, budget) in MODELS.items():
-        files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))['gltf']['1k']['gltf']
+        if only and name not in only:
+            continue
+        every = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
+        files = every['gltf']['1k']['gltf']
+        # The glTF's colour maps are JPEGs with no alpha, so cut-out leaves come as a separate mask.
+        if 'Alpha' in every:
+            with open(os.path.join(OUT, f'{name}_alpha.jpg'), 'wb') as f:
+                f.write(get(every['Alpha']['1k']['jpg']['url']))
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, f'{asset}.gltf')
             with open(src, 'wb') as f:
@@ -65,8 +82,7 @@ def main():
             ratio = min(1.0, budget / max(1, triangles(full)))
             out = os.path.join(OUT, f'{name}.glb')
             subprocess.run(CLI + ['simplify', full, out, '--ratio', f'{ratio:.4f}', '--error', '0.01'], check=True, capture_output=True)
-        credits.append(f'- {name}: https://polyhaven.com/a/{asset}')
-        print('saved', name, triangles(out), 'triangles')
+            print('saved', name, triangles(full), '->', triangles(out), 'triangles')
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write('# Models\n\nPhoto-scanned models from Poly Haven, all CC0 (public domain), simplified for the game.\n\n' + '\n'.join(credits) + '\n')
 

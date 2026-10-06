@@ -7,7 +7,7 @@ import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
 import { asphaltSurface, barkSurface, concreteSurface } from './textures.ts';
-import { model } from './models.ts';
+import { model, variants, type Model } from './models.ts';
 import { rockGeometry, rockMaterial } from './rocks.ts';
 
 export function buildScenery(scene: THREE.Scene, seed: number, decor: Decor[]) {
@@ -105,11 +105,11 @@ function buildScatter(scene: THREE.Scene, seed: number) {
 
   const scatter = (
     geo: THREE.BufferGeometry,
-    mat: THREE.Material,
+    mat: THREE.Material | THREE.Material[],
     count: number,
     place: (i: number) => { x: number; z: number; size: number; flat?: boolean; lift?: number } | null,
     shadows = false,
-  ) => {
+  ): THREE.InstancedMesh => {
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     let n = 0;
     for (let i = 0; i < count; i++) {
@@ -126,6 +126,14 @@ function buildScatter(scene: THREE.Scene, seed: number) {
     mesh.receiveShadow = true;
     mesh.castShadow = shadows;
     scene.add(mesh);
+    return mesh;
+  };
+  /** Scatters a scanned set, sharing `count` between its variants. Cut-out leaves skip the AO pass. */
+  const scatterSet = (set: Model[], count: number, place: Parameters<typeof scatter>[3], cutout = false) => {
+    for (const v of set) {
+      const mesh = scatter(v.geometry, v.material, Math.ceil(count / set.length), place, true);
+      if (cutout) mesh.userData.noAO = true;
+    }
   };
   const anywhere = () => ({ x: (rand() - 0.5) * 2 * span, z: (rand() - 0.5) * 2 * span });
   // Clusters, so debris looks dumped or blown together rather than sprinkled evenly.
@@ -178,7 +186,33 @@ function buildScatter(scene: THREE.Scene, seed: number) {
   }
   const shrubGeo = mergeSimple(twigs);
   const shrubMat = new THREE.MeshStandardMaterial({ color: 0x4e4236, roughness: 1 });
-  scatter(shrubGeo, shrubMat, 260, () => ({ ...anywhere(), size: 0.7 + rand() * 0.9, flat: true }), true);
+  const bushes = variants('dry-bush');
+  if (bushes.length) {
+    scatter(shrubGeo, shrubMat, 120, () => ({ ...anywhere(), size: 0.7 + rand() * 0.9, flat: true }), true);
+    scatterSet(bushes, 160, () => ({ ...anywhere(), size: 0.7 + rand() * 0.8, flat: true }), true);
+  } else scatter(shrubGeo, shrubMat, 260, () => ({ ...anywhere(), size: 0.7 + rand() * 0.9, flat: true }), true);
+
+  // Scanned ground cover: clumps of dry grass where the grass grows, fallen branches, small
+  // stones and old stumps.
+  const grassy = (x: number, z: number) => Math.sin(x * 0.08) * Math.cos(z * 0.06) + Math.sin((x + z) * 0.05) > 0.3;
+  scatterSet(
+    variants('dry-grass'),
+    1400,
+    () => {
+      for (let t = 0; t < 8; t++) {
+        const p = anywhere();
+        if (grassy(p.x, p.z) && terrainHeight(seed, p.x, p.z) > 1) return { ...p, size: 0.8 + rand() * 0.7, flat: true };
+      }
+      return null;
+    },
+    true,
+  );
+  const twigsAt = clusters(40, 10);
+  scatterSet(variants('branches'), 140, () => ({ ...twigsAt(), size: 0.6 + rand() * 0.8, flat: true }));
+  scatterSet(variants('dead-branch'), 50, () => ({ ...anywhere(), size: 0.8 + rand() * 0.8, flat: true }));
+  const stonesAt = clusters(60, 6);
+  scatterSet(variants('stones'), 500, () => ({ ...stonesAt(), size: 0.6 + rand() * 1.4, flat: true, lift: -0.05 }));
+  scatterSet(variants('stump'), 30, () => ({ ...anywhere(), size: 0.8 + rand() * 0.5, flat: true, lift: -0.1 }));
 }
 
 function mergeSimple(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
