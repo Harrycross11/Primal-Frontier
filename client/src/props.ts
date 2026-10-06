@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
+import { BOULDERS, model, soleMaterial } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -45,6 +46,8 @@ const BOULDER_COLORS: Record<BoulderKind, [number, number]> = {
 
 /** A weathered boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
 export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group {
+  const scanned = scannedBoulder(rand, kind);
+  if (scanned) return scanned;
   const ore = kind !== 'stone';
   const g = new THREE.Group();
   const { geo, cavity } = rockGeometry(rand, { detail: 4, stretch: [1.15, 0.85, 1], cuts: 8 });
@@ -62,6 +65,56 @@ export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group
     small.scale.setScalar(s);
     small.position.set(Math.cos(a) * 1.15, s * 0.3, Math.sin(a) * 1.05);
     small.rotation.set((rand() - 0.5) * 0.4, rand() * 6, (rand() - 0.5) * 0.4);
+    g.add(small);
+  }
+  return g;
+}
+
+const scannedMats = new Map<string, THREE.MeshStandardMaterial>();
+
+/**
+ * A photo-scanned boulder, picked by `rand`. Its own colour comes from the scan; vertex colours
+ * tint it per kind and paint the ore veins across it. Undefined if the scans didn't load.
+ */
+export function scannedRock(rand: () => number, base: THREE.Color, vein?: { color: THREE.Color; count: number; width: number }): THREE.Mesh | undefined {
+  const m = model(BOULDERS[Math.floor(rand() * BOULDERS.length)]);
+  if (!m) return undefined;
+  const geo = m.geometry.clone();
+  // paintRock expects a rock about 1 m in radius centred on the origin.
+  geo.translate(0, -0.5, 0);
+  paintRock(geo, new Float32Array(geo.attributes.position.count), base, rand, vein);
+  geo.translate(0, 0.5, 0);
+  const source = soleMaterial(m);
+  let mat = scannedMats.get(source.uuid);
+  if (!mat) {
+    mat = source.clone();
+    mat.vertexColors = true;
+    scannedMats.set(source.uuid, mat);
+  }
+  const out = new THREE.Mesh(geo, mat);
+  out.castShadow = true;
+  out.receiveShadow = true;
+  return out;
+}
+
+function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | undefined {
+  const stone = new THREE.Color(BOULDER_COLORS.stone[0]);
+  // Tints relative to plain stone, since the scan already has stone's colour.
+  const base = new THREE.Color(BOULDER_COLORS[kind][0]);
+  base.setRGB(base.r / stone.r, base.g / stone.g, base.b / stone.b);
+  const vein = kind === 'stone' ? undefined : { color: new THREE.Color(BOULDER_COLORS[kind][1]).multiplyScalar(1.15), count: 4, width: kind === 'sulfurOre' ? 0.22 : 0.16 };
+  const body = scannedRock(rand, base, vein);
+  if (!body) return undefined;
+  const g = new THREE.Group();
+  body.position.y = -0.05;
+  g.add(body);
+  // A few smaller stones broken off around the base.
+  for (let n = 0; n < 3; n++) {
+    const small = scannedRock(rand, base)!;
+    const a = rand() * Math.PI * 2;
+    small.scale.setScalar(0.12 + rand() * 0.08);
+    small.position.set(Math.cos(a) * 1.2, -0.02, Math.sin(a) * 1.1);
+    small.rotation.y = rand() * 6;
     g.add(small);
   }
   return g;
