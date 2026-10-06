@@ -3,6 +3,7 @@
 // "Low" renders directly.
 
 import * as THREE from 'three';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
@@ -14,15 +15,30 @@ export type Quality = 'high' | 'low';
 
 /** Low, hazy sun: late afternoon on a dead planet. */
 export const SUN_DIRECTION = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 16), THREE.MathUtils.degToRad(215));
-export const HAZE = new THREE.Color(0xb4a084);
-const ZENITH = new THREE.Color(0x5f6a76);
+export const HAZE = new THREE.Color(0xbcb09c);
+const ZENITH = new THREE.Color(0x56708e);
+
+/**
+ * The photographed sky (Poly Haven's "Wasteland Clouds", CC0), and where its sun is: 7.7° up,
+ * 0.6 of the way across the image. The photo is turned and stretched so its sun sits on ours.
+ */
+const SKY_URL = '/textures/sky.hdr';
+const PHOTO_SUN_U = 0.5996;
+const PHOTO_SUN_ELEVATION = THREE.MathUtils.degToRad(7.7);
+/** Scales the photo's brightness to match the lighting the game was tuned under. */
+const PHOTO_EXPOSURE = 0.3;
+
+interface PhotoSky {
+  map: { value: THREE.Texture | null };
+  mix: { value: number };
+}
 
 /**
  * A dusty sky dome: hazy brown at the horizon (matching the fog, so distant land melts into
  * it), grey-blue overhead, a glow around the sun that scatters through the dust, and slow
  * drifting layers of cloud lit from the sun's side.
  */
-function skyDome(radius: number, time: { value: number }): THREE.Mesh {
+function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -31,12 +47,35 @@ function skyDome(radius: number, time: { value: number }): THREE.Mesh {
       horizon: { value: HAZE },
       zenith: { value: ZENITH },
       sunDir: { value: SUN_DIRECTION },
-      sunColor: { value: new THREE.Color(0xffd2a0) },
+      sunColor: { value: new THREE.Color(0xffdcb4) },
       time,
+      photoMap: photo.map,
+      photoMix: photo.mix,
+      photoTurn: { value: (PHOTO_SUN_U - 0.5) * Math.PI * 2 - Math.atan2(SUN_DIRECTION.z, SUN_DIRECTION.x) },
+      photoSun: { value: new THREE.Vector2(Math.asin(SUN_DIRECTION.y), PHOTO_SUN_ELEVATION) },
+      photoExposure: { value: PHOTO_EXPOSURE },
     },
     vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`,
     fragmentShader: `
       uniform vec3 horizon; uniform vec3 zenith; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; varying vec3 vDir;
+      uniform sampler2D photoMap; uniform float photoMix; uniform float photoTurn; uniform vec2 photoSun; uniform float photoExposure;
+      const float PI = 3.141592653589793;
+      // The photographed sky in direction d, its elevations bent so the photo's sun (photoSun.y)
+      // lands at ours (photoSun.x) while the horizon and zenith stay put.
+      vec3 photoSky(vec3 d) {
+        float e = asin(clamp(d.y, -1.0, 1.0));
+        float s = photoSun.x;
+        float p = photoSun.y;
+        float e2 = e < s ? e * p / s : p + (e - s) * (PI * 0.5 - p) / (PI * 0.5 - s);
+        float a = atan(d.z, d.x) + photoTurn;
+        vec2 uv = vec2(fract(a / (2.0 * PI) + 0.5), e2 / PI + 0.5);
+        vec3 c = texture2D(photoMap, uv).rgb * photoExposure;
+        // The photo's glow round its sun is far brighter than ours and would flood the light
+        // shafts; squash everything above white. Our own sun disc is drawn on top.
+        float l = max(max(c.r, c.g), c.b);
+        if (l > 1.0) c *= (1.0 + (l - 1.0) * 0.12) / l;
+        return c;
+      }
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
         vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -69,6 +108,12 @@ function skyDome(radius: number, time: { value: number }): THREE.Mesh {
           cloud += sunColor * pow(s, 8.0) * (1.0 - thick) * 0.9;
           float fade = smoothstep(0.0, 0.25, d.y);
           col = mix(col, cloud, cover * fade * 0.8);
+        }
+        if (photoMix > 0.0) {
+          // Low down the photo fades into the haze, so it meets the fogged land without a seam.
+          vec3 photo = photoSky(d);
+          photo = mix(horizon, photo, smoothstep(-0.02, 0.14, d.y));
+          col = mix(col, photo, photoMix);
         }
         col += sunColor * smoothstep(0.9993, 0.9997, s) * 12.0;
         gl_FragColor = vec4(col, 1.0);
@@ -126,15 +171,15 @@ const GradeShader = {
       c.r = texture2D(tDiffuse, vUv + ca).r;
       c.b = texture2D(tDiffuse, vUv - ca).b;
       float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-      vec3 graded = mix(vec3(l), c.rgb, 0.9);
+      vec3 graded = mix(vec3(l), c.rgb, 0.96);
       // Warm highlights, slightly cool shadows.
       graded *= mix(vec3(0.95, 0.98, 1.04), vec3(1.05, 1.0, 0.9), smoothstep(0.1, 0.7, l));
       graded = (graded - 0.5) * 1.1 + 0.5;
       float v = smoothstep(0.95, 0.3, length(fromCentre));
-      graded *= mix(0.7, 1.0, v);
+      graded *= mix(0.8, 1.0, v);
       // Film grain, stronger in the shadows.
       float g = hash(vUv * 1000.0 + fract(time) * 100.0) - 0.5;
-      graded += g * 0.035 * (1.0 - l * 0.6);
+      graded += g * 0.022 * (1.0 - l * 0.6);
       c.rgb = mix(c.rgb, graded, amount);
       gl_FragColor = c;
     }`,
@@ -169,18 +214,32 @@ export class Graphics {
     this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1500);
 
     // Sky dome plus an environment map baked from it, so surfaces pick up the sky's colour.
-    this.sky = skyDome(1000, this.time);
+    // The dome is drawn in code until the photographed sky loads, then shows the photo.
+    const photo: PhotoSky = { map: { value: null }, mix: { value: 0 } };
+    this.sky = skyDome(1000, this.time, photo);
     scene.add(this.sky);
     const envScene = new THREE.Scene();
-    envScene.add(skyDome(50, { value: 0 }));
+    envScene.add(skyDome(50, { value: 0 }, photo));
     // A dark ground half, so reflections pick up earth below the horizon rather than sky.
     const ground = new THREE.Mesh(new THREE.CircleGeometry(48, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x4a4034 }));
     ground.position.y = -1;
     envScene.add(ground);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+    const bakeEnvironment = () => {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      scene.environment?.dispose();
+      scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+      pmrem.dispose();
+    };
+    bakeEnvironment();
     scene.environmentIntensity = 0.55;
-    pmrem.dispose();
+    new HDRLoader().load(SKY_URL, (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.minFilter = tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      photo.map.value = tex;
+      photo.mix.value = 1;
+      bakeEnvironment();
+    });
 
     const target = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, target);
@@ -188,6 +247,18 @@ export class Graphics {
     this.gtao = new GTAOPass(scene, this.camera, innerWidth, innerHeight);
     this.gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.5, scale: 1.1 });
     this.gtao.blendIntensity = 0.85;
+    // The occlusion pass draws everything with one plain material, so cut-out leaf cards would
+    // shade as solid squares. Leave anything marked noAO out of it.
+    const gtao = this.gtao as unknown as { _overrideVisibility(): void; _visibilityCache: THREE.Object3D[] };
+    gtao._overrideVisibility = () => {
+      scene.traverse((o) => {
+        const line = (o as THREE.Points).isPoints || (o as THREE.Line).isLine;
+        if ((line || o.userData.noAO) && o.visible) {
+          o.visible = false;
+          gtao._visibilityCache.push(o);
+        }
+      });
+    };
     this.composer.addPass(this.gtao);
     this.shafts = new ShaderPass(SunShaftShader);
     this.composer.addPass(this.shafts);

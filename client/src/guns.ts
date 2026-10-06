@@ -292,6 +292,43 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       part(g, new THREE.CylinderGeometry(0.012, 0.012, 0.061, 10), mat('gauze-core', () => new THREE.MeshStandardMaterial({ color: 0x9a8a70, roughness: 1 })), 0, 0, 0.03);
       part(g, box(0.05, 0.002, 0.08), mat('gauze', () => new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 1 })), 0.02, -0.03, 0.08);
       return g;
+    case 'cannedBeans': {
+      // A dented tin with a faded paper label and a ring-pull lid.
+      const tin = mat('tin', () => new THREE.MeshStandardMaterial({ color: 0xb0b2b0, roughness: 0.35, metalness: 0.9 }));
+      const label = mat('beans-label', () => new THREE.MeshStandardMaterial({ color: 0xa8462c, roughness: 0.8 }));
+      part(g, new THREE.CylinderGeometry(0.038, 0.038, 0.1, 20), tin, 0, 0.05, 0);
+      part(g, new THREE.CylinderGeometry(0.0385, 0.0385, 0.062, 20, 1, true), label, 0, 0.05, 0);
+      part(g, new THREE.CylinderGeometry(0.0386, 0.0386, 0.012, 20, 1, true), mat('beans-band', () => new THREE.MeshStandardMaterial({ color: 0xd8c27a, roughness: 0.8 })), 0, 0.05, 0);
+      part(g, new THREE.TorusGeometry(0.036, 0.003, 4, 20).rotateX(Math.PI / 2), tin, 0, 0.1, 0);
+      part(g, new THREE.TorusGeometry(0.009, 0.0025, 4, 10).rotateX(Math.PI / 2), tin, 0.015, 0.102, 0);
+      return g;
+    }
+    case 'bottledWater': {
+      // A clear plastic bottle, mostly full, with a blue cap and label.
+      const plastic = mat('bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeef5, roughness: 0.08, transmission: 0.5, transparent: true, opacity: 0.45, thickness: 0.01 }));
+      const shape = [[0.001, 0], [0.032, 0], [0.034, 0.01], [0.034, 0.15], [0.026, 0.18], [0.013, 0.2], [0.013, 0.215]].map(([r, y]) => new THREE.Vector2(r, y));
+      part(g, new THREE.LatheGeometry(shape, 20), plastic, 0, 0, 0);
+      part(g, new THREE.CylinderGeometry(0.031, 0.031, 0.13, 20), mat('bottle-water', () => new THREE.MeshStandardMaterial({ color: 0x8ec4dc, roughness: 0.05, transparent: true, opacity: 0.55 })), 0, 0.075, 0);
+      part(g, new THREE.CylinderGeometry(0.0345, 0.0345, 0.05, 20, 1, true), mat('bottle-label', () => new THREE.MeshStandardMaterial({ color: 0x2f6aa8, roughness: 0.7 })), 0, 0.08, 0);
+      part(g, new THREE.CylinderGeometry(0.015, 0.015, 0.018, 14), mat('bottle-cap', () => new THREE.MeshStandardMaterial({ color: 0x2a5a9a, roughness: 0.5 })), 0, 0.222, 0);
+      return g;
+    }
+    case 'antiRadPills': {
+      // An orange pill bottle with a white cap and a yellow warning label.
+      part(g, new THREE.CylinderGeometry(0.024, 0.024, 0.075, 18), mat('pill-bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xd8742a, roughness: 0.2, transmission: 0.25, transparent: true, opacity: 0.85 })), 0, 0.0375, 0);
+      part(g, new THREE.CylinderGeometry(0.0245, 0.0245, 0.035, 18, 1, true), mat('pill-label', () => new THREE.MeshStandardMaterial({ color: 0xe0c040, roughness: 0.7 })), 0, 0.035, 0);
+      part(g, new THREE.CylinderGeometry(0.027, 0.027, 0.018, 18), mat('pill-cap', () => new THREE.MeshStandardMaterial({ color: 0xece8e0, roughness: 0.6 })), 0, 0.084, 0);
+      return g;
+    }
+    case 'mushroom': {
+      const stem = mat('shroom-stem', () => new THREE.MeshStandardMaterial({ color: 0xd8cdb4, roughness: 0.9 }));
+      const cap = mat('shroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));
+      for (const [x, z, h, r] of [[0, 0, 0.07, 0.04], [0.045, 0.02, 0.05, 0.028]]) {
+        part(g, new THREE.CylinderGeometry(r * 0.32, r * 0.42, h, 10), stem, x, h / 2, z);
+        part(g, new THREE.SphereGeometry(r, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1), cap, x, h - 0.003, z);
+      }
+      return g;
+    }
     case 'syringe': {
       const glass = mat('syringe-glass', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeaf0, roughness: 0.05, transmission: 0.6, transparent: true, opacity: 0.55, thickness: 0.01 }));
       part(g, tube(0.012, 0.12, 14), glass, 0, 0.02, 0.05);

@@ -6,6 +6,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
+import { BOULDERS, model, soleMaterial } from './models.ts';
+import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 const cache = new Map<string, THREE.Material>();
@@ -37,47 +39,82 @@ function mesh(geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0)
 export type BoulderKind = 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre';
 const BOULDER_COLORS: Record<BoulderKind, [number, number]> = {
   stone: [0xa8a196, 0xa8a196],
-  metalOre: [0x7a736b, 0xc4823a],
-  sulfurOre: [0x8a8478, 0xe0c640],
-  hqmOre: [0x5e646c, 0xa9c2d8],
+  metalOre: [0x9a9289, 0xd08a3e],
+  sulfurOre: [0x9c968a, 0xe6cc48],
+  hqmOre: [0x7c838c, 0xb4cde2],
 };
 
-/** A lumpy boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
+/** A weathered boulder. Ore boulders get veins: rusty for metal, yellow for sulfur, blue-grey for high quality metal. */
 export function buildBoulder(rand: () => number, kind: BoulderKind): THREE.Group {
+  const scanned = scannedBoulder(rand, kind);
+  if (scanned) return scanned;
   const ore = kind !== 'stone';
   const g = new THREE.Group();
-  const geo = new THREE.IcosahedronGeometry(1, 2);
-  const p = geo.attributes.position;
-  const colors = new Float32Array(p.count * 3);
-  const base = new THREE.Color(BOULDER_COLORS[kind][0]);
-  const vein = new THREE.Color(BOULDER_COLORS[kind][1]);
-  const c = new THREE.Color();
-  const bumps = [...Array(6)].map(() => new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize());
-  const veins = [...Array(5)].map(() => new THREE.Vector3(rand() - 0.5, rand() * 0.6, rand() - 0.5).normalize());
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i).normalize();
-    let k = 0.85;
-    for (const b of bumps) k += Math.max(0, v.dot(b) - 0.6) * 0.5;
-    k += (rand() - 0.5) * 0.08;
-    p.setXYZ(i, v.x * k * 1.1, v.y * k * 0.75, v.z * k);
-    c.copy(base).multiplyScalar(0.85 + rand() * 0.25);
-    if (ore) for (const w of veins) if (v.dot(w) > (kind === 'sulfurOre' ? 0.8 : 0.86)) c.lerp(vein, 0.85);
-    c.toArray(colors, i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-  const rockMat = mat(`boulder-${kind}`, () =>
-    new THREE.MeshStandardMaterial({ ...concreteSurface(), vertexColors: true, roughness: ore ? 0.75 : 1, metalness: kind === 'metalOre' || kind === 'hqmOre' ? 0.25 : 0, flatShading: true }),
-  );
-  const body = mesh(geo, rockMat, 0, 0.45, 0);
+  const { geo, cavity } = rockGeometry(rand, { detail: 4, stretch: [1.15, 0.85, 1], cuts: 8 });
+  paintRock(geo, cavity, new THREE.Color(BOULDER_COLORS[kind][0]), rand, ore ? { color: new THREE.Color(BOULDER_COLORS[kind][1]), count: 4, width: kind === 'sulfurOre' ? 0.22 : 0.16 } : undefined);
+  const rockMat = rockMaterial(`boulder-${kind}`, { vertexColors: true, roughness: ore ? 0.82 : 0.95 });
+  const body = mesh(geo, rockMat, 0, 0.36, 0);
   g.add(body);
-  // A couple of smaller stones around the base.
+  // A few smaller stones broken off around the base.
   for (let n = 0; n < 3; n++) {
-    const small = mesh(new THREE.DodecahedronGeometry(0.22 + rand() * 0.15, 0), ore ? rockMat : stoneMat());
+    const piece = rockGeometry(rand, { detail: 2, stretch: [1, 0.7, 0.9], cuts: 3 });
+    paintRock(piece.geo, piece.cavity, new THREE.Color(BOULDER_COLORS[kind][0]), rand);
+    const small = mesh(piece.geo, rockMat, 0, 0, 0);
     const a = rand() * Math.PI * 2;
-    small.position.set(Math.cos(a) * 1.1, 0.08, Math.sin(a) * 1.0);
-    small.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+    const s = 0.2 + rand() * 0.16;
+    small.scale.setScalar(s);
+    small.position.set(Math.cos(a) * 1.15, s * 0.3, Math.sin(a) * 1.05);
+    small.rotation.set((rand() - 0.5) * 0.4, rand() * 6, (rand() - 0.5) * 0.4);
+    g.add(small);
+  }
+  return g;
+}
+
+const scannedMats = new Map<string, THREE.MeshStandardMaterial>();
+
+/**
+ * A photo-scanned boulder, picked by `rand`. Its own colour comes from the scan; vertex colours
+ * tint it per kind and paint the ore veins across it. Undefined if the scans didn't load.
+ */
+export function scannedRock(rand: () => number, base: THREE.Color, vein?: { color: THREE.Color; count: number; width: number }): THREE.Mesh | undefined {
+  const m = model(BOULDERS[Math.floor(rand() * BOULDERS.length)]);
+  if (!m) return undefined;
+  const geo = m.geometry.clone();
+  // paintRock expects a rock about 1 m in radius centred on the origin.
+  geo.translate(0, -0.5, 0);
+  paintRock(geo, new Float32Array(geo.attributes.position.count), base, rand, vein);
+  geo.translate(0, 0.5, 0);
+  const source = soleMaterial(m);
+  let mat = scannedMats.get(source.uuid);
+  if (!mat) {
+    mat = source.clone();
+    mat.vertexColors = true;
+    scannedMats.set(source.uuid, mat);
+  }
+  const out = new THREE.Mesh(geo, mat);
+  out.castShadow = true;
+  out.receiveShadow = true;
+  return out;
+}
+
+function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | undefined {
+  const stone = new THREE.Color(BOULDER_COLORS.stone[0]);
+  // Tints relative to plain stone, since the scan already has stone's colour.
+  const base = new THREE.Color(BOULDER_COLORS[kind][0]);
+  base.setRGB(base.r / stone.r, base.g / stone.g, base.b / stone.b);
+  const vein = kind === 'stone' ? undefined : { color: new THREE.Color(BOULDER_COLORS[kind][1]).multiplyScalar(1.15), count: 4, width: kind === 'sulfurOre' ? 0.22 : 0.16 };
+  const body = scannedRock(rand, base, vein);
+  if (!body) return undefined;
+  const g = new THREE.Group();
+  body.position.y = -0.05;
+  g.add(body);
+  // A few smaller stones broken off around the base.
+  for (let n = 0; n < 3; n++) {
+    const small = scannedRock(rand, base)!;
+    const a = rand() * Math.PI * 2;
+    small.scale.setScalar(0.12 + rand() * 0.08);
+    small.position.set(Math.cos(a) * 1.2, -0.02, Math.sin(a) * 1.1);
+    small.rotation.y = rand() * 6;
     g.add(small);
   }
   return g;
@@ -101,6 +138,110 @@ export function buildHemp(rand: () => number): THREE.Group {
       stalk.add(leaf);
     }
   }
+  return g;
+}
+
+/** A clump of pale wasteland mushrooms with brown, speckled caps. */
+export function buildMushrooms(rand: () => number): THREE.Group {
+  const g = new THREE.Group();
+  const stemMat = plain(0xd8cdb4, 0.9);
+  const capMat = mat('mushroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));
+  const gillMat = plain(0xb8a888, 1);
+  for (let n = 0; n < 5; n++) {
+    const h = 0.16 + rand() * 0.22;
+    const r = 0.08 + rand() * 0.08;
+    const x = (rand() - 0.5) * 0.6;
+    const z = (rand() - 0.5) * 0.6;
+    const tilt = (rand() - 0.5) * 0.4;
+    const m = new THREE.Group();
+    m.position.set(x, 0, z);
+    m.rotation.set(tilt, rand() * 3, (rand() - 0.5) * 0.4);
+    m.add(mesh(new THREE.CylinderGeometry(r * 0.3, r * 0.4, h, 8).translate(0, h / 2, 0), stemMat));
+    const cap = mesh(new THREE.SphereGeometry(r, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1), capMat, 0, h - 0.004, 0);
+    m.add(cap);
+    m.add(mesh(new THREE.CircleGeometry(r * 0.98, 12).rotateX(Math.PI / 2), gillMat, 0, h - 0.003, 0));
+    g.add(m);
+  }
+  return g;
+}
+
+/**
+ * A blue plastic drum catching rain under a tarp funnel. `setLevel` (0 to 1) raises or lowers
+ * the water inside as people drink from it.
+ */
+export function buildWaterBarrel(): THREE.Group {
+  const g = new THREE.Group();
+  const plastic = mat('drum-plastic', () => new THREE.MeshStandardMaterial({ color: 0x2c5a80, roughness: 0.5 }));
+  const body = mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, true), plastic, 0, 0.45, 0);
+  (body.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+  g.add(body);
+  g.add(mesh(new THREE.CircleGeometry(0.3, 20).rotateX(-Math.PI / 2), plastic, 0, 0.02, 0));
+  for (const y of [0.22, 0.68]) g.add(mesh(new THREE.TorusGeometry(0.305, 0.015, 6, 24).rotateX(Math.PI / 2), plastic, 0, y, 0));
+  g.add(mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 24).rotateX(Math.PI / 2), plastic, 0, 0.9, 0));
+  // A torn tarp tied round the rim as a funnel.
+  const tarp = mat('tarp', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x5a6a4a, roughness: 1, side: THREE.DoubleSide }));
+  const funnel = mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.16, 10, 1, true), tarp, 0, 0.97, 0);
+  funnel.rotation.z = 0.08;
+  g.add(funnel);
+  for (const a of [0.4, 2.5, 4.4]) g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), ropeMat(), Math.cos(a) * 0.4, 0.9, Math.sin(a) * 0.4));
+  const water = mesh(
+    new THREE.CircleGeometry(0.29, 20).rotateX(-Math.PI / 2),
+    mat('barrel-water', () => new THREE.MeshStandardMaterial({ color: 0x3a5058, roughness: 0.08, metalness: 0.2 })),
+    0,
+    0.82,
+    0,
+  );
+  water.castShadow = false;
+  g.add(water);
+  g.userData.setLevel = (k: number) => {
+    water.visible = k > 0.01;
+    water.position.y = 0.1 + 0.72 * k;
+  };
+  return g;
+}
+
+/** A yellow radiation warning sign on a leaning post, at the edge of a hot crater. */
+export function buildRadSign(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.8, 6).translate(0, 0.9, 0), rustMat()));
+  const face = mat('rad-sign', () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#d8b42a';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = '#1e1a14';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(6, 6, 116, 116);
+    // The trefoil: three blades round a centre dot.
+    ctx.fillStyle = '#1e1a14';
+    ctx.translate(64, 64);
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const a = (i * 2 * Math.PI) / 3 - Math.PI / 2;
+      ctx.moveTo(Math.cos(a - 0.52) * 14, Math.sin(a - 0.52) * 14);
+      ctx.arc(0, 0, 46, a - 0.52, a + 0.52);
+      ctx.arc(0, 0, 14, a + 0.52, a - 0.52, true);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    // Weathering: rust streaks and flaked paint.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#7a4a24';
+    for (let i = 0; i < 9; i++) ctx.fillRect(10 + i * 13, 70 + (i % 3) * 12, 3, 40 + (i % 4) * 10);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.2 });
+  });
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.02), [rustMat(), rustMat(), rustMat(), rustMat(), face, rustMat()]);
+  board.position.set(0, 1.45, 0.05);
+  board.rotation.z = 0.12;
+  board.castShadow = true;
+  g.add(board);
+  g.rotation.z = 0.06;
   return g;
 }
 
@@ -261,6 +402,12 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'bandage':
     case 'syringe':
       return buildOtherWeapon(item)?.rotateX(-Math.PI / 2) ?? null;
+    case 'cannedBeans':
+    case 'bottledWater':
+    case 'antiRadPills':
+    case 'mushroom':
+      // Held upright in the palm.
+      return buildOtherWeapon(item)?.rotateX(-Math.PI / 2).translateY(-0.03) ?? null;
     case 'buildingPlan': {
       // A rolled blueprint tied with string.
       g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));

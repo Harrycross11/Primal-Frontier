@@ -29,6 +29,8 @@ export class Controller {
   private onGround = false;
   private keys = new Set<string>();
   private raycaster = new THREE.Raycaster();
+  /** Called on touching down after a jump or fall, with the downward speed. */
+  onLand: ((speed: number) => void) | null = null;
   /** Used by automated tests to walk somewhere without a keyboard. */
   autoWalk: { x: number; z: number } | null = null;
 
@@ -94,7 +96,10 @@ export class Controller {
       this.onGround = false;
     }
     this.vy -= GRAVITY * dt;
+    const falling = -this.vy;
+    const wasOnGround = this.onGround;
     this.moveVertical(this.vy * dt, colliders);
+    if (this.onGround && !wasOnGround && falling > 4) this.onLand?.(falling);
   }
 
   /**
@@ -109,13 +114,14 @@ export class Controller {
       camera.lookAt(eye.addScaledVector(look, 10));
       return;
     }
-    const dist = 4.2 * (1 - 0.5 * zoom);
+    const dist = 3.9 * (1 - 0.5 * zoom);
     const back = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch),
       -Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch),
     );
-    const shoulder = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).multiplyScalar(0.55);
+    // Far enough right that the survivor sits left of the crosshair, so what they hold stays in view.
+    const shoulder = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).multiplyScalar(0.85 - 0.15 * zoom);
     const pivot = this.position.clone().add(new THREE.Vector3(0, 1.65, 0)).add(shoulder);
     this.raycaster.set(pivot, back);
     this.raycaster.far = dist;
@@ -216,7 +222,7 @@ export class Controller {
 
   private hitsResource(x: number, z: number): boolean {
     for (const n of this.resources()) {
-      if (n.amount <= 0 || n.kind === 'hemp') continue;
+      if (n.amount <= 0 || n.kind === 'hemp' || n.kind === 'mushroom') continue;
       const r = RESOURCE_INFO[n.kind].radius * n.scale + PLAYER_RADIUS;
       const was = Math.hypot(this.position.x - n.x, this.position.z - n.z);
       // Only block movement that goes further into the obstacle, so nobody gets stuck.
