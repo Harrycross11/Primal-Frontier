@@ -3,6 +3,7 @@
 
 import type { Box } from './building.ts';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from './constants.ts';
+import { ARMOUR_SLOTS, ITEMS, type ArmourSlot, type Slots } from './items.ts';
 import { terrainHeight } from './terrain.ts';
 
 export type Vec3 = [number, number, number];
@@ -22,6 +23,8 @@ const HEAD_Y = 1.62;
 /** The body below the head, a little wider than the collision box so grazing shots count. */
 const BODY_TOP = 1.46;
 const BODY_PAD = 0.05;
+/** Hits on the body below this height (the hips) land on the legs. */
+const LEGS_TOP = 0.92;
 
 export function headCentre(p: { x: number; y: number; z: number }): Vec3 {
   return [p.x, p.y + HEAD_Y, p.z];
@@ -67,13 +70,25 @@ export function raySphere(o: Vec3, d: Vec3, c: Vec3, r: number, max: number): nu
   return t <= max ? t : null;
 }
 
-/** Where a player's head or body is hit by the ray, if at all. */
-export function rayPlayer(o: Vec3, d: Vec3, p: { x: number; y: number; z: number }, max: number): { t: number; head: boolean } | null {
+/** Where a player's head, chest or legs are hit by the ray, if at all. */
+export function rayPlayer(
+  o: Vec3,
+  d: Vec3,
+  p: { x: number; y: number; z: number },
+  max: number,
+): { t: number; head: boolean; zone: ArmourSlot } | null {
   const head = raySphere(o, d, headCentre(p), HEAD_RADIUS, max);
   const body = rayBox(o, d, bodyBox(p), max);
   if (head === null && body === null) return null;
-  if (body === null || (head !== null && head <= body)) return { t: head!, head: true };
-  return { t: body, head: false };
+  if (body === null || (head !== null && head <= body)) return { t: head!, head: true, zone: 'head' };
+  const y = o[1] + d[1] * body - p.y;
+  return { t: body, head: false, zone: y < LEGS_TOP ? 'legs' : 'chest' };
+}
+
+/** The share of a hit on `zone` that gets through the armour worn in `wear`. */
+export function armourFactor(wear: Slots, zone: ArmourSlot): number {
+  const piece = wear[ARMOUR_SLOTS.indexOf(zone)];
+  return 1 - (piece ? (ITEMS[piece.item].armour?.protection ?? 0) : 0);
 }
 
 /** First point where the ray dips under the ground, by marching in half-metre steps. */

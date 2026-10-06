@@ -5,16 +5,20 @@ import { WORLD_SIZE } from '../../shared/constants.ts';
 import { MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
-import { generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
+import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
-import { buildBoulder, buildDeployable, buildHemp } from './props.ts';
+import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
+import { radZones } from '../../shared/survival.ts';
+import { BOULDERS, model } from './models.ts';
+import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery } from './scenery.ts';
 import {
   barkSurface,
   concreteSurface,
   dotTexture,
   grassTexture,
+  leafTexture,
   groundSurface,
   macroNoiseTexture,
   metalSurface,
@@ -44,15 +48,19 @@ export class World {
   /** Objects the camera should not pass through. */
   readonly cameraBlockers: THREE.Object3D[] = [];
   private bounce = new Map<number, number>();
+  /** Pieces settling into place after being built (rise) or jolted by a hit (shake): seconds left. */
+  private pops = new Map<string, { t: number; kind: 'rise' | 'shake' }>();
   private windTime = { value: 0 };
   private ash: THREE.Points;
   private materials: Record<string, THREE.MeshStandardMaterial>;
 
   constructor(readonly seed: number) {
-    this.scene.fog = new THREE.FogExp2(HAZE, 0.0125);
+    this.scene.fog = new THREE.FogExp2(HAZE, 0.0085);
 
-    this.scene.add(new THREE.HemisphereLight(0xcdbca2, 0x3c342c, 0.45));
-    this.sun = new THREE.DirectionalLight(0xffd6a0, 2.4);
+    // Shade is lit by the sky, so it runs cool and blue against the warm sun, with a little
+    // warm light bounced up off the ground.
+    this.scene.add(new THREE.HemisphereLight(0xa9bad0, 0x4a3e32, 0.6));
+    this.sun = new THREE.DirectionalLight(0xffe0b8, 2.8);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
     // Soft-edged shadows: wider filtering, like a sun seen through dust.
@@ -84,9 +92,7 @@ export class World {
       rebar: std({ color: 0x5a3a28, roughness: 0.7, metalness: 0.6 }),
       bark: std({ ...bark, roughness: 0.95 }),
       barkDark: std({ ...barkDark, roughness: 0.95 }),
-      leaves: std({ color: 0x5f6b34, roughness: 0.9, flatShading: true }),
       barrel: std({ ...barrel, roughness: 0.7, metalness: 0.5 }),
-      rock: std({ ...concrete, color: 0x8a8278, roughness: 1, flatShading: true }),
       pole: std({ ...bark, color: 0x8a7a6a, roughness: 0.95 }),
     };
 
@@ -95,6 +101,7 @@ export class World {
     this.pickables.push(this.terrain);
     this.cameraBlockers.push(this.terrain);
     this.buildGrass();
+    this.buildRadSigns();
     const decor = generateDecor(seed);
     for (const d of decor) this.addDecor(d);
     buildScenery(this.scene, seed, decor);
@@ -127,7 +134,8 @@ export class World {
       }
       const n = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 3) * Math.cos(z * 0.09 + x * 0.03);
       c.lerp(n > 0 ? pale : scorched, Math.abs(n) * 0.25);
-      colors.set([c.r, c.g, c.b], i * 3);
+      // The photo texture carries the ground's own colour, so the tints are relative to plain ash.
+      colors.set([c.r / ash.r, c.g / ash.g, c.b / ash.b], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
@@ -138,6 +146,8 @@ export class World {
       roughnessMap: ground.roughnessMap,
       normalScale: new THREE.Vector2(1.2, 1.2),
       vertexColors: true,
+      // The scanned earth is paler than the lighting was tuned for.
+      color: new THREE.Color(0.62, 0.62, 0.62),
       roughness: 1,
     });
     // Break up the texture repeat: mix the cracked earth at two scales, blend in drifts of
@@ -148,7 +158,13 @@ export class World {
       shader.uniforms.sandMap = { value: sand.map };
       shader.uniforms.sandNormal = { value: sand.normalMap };
       shader.uniforms.macroMap = { value: macro };
+      // World position and normal, so steep crater walls can take the texture from the side
+      // instead of stretching it down the slope.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);');
       shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
         .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D sandMap;\nuniform sampler2D sandNormal;\nuniform sampler2D macroMap;')
         .replace(
           '#include <map_fragment>',
@@ -159,9 +175,20 @@ export class World {
             vec4 crackA = texture2D(map, vMapUv);
             vec4 crackB = texture2D(map, vMapUv * 0.37 + vec2(0.17, 0.53));
             vec4 grit = texture2D(sandMap, vMapUv * 1.6);
+            // The scanned dirt is redder than this ashen land; pull it toward grey.
+            grit.rgb = mix(vec3(dot(grit.rgb, vec3(0.3, 0.55, 0.15))), grit.rgb, 0.55);
             sandy = smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4);
             vec4 ground = mix(crackA, crackB, 0.4);
             vec4 sampledDiffuseColor = mix(ground, grit, sandy);
+            // Steep slopes: the earth projected from the two sides, blended by facing.
+            vec3 gn = normalize(vGroundNormal);
+            float steep = smoothstep(0.82, 0.6, gn.y);
+            if (steep > 0.0) {
+              vec2 s = vec2(0.42);
+              vec4 side = texture2D(map, vGroundPos.xy * s) * abs(gn.z) + texture2D(map, vGroundPos.zy * s + 0.5) * abs(gn.x);
+              side /= abs(gn.z) + abs(gn.x) + 1e-4;
+              sampledDiffuseColor = mix(sampledDiffuseColor, side, steep);
+            }
             sampledDiffuseColor.rgb *= mix(0.8, 1.15, macro2.g) * mix(0.92, 1.06, macro.r);
             diffuseColor *= sampledDiffuseColor;
           #endif`,
@@ -170,7 +197,8 @@ export class World {
           '#include <normal_fragment_maps>',
           `#ifdef USE_NORMALMAP_TANGENTSPACE
             vec3 mapN = mix(texture2D(normalMap, vNormalMapUv).xyz, texture2D(sandNormal, vNormalMapUv * 1.6).xyz, sandy) * 2.0 - 1.0;
-            mapN.xy *= normalScale;
+            // The top-down detail would smear down steep walls, so flatten it there.
+            mapN.xy *= normalScale * (1.0 - smoothstep(0.82, 0.6, normalize(vGroundNormal).y) * 0.8);
             normal = normalize(tbn * mapN);
           #else
             #include <normal_fragment_maps>
@@ -183,12 +211,33 @@ export class World {
     return mesh;
   }
 
+  /** Warning signs round each radioactive crater, facing out so you see them on the way in. */
+  private buildRadSigns() {
+    for (const zone of radZones(this.seed)) {
+      for (let n = 0; n < 5; n++) {
+        const a = (n / 5) * Math.PI * 2 + zone.x * 0.1;
+        const x = zone.x + Math.cos(a) * zone.radius;
+        const z = zone.z + Math.sin(a) * zone.radius;
+        const sign = buildRadSign();
+        sign.position.set(x, terrainHeight(this.seed, x, z) - 0.05, z);
+        sign.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
+        this.scene.add(sign);
+      }
+    }
+  }
+
   private buildGrass() {
     const tex = grassTexture();
     const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 1 });
     // Tufts sway in gusts: the tips move, the roots stay put, and each clump is out of step.
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.windTime = this.windTime;
+      // Double-sided materials flip the normal on back faces, which points it into the ground
+      // and turns every blade seen from behind black. Keep the upward normal on both sides.
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
+        // Darker down among the roots, where the tuft shades itself.
+        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= mix(0.5, 1.05, smoothstep(0.0, 0.55, vMapUv.y));');
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float windTime;')
         .replace(
@@ -203,14 +252,16 @@ export class World {
           #endif`,
         );
     };
-    const blade = new THREE.PlaneGeometry(0.7, 0.55);
-    blade.translate(0, 0.27, 0);
-    const cross = mergeCross(blade);
+    const blade = new THREE.PlaneGeometry(0.75, 0.6);
+    blade.translate(0, 0.29, 0);
+    // Three cards at 60 degrees, so a tuft looks full from every side.
+    const cross = mergeCards([0, 1, 2].map((k) => blade.clone().rotateY((k * Math.PI) / 3)));
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
-    const count = 4500;
+    const count = 16000;
     const mesh = new THREE.InstancedMesh(cross, mat, count);
+    const tint = new THREE.Color();
     const rand = mulberry32(this.seed ^ 0xabcdef);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -222,12 +273,18 @@ export class World {
       const x = (rand() - 0.5) * WORLD_SIZE * 0.85;
       const z = (rand() - 0.5) * WORLD_SIZE * 0.85;
       const patch = Math.sin(x * 0.08) * Math.cos(z * 0.06) + Math.sin((x + z) * 0.05);
-      if (patch < 0.3) continue;
+      // Thick in the patches, thinning out around them, with the odd lone tuft elsewhere.
+      if (patch < 0.3 && rand() > Math.max(0.04, (patch + 0.2) * 1.4)) continue;
       const y = terrainHeight(this.seed, x, z);
       if (y < 1) continue;
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
-      s.setScalar(0.6 + rand() * 0.9);
+      const k = 0.55 + rand() * 0.9;
+      s.set(k * (0.9 + rand() * 0.3), k * (0.75 + rand() * 0.5), k);
       p.set(x, y - 0.02, z);
+      // Each tuft a little drier or greener, lighter or darker than its neighbours.
+      const dry = rand();
+      tint.setRGB(0.86 + dry * 0.2, 0.93 + dry * 0.07, 0.8 + dry * 0.05).multiplyScalar(0.85 + rand() * 0.3);
+      mesh.setColorAt(placed, tint);
       mesh.setMatrixAt(placed++, m.compose(p, q, s));
     }
     mesh.count = placed;
@@ -244,7 +301,7 @@ export class World {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const pts = new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ size: 0.07, map: dotTexture(), color: 0xe8e2d8, transparent: true, opacity: 0.75, depthWrite: false }),
+      new THREE.PointsMaterial({ size: 0.04, map: dotTexture(), color: 0xe8e2d8, transparent: true, opacity: 0.55, depthWrite: false }),
     );
     pts.frustumCulled = false;
     this.scene.add(pts);
@@ -310,15 +367,18 @@ export class World {
       g.rotation.z = (rand() - 0.5) * 0.25;
       g.rotation.x = (rand() - 0.5) * 0.2;
       this.decorColliders.push({ min: [d.x - 0.2, d.y, d.z - 0.2], max: [d.x + 0.2, d.y + 8, d.z + 0.2] });
-    } else if (d.kind === 'rock') {
-      const geo = new THREE.IcosahedronGeometry(1, 1);
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const k = 0.75 + rand() * 0.45;
-        p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.7, p.getZ(i) * k);
+    } else if (d.kind === 'rock' && model(BOULDERS[0])) {
+      const rock = solid(scannedRock(rand, new THREE.Color(1, 1, 1))!, d.scale > 1);
+      rock.scale.setScalar(d.scale);
+      rock.position.y = -0.1 * d.scale;
+      if (d.scale > 1) {
+        const r = d.scale * 0.7;
+        this.decorColliders.push({ min: [d.x - r, d.y - 1, d.z - r], max: [d.x + r, d.y + d.scale * 0.8, d.z + r] });
       }
-      geo.computeVertexNormals();
-      const rock = solid(new THREE.Mesh(geo, this.materials.rock), d.scale > 1);
+    } else if (d.kind === 'rock') {
+      const { geo, cavity } = rockGeometry(rand, { detail: d.scale > 1 ? 4 : 3, stretch: [1.2, 0.75, 1], cuts: 5 });
+      paintRock(geo, cavity, new THREE.Color(0x8a8278), rand);
+      const rock = solid(new THREE.Mesh(geo, rockMaterial('decor-rock', { vertexColors: true })), d.scale > 1);
       rock.scale.setScalar(d.scale);
       rock.position.y = d.scale * 0.25;
       if (d.scale > 1) {
@@ -327,9 +387,19 @@ export class World {
       }
     } else {
       const tipped = rand() < 0.4;
-      const barrel = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 14), this.materials.barrel), false);
-      barrel.position.y = tipped ? 0.3 : 0.45;
-      if (tipped) barrel.rotation.z = Math.PI / 2;
+      const scan = model('barrel');
+      if (scan) {
+        const barrel = solid(new THREE.Mesh(scan.geometry, scan.material), false);
+        // The scan stands on its base; tipped over, it lies on its side.
+        if (tipped) {
+          barrel.rotation.z = Math.PI / 2;
+          barrel.position.set(0.45, 0.3, 0);
+        }
+      } else {
+        const barrel = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 14), this.materials.barrel), false);
+        barrel.position.y = tipped ? 0.3 : 0.45;
+        if (tipped) barrel.rotation.z = Math.PI / 2;
+      }
     }
     this.scene.add(g);
   }
@@ -360,7 +430,13 @@ export class World {
               ? this.wreck(rand)
               : node.kind === 'hemp'
                 ? buildHemp(rand)
-                : buildBoulder(rand, node.kind);
+                : node.kind === 'mushroom'
+                  ? buildMushrooms(rand)
+                  : node.kind === 'waterBarrel'
+                    ? buildWaterBarrel()
+                    : buildBoulder(rand, node.kind);
+      // A barrel stays put when drunk dry; only its water level changes.
+      if (node.kind === 'waterBarrel') g.userData.keep = true;
       g.position.set(node.x, node.y, node.z);
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);
@@ -382,55 +458,137 @@ export class World {
   setResourceAmount(id: number, amount: number) {
     const g = this.resourceMeshes.get(id);
     if (!g) return;
+    if (g.userData.keep) {
+      g.userData.setLevel?.(amount / RESOURCE_INFO.waterBarrel.amount);
+      return;
+    }
     const was = g.visible;
     g.visible = amount > 0;
     if (was && g.visible) this.bounce.set(id, 0.25);
   }
 
-  private branch(parent: THREE.Object3D, mat: THREE.Material, len: number, radius: number, depth: number, rand: () => number) {
-    const geo = new THREE.CylinderGeometry(radius * 0.6, radius, len, 6);
+  /**
+   * A tapering limb that forks into smaller ones. Each limb starts as wide as its parent is at
+   * that height, so joints don't step. Tips are collected so leaves can hang off them.
+   */
+  private branch(parent: THREE.Object3D, mat: THREE.Material, len: number, radius: number, depth: number, rand: () => number, tips?: THREE.Object3D[]) {
+    const top = radius * (depth > 0 ? 0.62 : 0.3);
+    const geo = new THREE.CylinderGeometry(top, radius, len, depth > 1 ? 9 : 6, 4);
     geo.translate(0, len / 2, 0);
+    // A slight random bend so limbs aren't ruler-straight.
+    const p = geo.attributes.position;
+    const bendX = (rand() - 0.5) * 0.18 * len;
+    const bendZ = (rand() - 0.5) * 0.18 * len;
+    for (let i = 0; i < p.count; i++) {
+      const t = p.getY(i) / len;
+      const k = Math.sin(t * Math.PI);
+      p.setXYZ(i, p.getX(i) + bendX * k, p.getY(i), p.getZ(i) + bendZ * k);
+    }
+    geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
     parent.add(mesh);
-    if (depth <= 0) return mesh;
+    if (depth <= 0) {
+      const tip = new THREE.Object3D();
+      tip.position.y = len;
+      mesh.add(tip);
+      tips?.push(tip);
+      return mesh;
+    }
     const kids = 2 + Math.floor(rand() * 2);
     for (let n = 0; n < kids; n++) {
       const pivot = new THREE.Group();
-      pivot.position.y = len * (0.55 + rand() * 0.4);
-      pivot.rotation.set((rand() - 0.5) * 0.4, rand() * Math.PI * 2, 0.5 + rand() * 0.5);
-      pivot.rotateZ(0);
+      const at = 0.55 + rand() * 0.4;
+      pivot.position.set(bendX * Math.sin(at * Math.PI), len * at, bendZ * Math.sin(at * Math.PI));
+      pivot.rotation.set((rand() - 0.5) * 0.4, (n / kids) * Math.PI * 2 + rand() * 1.2, 0.45 + rand() * 0.5);
       mesh.add(pivot);
-      this.branch(pivot, mat, len * (0.5 + rand() * 0.2), radius * 0.55, depth - 1, rand);
+      this.branch(pivot, mat, len * (0.5 + rand() * 0.2), (radius + (top - radius) * at) * 0.72, depth - 1, rand, tips);
     }
     return mesh;
   }
 
+  private leafMat?: THREE.MeshStandardMaterial;
+
+  /** Leaf cards: cut-out sprays of leaves that sway, lit as if the crown were one soft ball. */
+  private foliageMaterial(): THREE.MeshStandardMaterial {
+    if (this.leafMat) return this.leafMat;
+    const m = new THREE.MeshStandardMaterial({ map: leafTexture(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.85, color: 0xdedcc8 });
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.windTime = this.windTime;
+      // Keep the crown's outward normals on both sides of each card (see the grass for why).
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
+        // Light through the leaves: the shaded side of a crown still glows a little.
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vec3(0.05, 0.06, 0.02);');
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float windTime;').replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vec4 rootW = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        float h = max(0.0, position.y - 1.5);
+        float gust = sin(windTime * 0.9 + rootW.x * 0.11 + rootW.z * 0.05) * 0.5 + 0.5;
+        float flutter = sin(windTime * 4.0 + position.x * 3.0 + position.z * 2.0) * 0.025;
+        transformed.x += (sin(windTime * 1.7 + rootW.z * 0.3) * (0.03 + gust * 0.05) + flutter) * h;
+        transformed.z += (cos(windTime * 1.3 + rootW.x * 0.3) * 0.02 + flutter) * h;`,
+      );
+    };
+    return (this.leafMat = m);
+  }
+
   private livingTree(rand: () => number): THREE.Group {
     const g = new THREE.Group();
-    const trunk = this.branch(g, this.materials.bark, 2.6, 0.26, 2, rand);
+    const tips: THREE.Object3D[] = [];
+    const trunk = this.branch(g, this.materials.bark, 2.4 + rand() * 0.8, 0.28, 3, rand, tips);
     trunk.rotation.z = (rand() - 0.5) * 0.1;
-    // Sparse, sickly foliage clumps: alive, but only just.
-    for (let n = 0; n < 6; n++) {
-      const geo = new THREE.IcosahedronGeometry(0.7 + rand() * 0.6, 1);
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const k = 0.8 + rand() * 0.35;
-        p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.8, p.getZ(i) * k);
+    // Root flare: a short wide cone where the trunk meets the ground.
+    const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, 0.45, 9, 1, true).translate(0, 0.2, 0), this.materials.bark);
+    g.add(flare);
+    g.updateMatrixWorld(true);
+    // A spray of crossed leaf cards at every twig tip, merged into one mesh per tree.
+    const crown = new THREE.Vector3();
+    const points = tips.map((t) => t.getWorldPosition(new THREE.Vector3()));
+    for (const pt of points) crown.add(pt);
+    crown.divideScalar(Math.max(1, points.length));
+    crown.y -= 0.4;
+    const cards: THREE.BufferGeometry[] = [];
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    // The sickliest trees keep only some of their leaves.
+    const keep = 0.65 + rand() * 0.35;
+    for (const pt of points) {
+      if (rand() > keep) continue;
+      const size = 1.5 + rand() * 0.9;
+      for (let n = 0; n < 3; n++) {
+        const card = new THREE.PlaneGeometry(size, size);
+        e.set(rand() * Math.PI, (n / 3) * Math.PI + rand() * 0.5, rand() * Math.PI);
+        card.applyQuaternion(q.setFromEuler(e));
+        card.translate(pt.x, pt.y, pt.z);
+        cards.push(card);
       }
-      geo.computeVertexNormals();
-      const clump = new THREE.Mesh(geo, this.materials.leaves);
-      const a = rand() * Math.PI * 2;
-      const r = rand() * 1.2;
-      clump.position.set(Math.cos(a) * r, 2.8 + rand() * 1.4, Math.sin(a) * r);
-      g.add(clump);
+    }
+    if (cards.length) {
+      const geo = mergeCards(cards);
+      // Normals point out from the crown's centre, so light falls across it like a soft ball.
+      const pos = geo.attributes.position;
+      const nrm = geo.attributes.normal;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).sub(crown);
+        v.y *= 1.4;
+        v.normalize();
+        nrm.setXYZ(i, v.x, v.y, v.z);
+      }
+      const leaves = new THREE.Mesh(geo, this.foliageMaterial());
+      leaves.userData.noAO = true;
+      g.add(leaves);
     }
     return g;
   }
 
   private deadTree(rand: () => number): THREE.Group {
     const g = new THREE.Group();
-    const trunk = this.branch(g, this.materials.barkDark, 2.4 + rand(), 0.2, 2, rand);
+    const trunk = this.branch(g, this.materials.barkDark, 2.4 + rand(), 0.22, 3, rand);
     trunk.rotation.z = (rand() - 0.5) * 0.25;
+    const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.4, 0.4, 9, 1, true).translate(0, 0.18, 0), this.materials.barkDark);
+    g.add(flare);
     return g;
   }
 
@@ -472,6 +630,11 @@ export class World {
   }
 
   /** Adds, updates or removes a workbench, furnace or box. */
+  /** Animates a piece: rising into place when just built, or a short shake when hit. */
+  popPiece(key: string, kind: 'rise' | 'shake' = 'rise') {
+    if (this.pieceMeshes.has(key)) this.pops.set(key, { t: kind === 'rise' ? 0.28 : 0.18, kind });
+  }
+
   setDeployable(id: number, d: Deployable | null) {
     const old = this.deployableMeshes.get(id);
     if (!d) {
@@ -600,6 +763,25 @@ export class World {
         this.bounce.delete(id);
       } else this.bounce.set(id, left);
     }
+
+    for (const [key, pop] of this.pops) {
+      const g = this.pieceMeshes.get(key);
+      pop.t -= dt;
+      if (!g || pop.t <= 0) {
+        g?.position.set(0, 0, 0);
+        this.pops.delete(key);
+        continue;
+      }
+      if (pop.kind === 'rise') {
+        // Ease out with a small overshoot, like the piece thumps down into its frame.
+        const k = 1 - pop.t / 0.28;
+        const back = 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
+        g.position.y = -0.35 * (1 - back);
+      } else {
+        const a = (pop.t / 0.18) * 0.045;
+        g.position.set(Math.sin(pop.t * 90) * a, 0, Math.cos(pop.t * 77) * a);
+      }
+    }
   }
 }
 
@@ -618,18 +800,25 @@ export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Gr
   return g;
 }
 
-/** Two crossed planes from one, so grass looks full from every angle. */
-function mergeCross(plane: THREE.PlaneGeometry): THREE.BufferGeometry {
-  const a = plane.clone();
-  const b = plane.clone().rotateY(Math.PI / 2);
+/** Joins plane geometries (position, normal, uv only) into one. */
+function mergeCards(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const count = parts.reduce((n, p) => n + p.attributes.position.count, 0);
+  const pos = new Float32Array(count * 3);
+  const nrm = new Float32Array(count * 3);
+  const uv = new Float32Array(count * 2);
+  const index: number[] = [];
+  let at = 0;
+  for (const p of parts) {
+    pos.set(p.attributes.position.array as Float32Array, at * 3);
+    nrm.set(p.attributes.normal.array as Float32Array, at * 3);
+    uv.set(p.attributes.uv.array as Float32Array, at * 2);
+    for (const i of p.index!.array) index.push(i + at);
+    at += p.attributes.position.count;
+    p.dispose();
+  }
   const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array([...a.attributes.position.array, ...b.attributes.position.array]);
-  const norm = new Float32Array([...a.attributes.normal.array, ...b.attributes.normal.array]);
-  const uv = new Float32Array([...a.attributes.uv.array, ...b.attributes.uv.array]);
-  const offset = a.attributes.position.count;
-  const index = [...a.index!.array, ...[...b.index!.array].map((i) => i + offset)];
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(index);
   return geo;

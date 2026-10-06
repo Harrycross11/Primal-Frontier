@@ -4,6 +4,7 @@
 
 import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
+  ARMOUR_SLOTS,
   BELT_SIZE,
   ITEMS,
   RECIPES,
@@ -32,6 +33,8 @@ export interface InventoryActions {
 
 export class InventoryUi {
   slots: Slots = [];
+  /** Armour worn on the head, chest and legs. */
+  wear: Slots = [null, null, null];
   active = 0;
   container: Deployable | null = null;
   /** Level of the best workbench in reach, or 0. */
@@ -102,6 +105,7 @@ export class InventoryUi {
     if (!this.open) return;
     this.renderGrid($('backpack'), 'me', BELT_SIZE, this.slots.length);
     this.renderGrid($('belt-grid'), 'me', 0, BELT_SIZE);
+    this.renderWear();
     this.renderContainer();
     this.renderCrafting();
   }
@@ -117,10 +121,13 @@ export class InventoryUi {
     const more = this.queue.length > 1 ? ` (+${this.queue.length - 1} more)` : '';
     const html = `Crafting ${ITEMS[job.item].name}${more}<div class="bar"><i style="width:${Math.round(done * 100)}%"></i></div>`;
     if (box.innerHTML !== html) box.innerHTML = html;
+    const qbar = document.querySelector<HTMLElement>('#queue .qbar');
+    if (qbar) qbar.style.width = `${Math.round(done * 100)}%`;
   }
 
   private stackAt(ref: SlotRef): Stack | null {
     if (ref.c === 'me') return this.slots[ref.i] ?? null;
+    if (ref.c === 'wear') return this.wear[ref.i] ?? null;
     return this.container?.id === ref.c ? (this.container.slots[ref.i] ?? null) : null;
   }
 
@@ -146,6 +153,21 @@ export class InventoryUi {
   private renderGrid(el: HTMLElement, c: SlotRef['c'], from: number, to: number) {
     el.innerHTML = '';
     for (let i = from; i < to; i++) el.appendChild(this.slotElement({ c, i }, this.slots[i] ?? null, true));
+  }
+
+  private renderWear() {
+    const grid = $('wear-grid');
+    grid.innerHTML = '';
+    ARMOUR_SLOTS.forEach((part, i) => {
+      const el = this.slotElement({ c: 'wear', i }, this.wear[i] ?? null, true);
+      el.classList.add('wear-slot');
+      el.dataset.label = part;
+      grid.appendChild(el);
+    });
+    $('armour-total').textContent = ARMOUR_SLOTS.map((part, i) => {
+      const a = this.wear[i] ? ITEMS[this.wear[i]!.item].armour : undefined;
+      return `${part[0].toUpperCase()}${part.slice(1)} ${Math.round((a?.protection ?? 0) * 100)}%`;
+    }).join(' · ') + ' protection';
   }
 
   private renderContainer() {
@@ -215,24 +237,40 @@ export class InventoryUi {
     const benchOk = (r.workbench ?? 0) <= this.workbench;
     const ok = canAfford(this.slots, r) && benchOk;
     const detail = $('recipe-detail');
-    detail.innerHTML = `<b>${ITEMS[r.item].name}</b> · ${r.time}s<br/>${ITEMS[r.item].description}${statsText(r.item)}${
+    // What it takes, against what you carry.
+    const parts = Object.entries(r.cost)
+      .map(([item, n]) => {
+        const have = countItem(this.slots, item as ItemId);
+        return `<div class="ing${have >= n! ? '' : ' short'}">${iconSvg(item as ItemId)}<span>${ITEMS[item as ItemId].name}</span><b>${n}</b><small>${have} held</small></div>`;
+      })
+      .join('');
+    const most = benchOk ? maxCraftable(this.slots, r) : 0;
+    const yields = r.count > 1 ? ` · makes ${r.count}` : '';
+    detail.innerHTML = `<div class="dhead">${iconSvg(r.item)}<div><b>${ITEMS[r.item].name}</b><small>${r.time}s each${yields}</small></div></div>${ITEMS[r.item].description}${statsText(r.item)}<div class="ings">${parts}</div>${
       benchOk ? '' : `<div class="need">Stand near a level ${r.workbench} workbench to craft this.</div>`
     }<div class="actions"></div>`;
     const actions = detail.querySelector('.actions')!;
-    for (const n of [1, 5]) {
+    const counts: [number, string][] = [
+      [1, 'Craft'],
+      [5, 'Craft 5'],
+    ];
+    if (most > 5) counts.push([Math.min(most, 50), `Max (${Math.min(most, 50)})`]);
+    for (const [n, label] of counts) {
       const b = document.createElement('button');
       b.className = n === 1 ? 'btn' : 'btn secondary';
-      b.textContent = n === 1 ? 'Craft' : 'Craft 5';
-      b.disabled = !ok || !canAfford(this.slots, r, n);
+      b.textContent = label;
+      b.disabled = !ok || most < n;
       b.onclick = () => this.actions.craft(r.item, n);
       actions.appendChild(b);
     }
+    if (benchOk) actions.insertAdjacentHTML('beforeend', `<span class="can">${most > 0 ? `You can make ${most * r.count}` : 'Not enough materials'}</span>`);
     const queue = $('queue');
     queue.innerHTML = this.queue.length ? '<h3>Queue</h3>' : '';
     this.queue.slice(0, 6).forEach((job, i) => {
       const row = document.createElement('div');
       row.className = 'job';
-      row.innerHTML = `${iconSvg(job.item)}${ITEMS[job.item].name}<span class="x" title="Cancel and refund">✕</span>`;
+      const bar = i === 0 ? '<div class="bar"><i class="qbar"></i></div>' : '';
+      row.innerHTML = `${iconSvg(job.item)}<div class="jname">${ITEMS[job.item].name}${bar}</div><span class="x" title="Cancel and refund">✕</span>`;
       (row.querySelector('.x') as HTMLElement).onclick = () => this.actions.cancel(i);
       queue.appendChild(row);
     });
@@ -289,11 +327,21 @@ export class InventoryUi {
     return el;
   }
 
-  /** Right click: send a stack to the open container, or between belt and backpack. */
+  /**
+   * Right click: send a stack to the open container, put armour on or take it off, or move
+   * between belt and backpack.
+   */
   private quickMove(from: SlotRef, stack: Stack) {
     const d = this.container && this.container.slots.length > 0 ? this.container : null;
+    const armour = ITEMS[stack.item].armour;
     let to: SlotRef | null = null;
-    if (from.c === 'me' && d) {
+    if (from.c === 'me' && !d && armour) {
+      to = { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) };
+    } else if (from.c === 'wear') {
+      const i = this.bestSlot(this.slots, stack, (n) => n >= BELT_SIZE);
+      const j = i >= 0 ? i : this.bestSlot(this.slots, stack, () => true);
+      if (j >= 0) to = { c: 'me', i: j };
+    } else if (from.c === 'me' && d) {
       const i = this.bestSlot(d.slots, stack, (n) => slotAccepts(d, n, stack.item));
       if (i >= 0) to = { c: d.id, i };
     } else {
@@ -316,6 +364,13 @@ export class InventoryUi {
 
 /** Damage, fire rate and magazine for weapons, shown in tooltips and the crafting menu. */
 function statsText(item: ItemId): string {
+  const a = ITEMS[item].armour;
+  if (a) return `<div class="stats">Worn on the ${a.slot} · Blocks ${Math.round(a.protection * 100)}% of damage there · ${Math.round(a.radiation * 100)}% of radiation · Right click to wear</div>`;
+  const c = ITEMS[item].consume;
+  if (c) {
+    const parts = [c.food && `Food +${c.food}`, c.water && `Water +${c.water}`, c.rads && `Radiation −${c.rads}`].filter(Boolean);
+    return `<div class="stats">${parts.join(' · ')}</div>`;
+  }
   const w = ITEMS[item].weapon;
   if (!w || ITEMS[item].kind !== 'weapon') return ITEMS[item].heal ? `<div class="stats">Heals ${ITEMS[item].heal}</div>` : '';
   const dmg = w.pellets ? `${w.damage} × ${w.pellets} pellets` : `${w.damage}`;
@@ -323,4 +378,11 @@ function statsText(item: ItemId): string {
   const parts = [`Damage ${dmg}`, w.class === 'melee' ? `Reach ${w.range} m` : rate];
   if (w.ammo) parts.push(`${w.mag} × ${ITEMS[w.ammo].name}`, `Range ${w.range} m`);
   return `<div class="stats">${parts.join(' · ')}</div>`;
+}
+
+/** How many times you can craft a recipe with what you carry. */
+function maxCraftable(slots: Slots, r: Recipe): number {
+  let most = Infinity;
+  for (const [item, n] of Object.entries(r.cost)) most = Math.min(most, Math.floor(countItem(slots, item as ItemId) / n!));
+  return most === Infinity ? 0 : most;
 }

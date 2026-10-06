@@ -3,8 +3,21 @@ import { test } from 'node:test';
 import { Game } from '../server/game.ts';
 import { MAX_PLAYERS } from '../shared/constants.ts';
 import { terrainHeight } from '../shared/terrain.ts';
-import { generateResources, RESOURCE_INFO } from '../shared/world.ts';
-import { addItem, countItem, ITEMS, recipeFor, type ItemId } from '../shared/items.ts';
+import { BARREL_DRINK, generateResources, RESOURCE_INFO } from '../shared/world.ts';
+import {
+  FOOD_DRAIN,
+  RADS_DECAY,
+  RADS_HARMLESS,
+  REGEN,
+  SPAWN_FOOD,
+  SPAWN_WATER,
+  STARVE_DAMAGE,
+  THIRST_DAMAGE,
+  WATER_DRAIN,
+  radZones,
+  radiationAt,
+} from '../shared/survival.ts';
+import { addItem, countItem, ITEMS, recipeFor, type ItemId, type Slots } from '../shared/items.ts';
 import { FURNACE_FUEL, FURNACE_ORE_SLOTS, FURNACE_OUTPUT_SLOTS, LOOT_BAG_SECONDS } from '../shared/deployables.ts';
 import { EYE_HEIGHT, MAX_HEALTH } from '../shared/combat.ts';
 import {
@@ -37,6 +50,12 @@ function run(game: Game, from: number, seconds: number): number {
   game.tick(t);
   while (t < from + seconds * 1000) game.tick((t += 250));
   return t;
+}
+
+/** Moves the stack of an item into a belt slot. */
+function toBelt(slots: Slots, item: ItemId, slot: number) {
+  const at = slots.findIndex((s) => s?.item === item);
+  [slots[slot], slots[at]] = [slots[at], slots[slot]];
 }
 
 function standAt(game: Game, id: number, x: number, z: number) {
@@ -74,8 +93,9 @@ test('gathering takes from the node, fills the inventory and respects range and 
   assert.equal(have(game, id, 'wood'), 0, 'too far away');
 
   standAt(game, id, tree.x + 1.5, tree.z);
-  game.gather(id, tree.id, 2000, 0);
+  const out = game.gather(id, tree.id, 2000, 0);
   assert.equal(have(game, id, 'wood'), 6, 'the starting rock chops at the base rate');
+  assert.ok(out.some((o) => o.to === 'all' && o.msg.t === 'resource' && o.msg.by === id), 'everyone hears who chopped it');
   game.gather(id, tree.id, 2100, 0);
   assert.equal(have(game, id, 'wood'), 6, 'cooldown');
   game.gather(id, tree.id, 3000, 0);
@@ -250,8 +270,14 @@ test('crafting takes ingredients, takes time, and can be cancelled for a refund'
   assert.equal(have(game, id, 'wood'), 200 - 2 * recipeFor('stoneHatchet')!.cost.wood!);
   let t = run(game, 0, 1);
   assert.equal(have(game, id, 'stoneHatchet'), 0, 'not done yet');
-  t = run(game, t, recipeFor('stoneHatchet')!.time - 0.5);
+  let crafted = false;
+  const end = t + (recipeFor('stoneHatchet')!.time - 0.5) * 1000;
+  while (t < end) {
+    const out = game.tick((t += 250));
+    if (out.some((o) => o.to === id && o.msg.t === 'crafted' && o.msg.item === 'stoneHatchet')) crafted = true;
+  }
   assert.equal(have(game, id, 'stoneHatchet'), 1);
+  assert.ok(crafted, 'the crafter is told it finished');
   game.cancelCraft(id, 0);
   assert.equal(have(game, id, 'wood'), 200 - recipeFor('stoneHatchet')!.cost.wood!, 'second one refunded');
   assert.equal(game.players.get(id)!.queue.length, 0);
@@ -435,9 +461,10 @@ test('dying drops everything in a loot bag, and you respawn with a rock', () => 
   const { game, a, b, target, shooter } = duel('l96');
   give(game, b, 'metal', 300);
   shooter.slots[2]!.ammo = 5;
-  game.fire(a, 2, AT_BODY, true, 1000);
-  game.fire(a, 2, AT_BODY, true, 4000);
+  const out = [...game.fire(a, 2, AT_BODY, true, 1000), ...game.fire(a, 2, AT_BODY, true, 4000)];
   assert.equal(target.dead, true);
+  const feed = out.find((o) => o.msg.t === 'kill');
+  assert.deepEqual(feed, { to: 'all', msg: { t: 'kill', killer: 'Ash', victim: 'Bo', item: 'l96', head: false } }, 'everyone sees it in the kill feed');
   const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
   assert.ok(bag, 'a loot bag was left');
   assert.equal(bag.label, 'Bo');
@@ -489,4 +516,181 @@ test('shotguns fire many pellets; melee weapons hit up close; bandages heal', ()
   knife.game.use(knife.b, slot, 2000);
   assert.equal(knife.target.hp, MAX_HEALTH - 20);
   assert.equal(have(knife.game, knife.b, 'bandage'), 0);
+});
+
+test('armour is worn in its own slot and cuts damage to the part it covers', () => {
+  const { game, a, b, target, shooter } = duel('boltRifle');
+  shooter.slots[2]!.ammo = 4;
+  give(game, b, 'metalChestplate', 1);
+  give(game, b, 'burlapHeadwrap', 1);
+  const plate = target.slots.findIndex((s) => s?.item === 'metalChestplate');
+  // A chest plate will not go on your head; on the chest it fits.
+  game.moveItem(b, { c: 'me', i: plate }, { c: 'wear', i: 0 });
+  assert.equal(target.wear.filter(Boolean).length, 0);
+  game.moveItem(b, { c: 'me', i: plate }, { c: 'wear', i: 1 });
+  assert.equal(target.wear[1]?.item, 'metalChestplate');
+  assert.equal(target.slots[plate], null);
+  // Using armour from the belt puts it on.
+  const wrap = target.slots.findIndex((s) => s?.item === 'burlapHeadwrap');
+  game.use(b, wrap, 1000);
+  assert.equal(target.wear[0]?.item, 'burlapHeadwrap');
+
+  const out = game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(target.hp, MAX_HEALTH - 40, 'the plate stops half of a body shot');
+  assert.ok(out.some((o) => o.msg.t === 'hitmarker' && o.msg.armour));
+  assert.equal(target.wear[1]!.hp, ITEMS.metalChestplate.armour!.durability - 1, 'the plate wears');
+  assert.equal(game.players.get(a)!.slots[2]!.item, 'boltRifle');
+
+  // Legs are not covered.
+  target.hp = MAX_HEALTH;
+  game.fire(a, 2, [10, 0.6 - EYE_HEIGHT, 0], true, 4000);
+  assert.equal(target.hp, MAX_HEALTH - 80, 'leg shot');
+
+  // Others see what you wear.
+  const state = game.tick(5000).find((o) => o.msg.t === 'state')!.msg as { players: { id: number; wear: (ItemId | null)[] }[] };
+  assert.deepEqual(state.players.find((p) => p.id === b)!.wear, ['burlapHeadwrap', 'metalChestplate', null]);
+});
+
+test('worn armour drops in the loot bag and breaks when worn out', () => {
+  const { game, a, b, target, shooter } = duel('l96');
+  shooter.slots[2]!.ammo = 5;
+  target.wear[1] = { item: 'burlapShirt', count: 1, hp: 1 };
+  game.fire(a, 2, AT_BODY, true, 1000);
+  assert.equal(target.wear[1], null, 'the worn-out shirt fell apart');
+  target.wear[2] = { item: 'roadsignKilt', count: 1, hp: 50 };
+  target.hp = 1;
+  game.fire(a, 2, AT_BODY, true, 4000);
+  assert.equal(target.dead, true);
+  const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
+  assert.ok(bag.slots.some((s) => s?.item === 'roadsignKilt'));
+  assert.deepEqual(target.wear, [null, null, null]);
+  game.respawn(b);
+  assert.deepEqual(target.wear, [null, null, null]);
+});
+
+test('hunger and thirst drain over time, faster on the move, and hurt when empty', () => {
+  const { game, id, player } = setup();
+  const v = player.vitals;
+  assert.equal(v.food, SPAWN_FOOD);
+  assert.equal(v.water, SPAWN_WATER);
+  let t = run(game, 0, 60);
+  assert.ok(Math.abs(v.food - (SPAWN_FOOD - FOOD_DRAIN * 60)) < 0.01, 'food drains standing still');
+  assert.ok(v.water < SPAWN_WATER - WATER_DRAIN * 59, 'water drains faster than food');
+  const still = v.water;
+  player.moving = true;
+  t = run(game, t, 60);
+  assert.ok(still - v.water > WATER_DRAIN * 60 * 1.3, 'moving burns more');
+  player.moving = false;
+
+  v.food = 0;
+  v.water = 0;
+  const hp = player.hp;
+  const out: ReturnType<Game['tick']> = [];
+  for (const end = t + 10_000; t < end; ) out.push(...game.tick((t += 250)));
+  assert.ok(Math.abs(hp - player.hp - (STARVE_DAMAGE + THIRST_DAMAGE) * 10) < 0.5, 'starving and thirsty hurts');
+  assert.ok(out.some((o) => o.to === id && o.msg.t === 'vitals' && o.msg.food === 0), 'the player is told');
+  assert.ok(out.some((o) => o.to === id && o.msg.t === 'health'));
+
+  // Starve to death: the kill feed says why.
+  player.hp = 1;
+  const death: ReturnType<Game['tick']> = [];
+  for (const end = t + 5_000; t < end; ) death.push(...game.tick((t += 250)));
+  assert.equal(player.dead, true);
+  assert.ok(death.some((o) => o.msg.t === 'kill' && o.msg.cause === 'thirst' && o.msg.killer === null));
+  game.respawn(id);
+  assert.equal(player.vitals.food, SPAWN_FOOD, 'respawning resets hunger');
+});
+
+test('food and water fill you up; a full stomach heals you slowly', () => {
+  const { game, id, player } = setup();
+  give(game, id, 'cannedBeans', 2);
+  toBelt(player.slots, 'cannedBeans', 2);
+  player.vitals.food = 30;
+  game.use(id, 2, 1000);
+  assert.equal(player.vitals.food, 30 + ITEMS.cannedBeans.consume!.food!);
+  assert.equal(have(game, id, 'cannedBeans'), 1);
+  player.vitals.food = 100;
+  player.vitals.water = 100;
+  game.use(id, 2, 5000);
+  assert.equal(have(game, id, 'cannedBeans'), 1, 'not eaten when full');
+
+  player.hp = 50;
+  run(game, 10_000, 20);
+  assert.ok(player.hp > 50 + REGEN * 15, 'well fed survivors heal');
+});
+
+test('rain barrels quench thirst and run dry; wrecks hide food', () => {
+  const { game, id, player } = setup();
+  const barrel = game.resources.find((r) => r.kind === 'waterBarrel')!;
+  standAt(game, id, barrel.x + 1, barrel.z);
+  player.vitals.water = 10;
+  game.gather(id, barrel.id, 1000, 0);
+  assert.equal(player.vitals.water, 10 + BARREL_DRINK);
+  assert.equal(barrel.amount, RESOURCE_INFO.waterBarrel.amount - RESOURCE_INFO.waterBarrel.perHit);
+  assert.equal(have(game, id, 'bottledWater'), 0, 'drunk on the spot, not carried');
+  player.vitals.water = 100;
+  game.gather(id, barrel.id, 2000, 0);
+  assert.equal(barrel.amount, RESOURCE_INFO.waterBarrel.amount - RESOURCE_INFO.waterBarrel.perHit, 'not thirsty, no drink');
+
+  // Hit enough wrecks and something to eat or drink turns up.
+  give(game, id, 'salvagedPickaxe', 1);
+  let found = 0;
+  let t = 10_000;
+  for (const wreck of game.resources.filter((r) => r.kind === 'scrap')) {
+    standAt(game, id, wreck.x + 1, wreck.z);
+    while (wreck.amount > 0 && player.slots.some((s) => !s)) game.gather(id, wreck.id, (t += 1000), 0);
+    found = have(game, id, 'cannedBeans') + have(game, id, 'bottledWater');
+    if (found >= 2) break;
+  }
+  assert.ok(found >= 2, 'wrecks give the odd can or bottle');
+});
+
+test('the craters are radioactive: poisoning builds up, hurts, and pills and burlap help', () => {
+  const { game, id, player } = setup();
+  const zone = radZones(SEED)[0];
+  assert.ok(radiationAt(SEED, zone.x, zone.z) > 0);
+  assert.equal(radiationAt(SEED, zone.x + zone.radius + 1, zone.z), 0, 'nothing outside');
+  for (const p of [...Array(MAX_PLAYERS - 1)].map(() => game.join('x', 0)!.id)) {
+    const q = game.players.get(p)!;
+    assert.equal(radiationAt(SEED, q.x, q.z), 0, 'nobody spawns in a zone');
+  }
+
+  standAt(game, id, zone.x, zone.z);
+  player.vitals.food = player.vitals.water = 100;
+  let t = run(game, 0, 10);
+  const naked = player.vitals.rads;
+  assert.ok(naked > 10, 'radiation builds up in the crater');
+  t = run(game, t, 20);
+  assert.ok(player.vitals.rads > RADS_HARMLESS && player.hp < MAX_HEALTH, 'and hurts once it is high');
+
+  // Pills flush it out.
+  give(game, id, 'antiRadPills', 1);
+  toBelt(player.slots, 'antiRadPills', 3);
+  const before = player.vitals.rads;
+  game.use(id, 3, t + 1000);
+  assert.ok(Math.abs(before - 40 - player.vitals.rads) < 0.01);
+
+  // A full burlap set keeps a good share of it out.
+  const { game: g2, id: b, player: dressed } = setup();
+  dressed.wear = [
+    { item: 'burlapHeadwrap', count: 1, hp: 60 },
+    { item: 'burlapShirt', count: 1, hp: 60 },
+    { item: 'burlapTrousers', count: 1, hp: 60 },
+  ];
+  standAt(g2, b, zone.x, zone.z);
+  run(g2, 0, 10);
+  assert.ok(dressed.vitals.rads < naked * 0.7, 'burlap blocks some radiation');
+
+  // Out of the zone it fades.
+  standAt(game, id, zone.x + zone.radius + 5, zone.z);
+  const inside = player.vitals.rads;
+  run(game, t + 2000, 20);
+  assert.ok(player.vitals.rads < inside - RADS_DECAY * 15);
+});
+
+test('high quality ore sits inside the craters', () => {
+  const nodes = generateResources(SEED);
+  const hot = nodes.filter((n) => n.kind === 'hqmOre' && radiationAt(SEED, n.x, n.z) > 0);
+  assert.ok(hot.length >= 4);
+  assert.ok(nodes.some((n) => n.kind === 'mushroom') && nodes.some((n) => n.kind === 'waterBarrel'));
 });

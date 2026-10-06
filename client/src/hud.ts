@@ -79,6 +79,23 @@ export class Hud {
     $('health-text').textContent = String(Math.max(0, Math.round(hp)));
   }
 
+  /** Food and water bars, and radiation poisoning with a warning while you stand somewhere hot. */
+  setVitals(v: { food: number; water: number; rads: number; level: number }) {
+    const bar = (id: string, n: number) => {
+      ($(`${id}-fill`) as HTMLElement).style.width = `${Math.max(0, Math.min(100, n))}%`;
+      $(`${id}-text`).textContent = String(Math.round(n));
+      $(id).classList.toggle('low', n < 20);
+    };
+    bar('food', v.food);
+    bar('water', v.water);
+    bar('rads', v.rads);
+    $('rads').hidden = v.rads < 1 && v.level <= 0;
+    const warn = $('rad-warning');
+    warn.hidden = v.level <= 0;
+    if (v.level > 0) warn.textContent = `☢ Radiation ${v.level.toFixed(1)}/s`;
+    ($('rad-tint') as HTMLElement).style.opacity = String(Math.min(0.55, v.level * 0.08 + v.rads * 0.002));
+  }
+
   /** A red flash at the edges of the screen when you take damage. */
   hurt() {
     const el = $('damage');
@@ -96,6 +113,52 @@ export class Hud {
       el.classList.remove('show');
       el.classList.add('fade');
     }, 90);
+  }
+
+  /** A line in the kill feed; `mine` when you were the killer or the one killed. */
+  killFeed(killer: string | null, victim: string, weapon: string | null, head: boolean, mine: boolean, how: string | null = null) {
+    const feed = $('kill-feed');
+    const row = document.createElement('div');
+    row.className = `kill${mine ? ' me' : ''}`;
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    row.innerHTML = killer
+      ? `<b>${esc(killer)}</b> killed <b>${esc(victim)}</b>${weapon ? ` <span class="with">· ${esc(weapon)}</span>` : ''}${head ? ' <span class="hs">headshot</span>' : ''}`
+      : `<b>${esc(victim)}</b> ${how ?? 'died'}`;
+    feed.prepend(row);
+    while (feed.children.length > 5) feed.lastElementChild!.remove();
+    fadeOut(row, 6000);
+  }
+
+  /** "+6 Wood" in the corner when items arrive in your inventory (or "-" when they leave a stack). */
+  pickup(icon: string, name: string, n: number) {
+    const list = $('pickups');
+    // Add to a recent line for the same item rather than stacking duplicates.
+    const key = `${name}:${n > 0 ? '+' : '-'}`;
+    let row = [...list.children].find((r) => (r as HTMLElement).dataset.key === key && !r.classList.contains('fade')) as HTMLElement | undefined;
+    if (row) {
+      const total = Number(row.dataset.n) + n;
+      row.dataset.n = String(total);
+      row.querySelector('.n')!.textContent = `${total > 0 ? '+' : ''}${total}`;
+      clearTimeout(Number(row.dataset.timer));
+    } else {
+      row = document.createElement('div');
+      row.className = `pickup${n < 0 ? ' lost' : ''}`;
+      row.dataset.key = key;
+      row.dataset.n = String(n);
+      row.innerHTML = `${icon}<span class="n">${n > 0 ? '+' : ''}${n}</span> ${name}`;
+      list.append(row);
+      while (list.children.length > 6) list.firstElementChild!.remove();
+    }
+    row.dataset.timer = String(fadeOut(row, 3000));
+  }
+
+  /** A red arc round the crosshair pointing to where a hit came from; `angle` 0 is ahead, clockwise. */
+  damageFrom(angle: number) {
+    const el = document.createElement('div');
+    el.className = 'dmg-dir';
+    el.style.transform = `rotate(${angle}rad)`;
+    $('damage-dirs').append(el);
+    fadeOut(el, 700);
   }
 
   /** Rounds loaded and carried for the gun in your hands, or nothing. */
@@ -125,4 +188,12 @@ export class Hud {
   disconnected() {
     $('disconnected').hidden = false;
   }
+}
+
+/** Fades an element out after `ms`, then removes it. Returns the timer. */
+function fadeOut(el: HTMLElement, ms: number): number {
+  return window.setTimeout(() => {
+    el.classList.add('fade');
+    setTimeout(() => el.remove(), 650);
+  }, ms);
 }
