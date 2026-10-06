@@ -133,7 +133,8 @@ export class World {
       }
       const n = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 3) * Math.cos(z * 0.09 + x * 0.03);
       c.lerp(n > 0 ? pale : scorched, Math.abs(n) * 0.25);
-      colors.set([c.r, c.g, c.b], i * 3);
+      // The photo texture carries the ground's own colour, so the tints are relative to plain ash.
+      colors.set([c.r / ash.r, c.g / ash.g, c.b / ash.b], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
@@ -144,6 +145,8 @@ export class World {
       roughnessMap: ground.roughnessMap,
       normalScale: new THREE.Vector2(1.2, 1.2),
       vertexColors: true,
+      // The scanned earth is paler than the lighting was tuned for.
+      color: new THREE.Color(0.62, 0.62, 0.62),
       roughness: 1,
     });
     // Break up the texture repeat: mix the cracked earth at two scales, blend in drifts of
@@ -154,7 +157,13 @@ export class World {
       shader.uniforms.sandMap = { value: sand.map };
       shader.uniforms.sandNormal = { value: sand.normalMap };
       shader.uniforms.macroMap = { value: macro };
+      // World position and normal, so steep crater walls can take the texture from the side
+      // instead of stretching it down the slope.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);');
       shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
         .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D sandMap;\nuniform sampler2D sandNormal;\nuniform sampler2D macroMap;')
         .replace(
           '#include <map_fragment>',
@@ -165,9 +174,20 @@ export class World {
             vec4 crackA = texture2D(map, vMapUv);
             vec4 crackB = texture2D(map, vMapUv * 0.37 + vec2(0.17, 0.53));
             vec4 grit = texture2D(sandMap, vMapUv * 1.6);
+            // The scanned dirt is redder than this ashen land; pull it toward grey.
+            grit.rgb = mix(vec3(dot(grit.rgb, vec3(0.3, 0.55, 0.15))), grit.rgb, 0.55);
             sandy = smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4);
             vec4 ground = mix(crackA, crackB, 0.4);
             vec4 sampledDiffuseColor = mix(ground, grit, sandy);
+            // Steep slopes: the earth projected from the two sides, blended by facing.
+            vec3 gn = normalize(vGroundNormal);
+            float steep = smoothstep(0.82, 0.6, gn.y);
+            if (steep > 0.0) {
+              vec2 s = vec2(0.42);
+              vec4 side = texture2D(map, vGroundPos.xy * s) * abs(gn.z) + texture2D(map, vGroundPos.zy * s + 0.5) * abs(gn.x);
+              side /= abs(gn.z) + abs(gn.x) + 1e-4;
+              sampledDiffuseColor = mix(sampledDiffuseColor, side, steep);
+            }
             sampledDiffuseColor.rgb *= mix(0.8, 1.15, macro2.g) * mix(0.92, 1.06, macro.r);
             diffuseColor *= sampledDiffuseColor;
           #endif`,
@@ -176,7 +196,8 @@ export class World {
           '#include <normal_fragment_maps>',
           `#ifdef USE_NORMALMAP_TANGENTSPACE
             vec3 mapN = mix(texture2D(normalMap, vNormalMapUv).xyz, texture2D(sandNormal, vNormalMapUv * 1.6).xyz, sandy) * 2.0 - 1.0;
-            mapN.xy *= normalScale;
+            // The top-down detail would smear down steep walls, so flatten it there.
+            mapN.xy *= normalScale * (1.0 - smoothstep(0.82, 0.6, normalize(vGroundNormal).y) * 0.8);
             normal = normalize(tbn * mapN);
           #else
             #include <normal_fragment_maps>
