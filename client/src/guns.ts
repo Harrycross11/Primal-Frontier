@@ -154,7 +154,7 @@ const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number; pa
   scarH: { grip: [0.19, 0.42], bore: 0.6, palm: [0.15, 0.25], hold: [0.52, 0.47] },
   m14: { grip: [0.3, 0.55], bore: 0.82, palm: [0.28, 0.45], hold: [0.55, 0.6] },
   svd: { grip: [0.25, 0.5], bore: 0.6, palm: [0.23, 0.3], hold: [0.45, 0.5] },
-  m82: { grip: [0.24, 0.48], bore: 0.68, palm: [0.22, 0.32], hold: [0.42, 0.55] },
+  m82: { grip: [0.25, 0.45], bore: 0.6, palm: [0.22, 0.3], hold: [0.48, 0.55] },
   m60: { grip: [0.3, 0.45], bore: 0.6, palm: [0.27, 0.28], hold: [0.48, 0.4] },
 };
 

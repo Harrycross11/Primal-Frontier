@@ -113,7 +113,8 @@ const FIT: Record<string, Fit> = {
   // A shell stands beside the grip in the same mesh as the gun.
   'gun-spas12': { length: 1.04, turn: [0, Math.PI, 0], cut: [[0.32, 0.38, -0.01, 0.3]] },
   'gun-saiga12': { length: 1.0, turn: [0, -Math.PI / 2, 0] },
-  'gun-m82': { length: 1.45, turn: [0, Math.PI, 0], drop: /Cartridge|NATO_Bullet/, cut: [[0.49, 0.56, 0.38, 0.52]] },
+  // Tilted nose-up in its file, with a round lying off the muzzle.
+  'gun-m82': { length: 1.45, turn: [0.1405, 0, 0], cut: [[0.9, 1.01, 0.5, 0.75]] },
   'gun-svd': { length: 1.22, turn: [0, Math.PI, 0] },
   'gun-m60': { length: 1.1, turn: [0, Math.PI / 2, 0], cut: [[0.3, 0.4, 0.8, 1.01]] },
   // Lies diagonally in its file; stood up with the string at the back.

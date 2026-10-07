@@ -106,7 +106,7 @@ PROPS = {
     'gun-m1911': '80a0b8a6c4314da4a7b3a7cfe6cec1d4',
     'gun-spas12': 'dfb4e1671b5b49e7b8a54cd120fc4d9f',
     'gun-saiga12': '2f2cce6204f14a9e8f7812141e8d63a4',
-    'gun-m82': 'af16e974a47e463989311bcda6f51f87',
+    'gun-m82': '6ad968a934b44294822259bba60b5a42',
     'gun-svd': '2ac78fb5a0eb40f5a02a5b0a9f566abf',
     'gun-m60': 'cbf408387dc94a30abe11afb3698ac13',
     'gun-compoundBow': '962312982e984e97882fb61cdc5c8cc7',
