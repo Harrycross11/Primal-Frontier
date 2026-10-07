@@ -53,6 +53,19 @@ SCANS = {
     'wreck-f': ('b64174d7bea644a7b86f8d1aa980dc51', 8000),
 }
 
+# Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
+CHARACTERS = {
+    'survivor': 'f56ffc64d18c40cf95d17559542ca44c',
+}
+
+
+def sketchfab_credit(name: str, uid: str, note: str) -> str:
+    info = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}'))
+    return (
+        f'- {name}: "{info["name"]}" by {info["user"]["displayName"]} ({info["viewerUrl"]}), '
+        f'licensed {info["license"]["label"]} ({info["license"]["url"]}), {note}'
+    )
+
 
 def get(url: str, auth: bool = False) -> bytes:
     headers = {'User-Agent': 'primal-frontier-fetch'}
@@ -102,11 +115,7 @@ def main():
             print('saved', name, triangles(full), '->', triangles(out), 'triangles')
     scans = []
     for name, (uid, budget) in SCANS.items():
-        info = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}'))
-        scans.append(
-            f'- {name}: "{info["name"]}" by {info["user"]["displayName"]} ({info["viewerUrl"]}), '
-            f'licensed {info["license"]["label"]} ({info["license"]["url"]}), simplified'
-        )
+        scans.append(sketchfab_credit(name, uid, 'simplified'))
         if only and name not in only:
             continue
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
@@ -120,11 +129,19 @@ def main():
                 check=True, capture_output=True, text=True,
             )
             print('saved', name, result.stdout.strip())
+    for name, uid in CHARACTERS.items():
+        scans.append(sketchfab_credit(name, uid, 'animated by the game'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
+            f.write(get(link['glb']['url']))
+        print('saved', name)
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write(
             '# Models\n\nPhoto-scanned models from Poly Haven, all CC0 (public domain), simplified for the game.\n\n'
             + '\n'.join(credits)
-            + '\n\nRaw photo scans from Sketchfab under Creative Commons Attribution, simplified and re-lit for the game.\n\n'
+            + '\n\nModels from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, and rigged characters.\n\n'
             + '\n'.join(scans)
             + '\n'
         )

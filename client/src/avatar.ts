@@ -7,7 +7,9 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
+import { character } from './models.ts';
 import { buildHeldItem } from './props.ts';
+import { ScanBody } from './scanBody.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
@@ -77,6 +79,9 @@ export class Avatar {
   private swingTimer = 0;
   private last = new THREE.Vector3(NaN, 0, 0);
   private hand: THREE.Group;
+  private grip: THREE.Group;
+  /** The photo-scanned body, when it loaded; it replaces the modelled one. */
+  private scan: ScanBody | null = null;
   private held: ItemId | null | undefined = undefined;
   /** How the arms hold what is in the hands. */
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
@@ -160,11 +165,15 @@ export class Avatar {
     body.bind(new THREE.Skeleton(BONES.map(([n]) => this.bones[n])));
     this.root.add(body);
 
-    // Gear is placed in the modelled pose's coordinates, then hung on the nearest bone.
+    // Gear is placed in the modelled pose's coordinates, then hung on the nearest bone. Pieces
+    // made to sit tight on the modelled body's surface are left off the scanned one.
+    let tight = true;
+    const fitted: THREE.Object3D[] = [];
     const attach = (boneName: BoneName, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z).sub(world.get(boneName)!);
       this.bones[boneName].add(m);
+      if (tight) fitted.push(m);
       return m;
     };
     const box = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 2, r);
@@ -198,6 +207,7 @@ export class Avatar {
     attach('torso', box(0.07, 0.18, 0.025, 0.01), accent, 0.05, 1.37, 0.1).rotation.set(-0.3, 0, 0.12);
 
     // Backpack with a rolled bedroll and a canteen.
+    tight = false;
     attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
     attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
     attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
@@ -211,6 +221,7 @@ export class Avatar {
     band.rotation.z = -ARM_REST;
 
     // Head: hood, goggles and respirator, so the face reads as a gritty survivor.
+    tight = true;
     const faceStart = this.bones.head.children.length;
     const hoodMesh = attach('head', new THREE.SphereGeometry(0.13, 24, 16, Math.PI / 2 + 0.72, Math.PI * 2 - 1.44, 0, Math.PI * 0.78), hood, 0, 1.705, -0.012);
     hoodMesh.scale.set(1.06, 1.1, 1.14);
@@ -236,13 +247,22 @@ export class Avatar {
     for (const [n, pos] of world) this.boneAt.set(n, pos);
 
     // Whatever is in their hands goes here: a rock, a tool or a building plan.
-    const grip = new THREE.Group();
+    const grip = (this.grip = new THREE.Group());
     grip.position.set(...HAND(1)).sub(world.get('elbowR')!);
     grip.rotation.z = ARM_REST;
     this.bones.elbowR.add(grip);
     this.hand = new THREE.Group();
     this.hand.rotation.x = Math.PI / 2 - 0.2;
     grip.add(this.hand);
+
+    const scan = character('survivor');
+    if (scan) {
+      // The modelled body draws nothing but keeps its bones, which carry the gear.
+      geometry.setDrawRange(0, 0);
+      for (const o of fitted) o.visible = false;
+      this.scan = new ScanBody(this.root, scan, this.bones, world);
+      this.scan.update();
+    }
 
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
@@ -281,13 +301,15 @@ export class Avatar {
       if (!item) continue;
       for (const { bone, mesh } of armourParts(item)) {
         mesh.position.sub(this.boneAt.get(bone)!);
+        // The scanned head is smaller than the modelled one in its hood; sit hats lower on it.
+        if (this.scan && item === 'coffeeCanHelmet') mesh.position.y -= 0.07;
         this.bones[bone].add(mesh);
         this.wornMeshes[i].push(mesh);
       }
     }
     if (!changed) return;
     const hidden = new Set(this.worn.flatMap((item) => (item ? (ARMOUR_HIDES[item] ?? []) : [])));
-    for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind);
+    for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind) && !this.scan;
   }
 
   /** World position of the gun's muzzle, for flashes and tracers. */
@@ -335,6 +357,18 @@ export class Avatar {
   }
 
   update(dt: number, moving: boolean) {
+    this.animate(dt, moving);
+    if (!this.scan) return;
+    this.scan.update();
+    // Held items go in the scanned hand, a little past the wrist.
+    const hand = this.scan.hands.get('elbowR')!;
+    const wrist = hand.getWorldPosition(new THREE.Vector3());
+    const along = wrist.clone().sub(hand.parent!.getWorldPosition(new THREE.Vector3())).setLength(0.05);
+    this.grip.position.copy(this.bones.elbowR.worldToLocal(wrist.add(along)));
+  }
+
+  /** Poses the game skeleton for this frame. */
+  private animate(dt: number, moving: boolean) {
     dt = Math.min(dt, 0.1);
     this.time += dt;
     const b = this.bones;

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 export interface Model {
   geometry: THREE.BufferGeometry;
@@ -132,10 +133,39 @@ async function load(loader: GLTFLoader, name: string) {
   if (out.length) models.set(name, out);
 }
 
+/** Rigged characters, kept whole (skeleton and skinned meshes) rather than merged. */
+const CHARACTERS = ['survivor'];
+const characters = new Map<string, THREE.Object3D>();
+
+async function loadCharacter(loader: GLTFLoader, name: string) {
+  const gltf = await loader.loadAsync(`/models/${name}.glb`);
+  gltf.scene.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Skinned bounds are taken from the bind pose; animated limbs would get culled at screen edges.
+    mesh.frustumCulled = false;
+    const m = mesh.material as THREE.MeshStandardMaterial;
+    if (m.map) m.map.anisotropy = 8;
+  });
+  characters.set(name, gltf.scene);
+}
+
 /** Loads every model; resolves even if some fail, so a missing file never stops the game. */
 export async function loadModels(): Promise<void> {
   const loader = new GLTFLoader();
-  await Promise.all(Object.keys(FIT).map((n) => load(loader, n).catch((e) => console.warn(`model ${n} failed to load`, e))));
+  const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
+  await Promise.all([
+    ...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))),
+    ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n))),
+  ]);
+}
+
+/** A fresh copy of a rigged character with its own skeleton, or none if it didn't load. */
+export function character(name: string): THREE.Object3D | undefined {
+  const scene = characters.get(name);
+  return scene && cloneSkinned(scene);
 }
 
 export function model(name: string): Model | undefined {
