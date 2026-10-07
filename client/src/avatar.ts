@@ -84,6 +84,8 @@ export class Avatar {
   private scan: ScanBody | null = null;
   private held: ItemId | null | undefined = undefined;
   /** How the arms hold what is in the hands. */
+  private band: THREE.Mesh | null = null;
+  private bandRest: [THREE.Vector3, THREE.Quaternion] | null = null;
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
   private muzzle: THREE.Object3D | null = null;
   private recoilTimer = 0;
@@ -216,9 +218,10 @@ export class Avatar {
     attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
 
     // Armband in the player's colour, around the left upper arm.
-    const band = attach('shoulderL', new THREE.CylinderGeometry(0.066, 0.064, 0.05, 16), accent, ...HAND(-1));
+    const band = (this.band = attach('shoulderL', new THREE.CylinderGeometry(0.066, 0.064, 0.05, 16), accent, ...HAND(-1)));
     band.position.copy(new THREE.Vector3(...HAND(-1)).sub(world.get('shoulderL')!).multiplyScalar(0.27));
     band.rotation.z = -ARM_REST;
+    this.bandRest = [band.position.clone(), band.quaternion.clone()];
 
     // Head: hood, goggles and respirator, so the face reads as a gritty survivor.
     tight = true;
@@ -285,7 +288,7 @@ export class Avatar {
     if (model) this.hand.add(model);
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;
-    this.pose = !w || w.class === 'melee' ? 'normal' : w.class === 'bow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
+    this.pose = !w || w.class === 'melee' ? 'normal' : item === 'huntingBow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
   }
 
   /** Dresses the survivor in the armour worn on their head, chest and legs. */
@@ -366,22 +369,37 @@ export class Avatar {
     this.grip.position.copy(this.bones.elbowR.worldToLocal(scan.palm('elbowR')));
     // A rifle's pistol grip runs down through the fist, so its top sits above the palm.
     this.hand.position.set(0, this.pose === 'rifle' ? -0.045 : 0, 0).applyQuaternion(this.hand.quaternion);
-    // Long guns and pistols are steadied by the left hand: under the front of the receiver, or cupped
-    // under the gripping hand.
-    const gun = !this.dead && (this.pose === 'rifle' || this.pose === 'pistol') ? this.muzzle?.parent : null;
-    if (gun && this.muzzle) {
+    // The left hand steadies a long gun under the front of the receiver, cups a pistol under the
+    // gripping hand, and draws a bow's string.
+    const weapon = this.dead || this.pose === 'normal' ? undefined : this.hand.children[0]?.children[0];
+    if (weapon) {
       this.root.updateMatrixWorld(true);
-      const m = this.muzzle.position;
-      // Rifles: as far along the handguard as the arm reaches. Pistols: cupped under the gripping hand.
-      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.1, m.z * 0.1) : new THREE.Vector3(0, -0.07, -0.01);
+      // Rifles: as far along the handguard as the arm reaches. Crossbows have no barrel, so along the stock.
+      const m = this.muzzle?.position ?? new THREE.Vector3(0, 0.06, 0.6);
+      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.1, m.z * 0.1) : this.pose === 'pistol' ? new THREE.Vector3(0, -0.07, -0.01) : new THREE.Vector3(0, 0.02, -0.14);
       const far = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.45, m.z * 0.45) : near.clone();
-      const up = new THREE.Vector3(0, 1, 0).transformDirection(gun.matrixWorld);
+      const up = new THREE.Vector3(0, 1, 0).transformDirection(weapon.matrixWorld);
       const side = Math.sign(this.boneAt.get('shoulderL')!.x);
       // The left elbow hangs down and out to the side.
       const pole = this.root.localToWorld(new THREE.Vector3(side * 0.9, 0.4, 0.1));
-      scan.reach('elbowL', gun.localToWorld(near), gun.localToWorld(far), pole, up);
+      scan.reach('elbowL', weapon.localToWorld(near), weapon.localToWorld(far), pole, up);
       scan.curl('elbowL', 1);
-    } else scan.curl('elbowL', this.dead ? 0.15 : 0.3);
+      // The armband rides on the scanned upper arm, which has left the game's arm behind.
+      if (this.band) {
+        const [shoulder, elbow] = scan.arm('elbowL');
+        const parent = this.band.parent!;
+        this.band.position.copy(parent.worldToLocal(shoulder.clone().lerp(elbow, 0.27)));
+        const along = elbow.sub(shoulder).normalize();
+        const world = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
+        this.band.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(world));
+      }
+    } else {
+      scan.curl('elbowL', this.dead ? 0.15 : 0.3);
+      if (this.band && this.bandRest) {
+        this.band.position.copy(this.bandRest[0]);
+        this.band.quaternion.copy(this.bandRest[1]);
+      }
+    }
   }
 
   /** Poses the game skeleton for this frame. */
@@ -464,7 +482,7 @@ export class Avatar {
       const lower = reloading ? 0.6 : r * 0.7;
       const pitch = THREE.MathUtils.clamp(this.aimPitch, -0.9, 0.9) * (1 - lower);
       const up = 1.45 - lower + pitch + kick;
-      if (this.pose === 'pistol') {
+      if (this.pose === 'pistol' || this.pose === 'bow') {
         b.shoulderR.rotation.set(-up, -0.15, -0.12);
         b.elbowR.rotation.x = -0.1;
         b.shoulderL.rotation.set(-up + 0.05, 0.5, 0.35);

@@ -220,6 +220,12 @@ export class ScanBody {
     }
   }
 
+  /** Where a scanned arm's shoulder and elbow joints are, in world space. */
+  arm(elbow: BoneName): [THREE.Vector3, THREE.Vector3] {
+    const h = this.grips.get(elbow)!;
+    return [h.upper.getWorldPosition(new THREE.Vector3()), h.lower.getWorldPosition(new THREE.Vector3())];
+  }
+
   /** Swings a bone about the point `from` so the direction towards `was` points towards `want`. */
   private turn(bone: THREE.Object3D, from: THREE.Vector3, was: THREE.Vector3, want: THREE.Vector3) {
     const turn = new THREE.Quaternion().setFromUnitVectors(was.clone().sub(from).normalize(), want.clone().sub(from).normalize());

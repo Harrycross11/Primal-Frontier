@@ -282,7 +282,8 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
         limb.rotation.set(Math.PI / 2, 0, Math.PI / 2 - 0.8);
         part(g, box(0.04, 0.04, 0.6), wood, 0, 0.03, 0.15);
       } else {
-        limb.rotation.set(0, Math.PI / 2, Math.PI / 2 - 0.95);
+        // Upright, curving back from the grip to the tips.
+        limb.rotation.set(0, -Math.PI / 2, -0.95);
         part(g, box(0.025, 0.12, 0.03), clothMat(), 0, 0.02, 0.08);
       }
       const string = new THREE.BufferGeometry().setFromPoints(
