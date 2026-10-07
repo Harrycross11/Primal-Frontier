@@ -10,7 +10,7 @@ import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
-import { BOULDERS, model } from './models.ts';
+import { BOULDERS, WRECKS, model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery } from './scenery.ts';
 import {
@@ -594,7 +594,16 @@ export class World {
 
   /** A rusted-out old car, with a loose sheet of scrap lying beside it. */
   private wreck(rand: () => number): THREE.Group {
-    const g = buildCar(rand);
+    const scan = model(WRECKS[Math.floor(rand() * WRECKS.length)]);
+    let g: THREE.Group;
+    if (scan) {
+      g = new THREE.Group();
+      const car = new THREE.Mesh(scan.geometry, scan.material);
+      // Settled into the dirt, sometimes facing the other way.
+      car.position.y = -0.05;
+      if (rand() < 0.5) car.rotation.y = Math.PI;
+      g.add(car);
+    } else g = buildCar(rand);
     const sheet = new THREE.Mesh(new THREE.BoxGeometry(1, 0.04, 0.7), this.materials.scrap);
     sheet.position.set(2.4, 0.1, 1.1);
     sheet.rotation.set(0.2, rand() * 3, 0.15);

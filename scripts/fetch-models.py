@@ -1,9 +1,12 @@
-"""Downloads photo-scanned CC0 models from Poly Haven into client/public/models as .glb files.
+"""Downloads photo-scanned models into client/public/models as .glb files: CC0 ones from Poly Haven
+and CC-BY raw scans from Sketchfab (credited in CREDITS.md).
 
 Scans come with far more triangles than a game can draw hundreds of times, so each one is
 simplified to roughly the triangle budget below with gltf-transform (fetched by npx); the
 normal map keeps the fine surface detail. The output is committed, so this only needs running
-again to change or add a model. Needs Node (npx) and network access to Poly Haven.
+again to change or add a model. Needs Node (npx, and `npm install` for the Sketchfab scans) and
+network access to Poly Haven and Sketchfab. Sketchfab downloads need an account token: set
+SKETCHFAB_TOKEN, unless a proxy already adds it.
 
     python3 scripts/fetch-models.py            # every model
     python3 scripts/fetch-models.py tyre log   # just these
@@ -39,9 +42,23 @@ MODELS = {
     'stump': ('tree_stump_01', 2000),
 }
 
+# Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
+# Our name: (Sketchfab model uid, target triangles).
+SCANS = {
+    'wreck-a': ('483fe7f26336463fba66638ca4200c5a', 8000),
+    'wreck-b': ('263fd595fa4a45e988d5c6e236cbf293', 8000),
+    'wreck-c': ('b1902df910524c13995865a9858fa99e', 8000),
+    'wreck-d': ('222688561ba74a638c51a8af36ad0255', 8000),
+    'wreck-e': ('916b51c7e5644eb2a6c9b3797ebb08cf', 8000),
+    'wreck-f': ('b64174d7bea644a7b86f8d1aa980dc51', 8000),
+}
 
-def get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={'User-Agent': 'primal-frontier-fetch'})
+
+def get(url: str, auth: bool = False) -> bytes:
+    headers = {'User-Agent': 'primal-frontier-fetch'}
+    if auth and os.environ.get('SKETCHFAB_TOKEN'):
+        headers['Authorization'] = f'Token {os.environ["SKETCHFAB_TOKEN"]}'
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req) as r:
         return r.read()
 
@@ -83,8 +100,34 @@ def main():
             out = os.path.join(OUT, f'{name}.glb')
             subprocess.run(CLI + ['simplify', full, out, '--ratio', f'{ratio:.4f}', '--error', '0.01'], check=True, capture_output=True)
             print('saved', name, triangles(full), '->', triangles(out), 'triangles')
+    scans = []
+    for name, (uid, budget) in SCANS.items():
+        info = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}'))
+        scans.append(
+            f'- {name}: "{info["name"]}" by {info["user"]["displayName"]} ({info["viewerUrl"]}), '
+            f'licensed {info["license"]["label"]} ({info["license"]["url"]}), simplified'
+        )
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with tempfile.TemporaryDirectory() as tmp:
+            full = os.path.join(tmp, 'scan.glb')
+            with open(full, 'wb') as f:
+                f.write(get(link['glb']['url']))
+            out = os.path.join(OUT, f'{name}.glb')
+            result = subprocess.run(
+                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'simplify-scan.ts'), full, out, str(budget)],
+                check=True, capture_output=True, text=True,
+            )
+            print('saved', name, result.stdout.strip())
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
-        f.write('# Models\n\nPhoto-scanned models from Poly Haven, all CC0 (public domain), simplified for the game.\n\n' + '\n'.join(credits) + '\n')
+        f.write(
+            '# Models\n\nPhoto-scanned models from Poly Haven, all CC0 (public domain), simplified for the game.\n\n'
+            + '\n'.join(credits)
+            + '\n\nRaw photo scans from Sketchfab under Creative Commons Attribution, simplified and re-lit for the game.\n\n'
+            + '\n'.join(scans)
+            + '\n'
+        )
 
 
 if __name__ == '__main__':

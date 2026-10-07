@@ -13,6 +13,8 @@ export interface Model {
 }
 
 export const BOULDERS = ['boulder-a', 'boulder-b', 'boulder-c', 'boulder-d', 'boulder-e'];
+/** Scanned car wrecks, each laid lengthways along x. */
+export const WRECKS = ['wreck-a', 'wreck-b', 'wreck-c', 'wreck-d', 'wreck-e', 'wreck-f'];
 
 interface Fit {
   /** Widest horizontal extent in metres. */
@@ -39,6 +41,13 @@ const FIT: Record<string, Fit> = {
   'dead-branch': { width: 0.9, turn: [Math.PI / 2, 0, 0] },
   stones: { width: 0.3, set: true },
   stump: { width: 1.1 },
+  // Lengths of the real cars: two big sedans, three mid-size, and a small hatchback.
+  'wreck-a': { width: 5.0 },
+  'wreck-b': { width: 4.6 },
+  'wreck-c': { width: 4.5 },
+  'wreck-d': { width: 4.7 },
+  'wreck-e': { width: 3.9 },
+  'wreck-f': { width: 4.6 },
 };
 
 const models = new Map<string, Model[]>();
