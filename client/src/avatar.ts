@@ -16,6 +16,11 @@ import { clothSurface, leatherSurface } from './textures.ts';
 
 // Faded workwear: olive drab, oilskin brown, charcoal, washed-out navy, khaki and rust. Trousers
 // are darker than jackets, as they usually are, so the outfit reads as separate pieces.
+/** Between the scanned survivor's eyes, in the survivor's model space. */
+const EYE = new THREE.Vector3(0, 1.655, 0.085);
+/** Guns aimed through a scope, whose eye line runs through the scope rather than the iron sights. */
+const SCOPED: ItemId[] = ['boltRifle', 'l96', 'm249'];
+
 const JACKETS = [0x5a5c3e, 0x6a5440, 0x48494a, 0x46505e, 0x7c7052, 0x6e4e3a];
 const TROUSERS = [0x3f3c35, 0x4a4436, 0x363a3f, 0x544a3b];
 
@@ -90,7 +95,7 @@ export class Avatar {
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
   private muzzle: THREE.Object3D | null = null;
   /** Where the hands go on the gun or bow in hand, in its model space, and where its butt is. */
-  private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; butt?: THREE.Vector3 } | null = null;
+  private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; butt?: THREE.Vector3; top?: number } | null = null;
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
@@ -402,14 +407,21 @@ export class Avatar {
     const turn = weapon.getWorldQuaternion(new THREE.Quaternion());
     let point: THREE.Vector3;
     let at: THREE.Vector3;
+    // Where he looks from: between the scanned eyes, which sit a little lower than the old hood's.
+    const eye = this.bones.head.localToWorld(EYE.clone().sub(this.boneAt.get('head')!));
+    const sightY = this.sightY(weapon, hands);
     if (this.pose === 'rifle') {
-      // The butt sits in the pocket of the right shoulder, just inside the joint.
+      // The butt sits in the pocket of the right shoulder, just inside the joint, and comes up
+      // until the sights are at his eye (his cheek on the stock), as far as the shoulder allows.
       point = this.butt(weapon, hands);
-      at = shoulderR.clone().addScaledVector(left, 0.07).addScaledVector(ahead, 0.05).addScaledVector(up, 0.03);
+      at = shoulderR.clone().addScaledVector(left, 0.08).addScaledVector(ahead, 0.05).addScaledVector(up, 0.03);
+      const sight = new THREE.Vector3(0, sightY - point.y, 0.25).applyQuaternion(turn);
+      at.addScaledVector(up, THREE.MathUtils.clamp(eye.y - 0.015 - (at.y + sight.y), 0, 0.13));
     } else if (this.pose === 'pistol') {
-      // Arms out, the grip in front of the chest and a little below the eyes.
+      // Arms out towards the target, the sights at eye level.
       point = hands.palm;
-      at = shoulderR.clone().lerp(shoulderL, 0.5).addScaledVector(ahead, 0.42).addScaledVector(up, 0.06);
+      at = shoulderR.clone().lerp(shoulderL, 0.5).addScaledVector(ahead, 0.4);
+      at.y = eye.y - 0.03 - new THREE.Vector3(0, sightY - point.y, 0).applyQuaternion(turn).y;
     } else {
       // A bow is held out at arm's length in the left hand.
       point = hands.hold!;
@@ -453,6 +465,14 @@ export class Avatar {
     }
   }
 
+  /** How high the line from his eye along the sights sits on the weapon: a scope's middle, or just over the bore. */
+  private sightY(weapon: THREE.Object3D, hands: NonNullable<Avatar['hands']>): number {
+    const muzzleY = this.muzzle?.position.y ?? 0.05;
+    if (!this.held || !SCOPED.includes(this.held)) return muzzleY + 0.03;
+    this.butt(weapon, hands);
+    return hands.top! - 0.025;
+  }
+
   /** The middle of a long gun's butt plate, in its model space: the back end, halfway up the stock. */
   private butt(weapon: THREE.Object3D, hands: NonNullable<Avatar['hands']>): THREE.Vector3 {
     if (hands.butt) return hands.butt;
@@ -466,6 +486,7 @@ export class Avatar {
       box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(into.clone().multiply(mesh.matrixWorld)));
     });
     const muzzleY = this.muzzle?.position.y ?? 0.05;
+    hands.top = box.max.y;
     return (hands.butt = new THREE.Vector3(0, (hands.palm.y + muzzleY) / 2 + 0.02, box.min.z));
   }
 
