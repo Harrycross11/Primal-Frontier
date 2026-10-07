@@ -11,6 +11,7 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - barrel: https://polyhaven.com/a/barrel_03
 - tyre: https://polyhaven.com/a/old_tyre
 - dry-grass: https://polyhaven.com/a/grass_medium_02
+- grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 - dry-bush: https://polyhaven.com/a/wild_rooibos_bush
 - branches: https://polyhaven.com/a/dry_branches_medium_01
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01

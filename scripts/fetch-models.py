@@ -145,6 +145,8 @@ def triangles(path: str) -> int:
 def main():
     os.makedirs(OUT, exist_ok=True)
     credits = [f'- {name}: https://polyhaven.com/a/{asset}' for name, (asset, _) in MODELS.items()]
+    # Drawn in a browser from the dry-grass clumps above (each seen from several sides), not downloaded.
+    credits.append('- grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02')
     only = sys.argv[1:]
     for name, (asset, budget) in MODELS.items():
         if only and name not in only:

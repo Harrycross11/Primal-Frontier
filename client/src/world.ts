@@ -227,19 +227,37 @@ export class World {
   }
 
   private buildGrass() {
-    const tex = grassTexture();
-    const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 1 });
+    // Four photo-scanned clumps of dry grass, each drawn from three sides into one card (see
+    // CREDITS.md). The painted tuft stands in if the file doesn't load.
+    const mat = new THREE.MeshStandardMaterial({ alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 });
+    /** Clumps side by side in the texture; each tuft shows one of them. */
+    const cards = { value: 4 };
+    mat.map = new THREE.TextureLoader().load('/models/grass-cards.png', undefined, undefined, () => {
+      mat.map = grassTexture();
+      cards.value = 1;
+      mat.needsUpdate = true;
+    });
+    mat.map.colorSpace = THREE.SRGBColorSpace;
+    mat.map.anisotropy = 4;
     // Tufts sway in gusts: the tips move, the roots stay put, and each clump is out of step.
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.windTime = this.windTime;
+      shader.uniforms.cards = cards;
       // Double-sided materials flip the normal on back faces, which points it into the ground
       // and turns every blade seen from behind black. Keep the upward normal on both sides.
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
-        // Darker down among the roots, where the tuft shades itself.
-        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= mix(0.5, 1.05, smoothstep(0.0, 0.55, vMapUv.y));');
+        // Darker down among the roots, where the tuft shades itself. Thin blades would vanish in
+        // the distance as the texture shrinks; sharpening the cut-out edge keeps them solid.
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          diffuseColor.rgb *= mix(0.5, 1.05, smoothstep(0.0, 0.55, vMapUv.y));
+          diffuseColor.a = (diffuseColor.a - 0.5) / max(fwidth(diffuseColor.a), 0.0001) + 0.5;`,
+        );
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float windTime;')
+        .replace('#include <common>', '#include <common>\nuniform float windTime;\nuniform float cards;\nattribute float card;')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv.x = (vMapUv.x + mod(card, cards)) / cards;')
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
@@ -252,14 +270,16 @@ export class World {
           #endif`,
         );
     };
-    const blade = new THREE.PlaneGeometry(0.75, 0.6);
-    blade.translate(0, 0.29, 0);
+    const blade = new THREE.PlaneGeometry(0.75, 0.75);
+    blade.translate(0, 0.36, 0);
     // Three cards at 60 degrees, so a tuft looks full from every side.
     const cross = mergeCards([0, 1, 2].map((k) => blade.clone().rotateY((k * Math.PI) / 3)));
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
     const count = 16000;
+    const card = new Float32Array(count);
+    cross.setAttribute('card', new THREE.InstancedBufferAttribute(card, 1));
     const mesh = new THREE.InstancedMesh(cross, mat, count);
     const tint = new THREE.Color();
     const rand = mulberry32(this.seed ^ 0xabcdef);
@@ -283,12 +303,15 @@ export class World {
       p.set(x, y - 0.02, z);
       // Each tuft a little drier or greener, lighter or darker than its neighbours.
       const dry = rand();
-      tint.setRGB(0.86 + dry * 0.2, 0.93 + dry * 0.07, 0.8 + dry * 0.05).multiplyScalar(0.85 + rand() * 0.3);
+      tint.setRGB(1.0 + dry * 0.15, 0.9 + dry * 0.06, 0.68 + dry * 0.06).multiplyScalar(0.85 + rand() * 0.3);
       mesh.setColorAt(placed, tint);
+      card[placed] = Math.floor(rand() * 4);
       mesh.setMatrixAt(placed++, m.compose(p, q, s));
     }
     mesh.count = placed;
     mesh.receiveShadow = true;
+    // The occlusion pass would shade each card as a solid square.
+    mesh.userData.noAO = true;
     this.scene.add(mesh);
   }
 
