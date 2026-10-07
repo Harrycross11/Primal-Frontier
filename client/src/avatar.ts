@@ -359,12 +359,29 @@ export class Avatar {
   update(dt: number, moving: boolean) {
     this.animate(dt, moving);
     if (!this.scan) return;
-    this.scan.update();
-    // Held items go in the scanned hand, a little past the wrist.
-    const hand = this.scan.hands.get('elbowR')!;
-    const wrist = hand.getWorldPosition(new THREE.Vector3());
-    const along = wrist.clone().sub(hand.parent!.getWorldPosition(new THREE.Vector3())).setLength(0.05);
-    this.grip.position.copy(this.bones.elbowR.worldToLocal(wrist.add(along)));
+    const scan = this.scan;
+    scan.update();
+    // The right hand closes round whatever it holds, which sits in the middle of the palm.
+    scan.curl('elbowR', this.held && !this.dead ? 1 : 0.3);
+    this.grip.position.copy(this.bones.elbowR.worldToLocal(scan.palm('elbowR')));
+    // A rifle's pistol grip runs down through the fist, so its top sits above the palm.
+    this.hand.position.set(0, this.pose === 'rifle' ? -0.045 : 0, 0).applyQuaternion(this.hand.quaternion);
+    // Long guns and pistols are steadied by the left hand: under the front of the receiver, or cupped
+    // under the gripping hand.
+    const gun = !this.dead && (this.pose === 'rifle' || this.pose === 'pistol') ? this.muzzle?.parent : null;
+    if (gun && this.muzzle) {
+      this.root.updateMatrixWorld(true);
+      const m = this.muzzle.position;
+      // Rifles: as far along the handguard as the arm reaches. Pistols: cupped under the gripping hand.
+      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.15, m.z * 0.15) : new THREE.Vector3(0, -0.07, -0.01);
+      const far = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.45, m.z * 0.45) : near.clone();
+      const up = new THREE.Vector3(0, 1, 0).transformDirection(gun.matrixWorld);
+      const side = Math.sign(this.boneAt.get('shoulderL')!.x);
+      // The left elbow hangs down and out to the side.
+      const pole = this.root.localToWorld(new THREE.Vector3(side * 0.9, 0.4, 0.1));
+      scan.reach('elbowL', gun.localToWorld(near), gun.localToWorld(far), pole, up);
+      scan.curl('elbowL', 1);
+    } else scan.curl('elbowL', this.dead ? 0.15 : 0.3);
   }
 
   /** Poses the game skeleton for this frame. */
@@ -453,7 +470,7 @@ export class Avatar {
         b.shoulderL.rotation.set(-up + 0.05, 0.5, 0.35);
         b.elbowL.rotation.x = -0.35;
       } else {
-        b.shoulderR.rotation.set(-up + 0.55, -0.05, -0.35);
+        b.shoulderR.rotation.set(-up + 0.55, -0.8, -0.35);
         b.elbowR.rotation.x = -1.2;
         b.shoulderL.rotation.set(-up - 0.05, 0.55, 0.45);
         b.elbowL.rotation.x = -0.25;

@@ -30,6 +30,21 @@ const LIMBS: [string, string][] = [
   ['ForeArm', 'Hand'],
 ];
 
+/**
+ * How far each finger joint bends, knuckle first, in a full grip. This rig weights all four
+ * fingers to the first joint, so they fold together at the knuckles, round a handle.
+ */
+const CURL = [1.8, 0, 0];
+
+interface Hand {
+  hand: THREE.Bone;
+  /** Finger joints from the knuckle out; the rig moves all four fingers together. */
+  fingers: THREE.Bone[];
+  rest: THREE.Quaternion[];
+  upper: THREE.Bone;
+  lower: THREE.Bone;
+}
+
 interface Pair {
   src: THREE.Bone;
   dst: THREE.Bone;
@@ -41,6 +56,7 @@ interface Pair {
 const q = new THREE.Quaternion();
 const q2 = new THREE.Quaternion();
 const v = new THREE.Vector3();
+const X = new THREE.Vector3(1, 0, 0);
 
 export class ScanBody {
   private pairs: Pair[] = [];
@@ -49,6 +65,7 @@ export class ScanBody {
   private pelvisRest = new THREE.Vector3();
   /** The scan's hands, keyed by the game's elbow bone on the same side. */
   readonly hands = new Map<BoneName, THREE.Bone>();
+  private grips = new Map<BoneName, Hand>();
 
   constructor(
     private root: THREE.Object3D,
@@ -114,8 +131,21 @@ export class ScanBody {
         this.pairs.push({ src: bones[src], dst, srcRest: this.avatarQuat(bones[src]), dstRest: this.avatarQuat(dst) });
       }
     }
-    this.hands.set(`elbow${leftIs}` as BoneName, bone('LeftHand'));
-    this.hands.set(`elbow${rightIs}` as BoneName, bone('RightHand'));
+    for (const [prefix, s] of [
+      ['Left', leftIs],
+      ['Right', rightIs],
+    ] as const) {
+      const elbow = `elbow${s}` as BoneName;
+      const fingers = [1, 2, 3].map((n) => named.get(`${prefix}HandIndex${n}`)).filter((b): b is THREE.Bone => !!b);
+      this.hands.set(elbow, bone(`${prefix}Hand`));
+      this.grips.set(elbow, {
+        hand: bone(`${prefix}Hand`),
+        fingers,
+        rest: fingers.map((f) => f.quaternion.clone()),
+        upper: bone(`${prefix}Arm`),
+        lower: bone(`${prefix}ForeArm`),
+      });
+    }
     this.hipsRest.copy(root.worldToLocal(this.hips.getWorldPosition(v)));
     this.pelvisRest.copy(root.worldToLocal(bones.pelvis.getWorldPosition(v)));
   }
@@ -123,6 +153,79 @@ export class ScanBody {
   /** A bone's orientation relative to the avatar. */
   private avatarQuat(o: THREE.Object3D, out = new THREE.Quaternion()): THREE.Quaternion {
     return out.copy(this.root.getWorldQuaternion(q2).invert().multiply(o.getWorldQuaternion(q)));
+  }
+
+  /** Closes the fingers of one hand, from open (0) to a full grip (1). */
+  curl(elbow: BoneName, amount: number) {
+    const h = this.grips.get(elbow);
+    if (!h) return;
+    // Every finger joint bends about its own x axis, towards the palm.
+    h.fingers.forEach((f, i) => f.quaternion.copy(h.rest[i]).multiply(q.setFromAxisAngle(X, CURL[i] * amount)));
+    h.hand.updateMatrixWorld(true);
+  }
+
+  /** The middle of the palm in world space, where a held handle sits. */
+  palm(elbow: BoneName, out = new THREE.Vector3()): THREE.Vector3 {
+    const h = this.grips.get(elbow)!;
+    const wrist = h.hand.getWorldPosition(new THREE.Vector3());
+    if (!h.fingers.length) return out.copy(wrist);
+    const along = h.fingers[0].getWorldPosition(new THREE.Vector3()).sub(wrist);
+    return out.copy(wrist).addScaledVector(along, 0.75).addScaledVector(this.facing(h), along.length() * 0.35);
+  }
+
+  /** Which way the palm of a hand faces, in world space. */
+  private facing(h: Hand): THREE.Vector3 {
+    const along = h.fingers[0].getWorldPosition(new THREE.Vector3()).sub(h.hand.getWorldPosition(v));
+    // Fingers bend about their x axis, so the palm faces along (axis x fingers).
+    const axis = X.clone().applyQuaternion(h.fingers[0].getWorldQuaternion(q2));
+    return new THREE.Vector3().crossVectors(axis, along).normalize();
+  }
+
+  /**
+   * Bends one scanned arm so its palm lands as far along the line from `near` to `far` as the arm
+   * reaches, the elbow bowing towards `pole` and the palm turned to face `up`. The standard
+   * two-bone solve: the triangle of upper arm, forearm and reach fixes the elbow.
+   */
+  reach(elbow: BoneName, near: THREE.Vector3, far: THREE.Vector3, pole: THREE.Vector3, up: THREE.Vector3) {
+    const h = this.grips.get(elbow)!;
+    if (!h.fingers.length) return;
+    const s = h.upper.getWorldPosition(new THREE.Vector3());
+    const a = s.distanceTo(h.lower.getWorldPosition(v));
+    const b = h.lower.getWorldPosition(v).distanceTo(h.hand.getWorldPosition(new THREE.Vector3()));
+    // Turning the wrist moves the palm, so solve twice.
+    for (let pass = 0; pass < 2; pass++) {
+      // Aim the wrist so the palm, rather than the wrist, ends up on the target.
+      const offset = this.palm(elbow).sub(h.hand.getWorldPosition(v));
+      const wristAt = (t: number) => near.clone().lerp(far, t).sub(offset);
+      let lo = 0;
+      let hi = 1;
+      if (wristAt(1).distanceTo(s) <= a + b - 0.01) lo = 1;
+      else for (let i = 0; i < 12; i++) {
+        const mid = (lo + hi) / 2;
+        if (wristAt(mid).distanceTo(s) <= a + b - 0.01) lo = mid;
+        else hi = mid;
+      }
+      const toTarget = wristAt(lo).sub(s);
+      const d = THREE.MathUtils.clamp(toTarget.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
+      const dir = toTarget.normalize();
+      const x = (a * a - b * b + d * d) / (2 * d);
+      const bow = pole.clone().sub(s);
+      bow.addScaledVector(dir, -bow.dot(dir)).normalize();
+      const elbowAt = s.clone().addScaledVector(dir, x).addScaledVector(bow, Math.sqrt(Math.max(0, a * a - x * x)));
+      this.turn(h.upper, s, h.lower.getWorldPosition(new THREE.Vector3()), elbowAt);
+      this.turn(h.lower, elbowAt, h.hand.getWorldPosition(new THREE.Vector3()), s.clone().addScaledVector(dir, d));
+      // Roll the hand so the palm faces the handle.
+      const wrist = h.hand.getWorldPosition(new THREE.Vector3());
+      this.turn(h.hand, wrist, wrist.clone().add(this.facing(h)), wrist.clone().add(up));
+    }
+  }
+
+  /** Swings a bone about the point `from` so the direction towards `was` points towards `want`. */
+  private turn(bone: THREE.Object3D, from: THREE.Vector3, was: THREE.Vector3, want: THREE.Vector3) {
+    const turn = new THREE.Quaternion().setFromUnitVectors(was.clone().sub(from).normalize(), want.clone().sub(from).normalize());
+    const world = bone.getWorldQuaternion(new THREE.Quaternion()).premultiply(turn);
+    bone.quaternion.copy(bone.parent!.getWorldQuaternion(q).invert().multiply(world));
+    bone.updateMatrixWorld(true);
   }
 
   /** Turns the scan's bones to match the game skeleton's current pose. */
