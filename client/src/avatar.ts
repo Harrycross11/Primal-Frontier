@@ -373,7 +373,7 @@ export class Avatar {
       this.root.updateMatrixWorld(true);
       const m = this.muzzle.position;
       // Rifles: as far along the handguard as the arm reaches. Pistols: cupped under the gripping hand.
-      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.15, m.z * 0.15) : new THREE.Vector3(0, -0.07, -0.01);
+      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.1, m.z * 0.1) : new THREE.Vector3(0, -0.07, -0.01);
       const far = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.45, m.z * 0.45) : near.clone();
       const up = new THREE.Vector3(0, 1, 0).transformDirection(gun.matrixWorld);
       const side = Math.sign(this.boneAt.get('shoulderL')!.x);
@@ -476,8 +476,10 @@ export class Avatar {
         b.elbowL.rotation.x = -0.25;
       }
       if (reloading) b.shoulderL.rotation.x += Math.sin(this.time * 14) * 0.15;
-      b.torso.rotation.y += 0.1;
-      b.head.rotation.y -= 0.1;
+      // Bladed to the target for a long gun, which brings the left shoulder forward to the handguard.
+      const twist = this.pose === 'rifle' ? -Math.sign(this.boneAt.get('shoulderL')!.x) * 0.8 : 0.1;
+      b.torso.rotation.y += twist;
+      b.head.rotation.y -= twist;
       this.pointWeapon(pitch + kick * 0.5 - lower * 0.8);
     }
 
