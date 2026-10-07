@@ -34,6 +34,7 @@ const SEED = 1234;
 
 function setup() {
   const game = new Game(SEED);
+  game.wildlife = false;
   const id = game.join('Tester', 0)!.id;
   const player = game.players.get(id)!;
   return { game, id, player };
@@ -79,6 +80,7 @@ test('the map is scarce: few living trees, mostly dead wood and scrap', () => {
 
 test('joining sends a welcome and tells others; the server caps players', () => {
   const game = new Game(SEED);
+  game.wildlife = false;
   const first = game.join('Ash', 0)!;
   assert.equal(first.out[0].msg.t, 'welcome');
   for (let i = 1; i < MAX_PLAYERS; i++) assert.ok(game.join(`P${i}`, 0));
@@ -411,6 +413,7 @@ const FLAT = (() => {
 /** Two players facing each other along x, `gap` metres apart, the shooter holding `item` in slot 2. */
 function duel(item: ItemId, gap = 10) {
   const game = new Game(SEED);
+  game.wildlife = false;
   const a = game.join('Ash', 0)!.id;
   const b = game.join('Bo', 0)!.id;
   standAt(game, a, FLAT.x, FLAT.z);

@@ -85,6 +85,8 @@ export type ItemId =
   | 'mushroom'
   | 'cannedBeans'
   | 'bottledWater'
+  | 'rawMeat'
+  | 'cookedMeat'
   // Armour
   | 'burlapHeadwrap'
   | 'burlapShirt'
@@ -386,6 +388,14 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   mushroom: { name: 'Mushroom', kind: 'food', stack: 20, consume: { food: 10, water: 3 }, description: 'Grows in the shade of ruins. Chewy, but it is food. Left click to eat.' },
   cannedBeans: { name: 'Can of Beans', kind: 'food', stack: 10, consume: { food: 40, water: 5 }, description: 'Still sealed. Found in the glove boxes of old wrecks. Left click to eat.' },
   bottledWater: { name: 'Bottled Water', kind: 'food', stack: 10, consume: { water: 35 }, description: 'Clean water from before the bombs. Found in old wrecks. Left click to drink.' },
+  rawMeat: { name: 'Raw Hound Meat', kind: 'food', stack: 20, consume: { food: 6 }, description: 'Cut from a dead Ashhound. Cook it in a furnace, or eat it raw if you must. Left click to eat.' },
+  cookedMeat: {
+    name: 'Cooked Hound Meat',
+    kind: 'food',
+    stack: 20,
+    consume: { food: 35, water: 2 },
+    description: 'Seared over a furnace. Filling, and a wild Ashhound will take it from your hand: feed one three times to tame it.',
+  },
 };
 
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];

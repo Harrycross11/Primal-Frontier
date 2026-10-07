@@ -45,11 +45,12 @@ export const FURNACE_ORE_SLOTS = [1, 2];
 export const FURNACE_OUTPUT_SLOTS = [3, 4, 5];
 /** Seconds one wood burns for (leaving one charcoal). */
 export const FURNACE_WOOD_SECONDS = 2;
-/** What each ore smelts into, and the seconds one takes. */
+/** What each ore smelts (or raw meat cooks) into, and the seconds one takes. */
 export const SMELTS: Partial<Record<ItemId, { into: ItemId; seconds: number }>> = {
   metalOre: { into: 'metal', seconds: 1 },
   sulfurOre: { into: 'sulfur', seconds: 0.75 },
   hqmOre: { into: 'hqm', seconds: 2 },
+  rawMeat: { into: 'cookedMeat', seconds: 5 },
 };
 /** Loot bags vanish after this long. */
 export const LOOT_BAG_SECONDS = 300;

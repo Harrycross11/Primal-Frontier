@@ -12,7 +12,7 @@ import {
   PLAYER_SPRINT,
   WORKBENCH_RANGE,
 } from '../shared/constants.ts';
-import type { CraftJob, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
+import type { CraftJob, DeathCause, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
 import { cleanLook } from '../shared/look.ts';
 import {
@@ -82,6 +82,8 @@ import {
   type Vec3,
 } from '../shared/combat.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
+import { ASHHOUND, PACK_SIZE, clearOfRuins, packDens, rayCreature, yawTowards } from '../shared/creatures.ts';
+import { blocked, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
 import {
   MAX_FOOD,
   MAX_WATER,
@@ -89,7 +91,6 @@ import {
   SPAWN_WATER,
   radiationAt,
   tickVitals,
-  type SurvivalCause,
   type Vitals,
 } from '../shared/survival.ts';
 
@@ -122,6 +123,8 @@ interface Player extends Omit<PlayerState, 'held' | 'wear'> {
   sentVitals: string;
   /** Health last sent, rounded, for the same reason. */
   sentHp: number;
+  /** Wild hounds leave a survivor alone until this time (ms), just after they wake up. */
+  safeUntil: number;
 }
 
 /** What is kept of a survivor while they are offline, so they come back as they left. */
@@ -157,6 +160,8 @@ export interface WorldSave {
   bags: [number, number][];
   /** Every survivor, online or not, by the private token their browser keeps. */
   survivors: [string, Sleeper][];
+  /** Tame hounds (wild ones are born afresh). */
+  hounds?: SavedHound[];
 }
 
 /** Furnace burn and smelt timers, kept off the shared deployable state. */
@@ -172,6 +177,10 @@ const COLORS = [0xa4553a, 0x3f7f86, 0xb08c3a, 0x6f7f3e, 0x7a4f6e, 0x9a3b34, 0x4f
 const MAX_QUEUE = 20;
 /** How close you must be to open a furnace or box. */
 const CONTAINER_RANGE = 3.5;
+/** Seconds after waking up before wild hounds will go for you. */
+const SAFE_SECONDS = 20;
+/** Seconds a tame hound remembers who just fought its owner. */
+const FEUD_SECONDS = 10;
 
 export class Game {
   readonly seed: number;
@@ -196,6 +205,18 @@ export class Game {
   spawnAt: [number, number] | null = null;
   /** Separate from `rand`, so finding loot never moves spawn points. */
   private lootRand: () => number;
+  readonly hounds = new Map<number, Hound>();
+  private nextHoundId = 1;
+  /** Hounds still to be born into each pack, and when. */
+  private litters: { pack: number; at: number }[] = [];
+  /** Who last hurt each player, and whom each player last hurt, so tame hounds join the fight. */
+  private hurtBy = new Map<number, { prey: Prey; at: number }>();
+  private hurt = new Map<number, { prey: Prey; at: number }>();
+  /** Turned off for tests that need an empty map; the packs are born on the first tick. */
+  wildlife = true;
+  private wildlifeStarted = false;
+  /** Separate again, so the hounds' wandering never changes loot or spawns. */
+  private houndRand: () => number;
 
   /**
    * @param startKit what players spawn with besides the rock and plan: a count of each basic
@@ -209,6 +230,7 @@ export class Game {
     this.resources = generateResources(seed);
     this.rand = mulberry32(seed ^ 0x5bd1e995);
     this.lootRand = mulberry32(seed ^ 0x2545f491);
+    this.houndRand = mulberry32(seed ^ 0x3c6ef372);
   }
 
   /** Adds a player at a random spawn point. Returns null when the server is full. */
@@ -259,6 +281,7 @@ export class Game {
       craftBlocked: false,
       lastMoveAt: now,
       lastGatherAt: 0,
+      safeUntil: now + SAFE_SECONDS * 1000,
     };
     if (back && !back.dead && back.hp > 0) {
       Object.assign(player, { x: back.x, y: back.y, z: back.z, yaw: back.yaw, hp: back.hp, sentHp: back.hp, slots: back.slots, wear: back.wear, vitals: back.vitals });
@@ -277,6 +300,7 @@ export class Game {
             seed: this.seed,
             you: pub,
             players: [...this.players.values()].filter((p) => p.id !== id).map(publicState),
+            creatures: this.creatures(),
             resources: this.resources,
             pieces: [...this.pieces.values()],
             deployables: [...this.deployables.values()],
@@ -591,10 +615,17 @@ export class Game {
     const cone = (w.spread ?? 0) * (aim ? 0.5 : 1) * (p.moving ? 1.6 : 1);
     const ends: Vec3[] = [];
     const damage = new Map<Player, { amount: number; head: boolean; zones: Set<ArmourSlot> }>();
+    const bites = new Map<Hound, { amount: number; head: boolean }>();
     for (let n = 0; n < (w.pellets ?? 1); n++) {
       const pd = spreadDir(d, cone, this.rand);
       const hit = this.trace(p, from, pd, w.range);
       ends.push([from[0] + pd[0] * hit.t, from[1] + pd[1] * hit.t, from[2] + pd[2] * hit.t]);
+      if (hit.hound) {
+        const sum = bites.get(hit.hound) ?? { amount: 0, head: false };
+        sum.amount += w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1);
+        sum.head ||= hit.head;
+        bites.set(hit.hound, sum);
+      }
       if (!hit.player) continue;
       const amount = w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1) * armourFactor(hit.player.wear, hit.zone);
       const sum = damage.get(hit.player) ?? { amount: 0, head: false, zones: new Set() };
@@ -606,6 +637,7 @@ export class Game {
     const out: Outgoing[] = [{ to: 'all', msg: { t: 'shot', by: id, item: stack.item, from, ends } }];
     out.push(...this.wear(p, slot));
     for (const [victim, { amount, head, zones }] of damage) out.push(...this.damage(victim, amount, p, stack.item, head, zones));
+    for (const [hound, { amount, head }] of bites) out.push(...this.hurtHound(hound, amount, { kind: 'player', id: p.id }, now, head));
     out.push(this.inventory(p));
     return out;
   }
@@ -641,6 +673,12 @@ export class Game {
     const from: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
     // A little extra reach, since the client aims from behind the shoulder.
     const hit = this.trace(p, from, normalize(dir), w.range + 0.6);
+    if (hit.hound) {
+      const out = this.wear(p, slot);
+      out.push(...this.hurtHound(hit.hound, w.damage * (hit.head ? 1.5 : 1), { kind: 'player', id: p.id }, now, hit.head));
+      if (stack) out.push(this.inventory(p));
+      return out;
+    }
     if (!hit.player) return [];
     const out = this.wear(p, slot);
     const amount = w.damage * (hit.head ? 1.5 : 1) * armourFactor(hit.player.wear, hit.zone);
@@ -657,6 +695,10 @@ export class Game {
     // Armour in your hands is put on, swapping with whatever was worn there.
     const armour = stack ? ITEMS[stack.item].armour : undefined;
     if (armour) return this.moveItem(id, { c: 'me', i: slot }, { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) });
+    if (stack?.item === 'cookedMeat') {
+      const fed = this.feed(p, slot, now);
+      if (fed) return fed;
+    }
     const consume = stack ? ITEMS[stack.item].consume : undefined;
     if (stack && consume) return this.consume(p, slot, consume, now);
     const heal = stack ? ITEMS[stack.item].heal : undefined;
@@ -731,6 +773,7 @@ export class Game {
     p.wear = emptySlots(ARMOUR_SLOTS.length);
     p.active = 0;
     p.reloadUntil = 0;
+    p.safeUntil = Math.max(0, this.lastTick) + SAFE_SECONDS * 1000;
     return [
       { to: id, msg: { t: 'correct', x: p.x, y: p.y, z: p.z } },
       { to: id, msg: { t: 'health', hp: p.hp } },
@@ -742,7 +785,7 @@ export class Game {
    * Follows a ray until it hits a player, or is stopped by a building piece, a deployable or
    * the ground. Returns how far it went.
    */
-  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; head: boolean; zone: ArmourSlot } {
+  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; hound?: Hound; head: boolean; zone: ArmourSlot } {
     let t = range;
     for (const piece of this.pieces.values()) {
       for (const b of pieceBoxes(piece)) {
@@ -756,11 +799,16 @@ export class Game {
     }
     const ground = rayTerrain(this.seed, o, d, t);
     if (ground !== null) t = ground;
-    let best: { t: number; player?: Player; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
+    let best: { t: number; player?: Player; hound?: Hound; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
     for (const other of this.players.values()) {
       if (other === shooter || other.dead) continue;
       const hit = rayPlayer(o, d, other, best.t);
       if (hit) best = { t: hit.t, player: other, head: hit.head, zone: hit.zone };
+    }
+    for (const h of this.hounds.values()) {
+      if (h.deadAt) continue;
+      const hit = rayCreature(o, d, h, best.t);
+      if (hit) best = { t: hit.t, hound: h, head: hit.head, zone: 'chest' };
     }
     return best;
   }
@@ -777,6 +825,9 @@ export class Game {
 
   /** Applies damage (already reduced by armour) and wears down the armour on each part hit. */
   private damage(victim: Player, amount: number, by: Player, item: ItemId | null, head: boolean, zones: Set<ArmourSlot>): Outgoing[] {
+    const now = Math.max(0, this.lastTick);
+    this.hurtBy.set(victim.id, { prey: { kind: 'player', id: by.id }, at: now });
+    this.hurt.set(by.id, { prey: { kind: 'player', id: victim.id }, at: now });
     victim.hp = Math.max(0, victim.hp - amount);
     victim.sentHp = Math.round(victim.hp);
     const kill = victim.hp <= 0;
@@ -807,7 +858,8 @@ export class Game {
   }
 
   /** Drops everything the victim carried (and their crafting refunds) into a loot bag. */
-  private kill(victim: Player, by: Player | null, item: ItemId | null, head = false, cause?: SurvivalCause): Outgoing[] {
+  /** `killer` names who did it when it was not a player (somebody's tame hound). */
+  private kill(victim: Player, by: Player | null, item: ItemId | null, head = false, cause?: DeathCause, killer?: string): Outgoing[] {
     for (const job of victim.queue) {
       for (const [ingredient, n] of Object.entries(recipeFor(job.item)!.cost)) addItem(victim.slots, ingredient as ItemId, n!);
     }
@@ -829,10 +881,10 @@ export class Game {
     victim.slots = emptySlots(INVENTORY_SIZE);
     victim.wear = emptySlots(ARMOUR_SLOTS.length);
     out.push(
-      { to: victim.id, msg: { t: 'died', by: by?.name ?? null, item, ...(cause && { cause }) } },
+      { to: victim.id, msg: { t: 'died', by: by?.name ?? killer ?? null, item, ...(cause && { cause }) } },
       this.inventory(victim),
       this.crafting(victim),
-      { to: 'all', msg: { t: 'kill', killer: by?.name ?? null, victim: victim.name, item: by ? item : null, head, ...(cause && { cause }) } },
+      { to: 'all', msg: { t: 'kill', killer: by?.name ?? killer ?? null, victim: victim.name, item: by ? item : null, head, ...(cause && { cause }) } },
     );
     return out;
   }
@@ -874,6 +926,9 @@ export class Game {
       furnaces: [...this.furnaces],
       bags: [...this.bagExpiry],
       survivors: [...survivors],
+      hounds: [...this.hounds.values()]
+        .filter((h) => h.owner !== null && !h.deadAt)
+        .map((h) => ({ x: h.x, y: h.y, z: h.z, yaw: h.yaw, hp: h.hp, owner: h.owner!, name: h.name ?? 'Ashhound' })),
     });
   }
 
@@ -892,6 +947,11 @@ export class Game {
     game.furnaces = new Map(save.furnaces);
     game.bagExpiry = new Map(save.bags);
     game.sleepers = new Map(save.survivors);
+    for (const saved of save.hounds ?? []) {
+      const h = newHound(game.nextHoundId++, -1, saved.x, saved.z, game.seed, saved.yaw);
+      Object.assign(h, { hp: saved.hp, owner: saved.owner, name: saved.name });
+      game.hounds.set(h.id, h);
+    }
     return game;
   }
 
@@ -913,8 +973,9 @@ export class Game {
       if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
       else out.push(...this.removeDeployable(bag));
     }
+    out.push(...this.tickWildlife(now, dt));
     if (this.players.size > 0) {
-      out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState) } });
+      out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState), creatures: this.creatures() } });
     }
     return out;
   }
@@ -977,6 +1038,307 @@ export class Game {
       }
     });
     return changed;
+  }
+
+  /** Every hound alive or lying dead, as everyone is told about them. */
+  private creatures() {
+    return [...this.hounds.values()].map(houndState);
+  }
+
+  /** The hounds a survivor has tamed and still has. */
+  private pets(owner: number): Hound[] {
+    return [...this.hounds.values()].filter((h) => h.owner === owner && !h.deadAt);
+  }
+
+  /**
+   * Holding out cooked meat to a hound within reach: a wild one takes it and calms down
+   * towards you, and is yours after enough of it; your own one is healed by it. Returns
+   * null when no hound is near (or yours is already healthy), so you eat it yourself.
+   */
+  private feed(p: Player, slot: number, now: number): Outgoing[] | null {
+    let best: Hound | null = null;
+    let bestD: number = ASHHOUND.feedRange;
+    for (const h of this.hounds.values()) {
+      if (h.deadAt || (h.owner !== null && h.owner !== p.id) || Math.abs(h.y - p.y) > 1.5) continue;
+      const d = Math.hypot(h.x - p.x, h.z - p.z);
+      if (d < bestD) [best, bestD] = [h, d];
+    }
+    if (!best) return null;
+    const h = best;
+    // Busy biting or eating: it takes the meat once it is done.
+    if (now < h.animUntil) return [];
+    if (h.owner === p.id && h.hp >= ASHHOUND.maxHp - 1) return null;
+    const stack = p.slots[slot]!;
+    if (h.owner === null && this.pets(p.id).length >= ASHHOUND.maxPets) {
+      return [notice(p.id, `You can only keep ${ASHHOUND.maxPets} hounds at a time`)];
+    }
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    h.anim = 'eat';
+    h.animUntil = now + 1800;
+    turnTo(h, yawTowards(h.x, h.z, p.x, p.z), 10);
+    const out: Outgoing[] = [this.inventory(p)];
+    if (h.owner === p.id) {
+      h.hp = Math.min(ASHHOUND.maxHp, h.hp + 45);
+      out.push(notice(p.id, 'Your hound wolfs down the meat'));
+      return out;
+    }
+    if (h.fedBy !== p.id) h.fed = 0;
+    h.fedBy = p.id;
+    h.fed += 1;
+    h.calmUntil = now + ASHHOUND.calm * 1000;
+    if (h.target?.kind === 'player' && h.target.id === p.id) h.target = null;
+    if (h.fed < ASHHOUND.tameFeeds) {
+      out.push(notice(p.id, `The Ashhound snatches the meat (${h.fed}/${ASHHOUND.tameFeeds}). Feed it again to tame it`));
+      return out;
+    }
+    // Tamed: it leaves its pack, which in time raises another pup to fill the gap.
+    this.litters.push({ pack: h.pack, at: now + ASHHOUND.respawn * 1000 });
+    Object.assign(h, { owner: p.id, name: `${p.name}'s Ashhound`, pack: -1, target: null, hp: ASHHOUND.maxHp, fed: 0, fedBy: null, fleeUntil: 0 });
+    out.push(notice(p.id, 'The Ashhound is yours. It follows you and fights for you'));
+    return out;
+  }
+
+  /** A shot, swing or bite landing on a hound. */
+  private hurtHound(h: Hound, amount: number, by: Prey, now: number, head = false): Outgoing[] {
+    if (h.deadAt) return [];
+    h.hp = Math.max(0, h.hp - amount);
+    const shooter = by.kind === 'player' ? this.players.get(by.id) : undefined;
+    const out: Outgoing[] = [];
+    if (shooter) {
+      this.hurt.set(shooter.id, { prey: { kind: 'hound', id: h.id }, at: now });
+      out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0 } });
+    }
+    if (h.hp <= 0) return [...out, ...this.houndDies(h, now)];
+    if (now >= h.animUntil || h.anim !== 'attack') {
+      h.anim = 'hit';
+      h.animUntil = now + 350;
+    }
+    // Hurt, it turns on whoever did it, unless that is its own master.
+    const own = by.kind === 'player' && by.id === h.owner;
+    if (!own && !(by.kind === 'hound' && by.id === h.id)) {
+      h.target = by;
+      h.calmUntil = 0;
+      if (h.owner === null) this.alertPack(h, by);
+    }
+    if (h.owner === null && h.hp < ASHHOUND.maxHp * ASHHOUND.flee && h.fleeUntil < now - 20000) {
+      const from = this.preyAt(by);
+      h.fleeFrom = from ? [from.x, from.z] : [h.x, h.z];
+      h.fleeUntil = now + 5000;
+    }
+    return out;
+  }
+
+  /** A dead hound leaves its meat in a bag, and its pack raises another in time. */
+  private houndDies(h: Hound, now: number): Outgoing[] {
+    h.deadAt = now;
+    h.anim = 'dead';
+    h.target = null;
+    const out: Outgoing[] = [];
+    if (h.owner === null) this.litters.push({ pack: h.pack, at: now + ASHHOUND.respawn * 1000 });
+    else if (this.players.has(h.owner)) out.push(notice(h.owner, 'Your Ashhound was killed'));
+    const [lo, hi] = ASHHOUND.meat;
+    const bag = newDeployable(this.nextDeployableId++, 'lootBag', h.x, h.y, h.z, h.yaw, 0);
+    bag.slots = emptySlots(6);
+    addItem(bag.slots, 'rawMeat', lo + Math.floor(this.houndRand() * (hi - lo + 1)));
+    bag.label = 'Ashhound';
+    this.deployables.set(bag.id, bag);
+    this.bagExpiry.set(bag.id, LOOT_BAG_SECONDS);
+    out.push({ to: 'all', msg: { t: 'deployable', id: bag.id, d: bag, by: 0 } });
+    return out;
+  }
+
+  /** The rest of a wild pack nearby joins a fight one of them is in. */
+  private alertPack(h: Hound, prey: Prey) {
+    for (const o of this.hounds.values()) {
+      if (o !== h && o.pack === h.pack && o.owner === null && !o.deadAt && !o.target && Math.hypot(o.x - h.x, o.z - h.z) < 25) o.target = prey;
+    }
+  }
+
+  /** Where someone a hound is after is, if they are still there to be chased. */
+  private preyAt(prey: Prey): { x: number; y: number; z: number } | null {
+    if (prey.kind === 'player') {
+      const p = this.players.get(prey.id);
+      return p && !p.dead ? p : null;
+    }
+    const h = this.hounds.get(prey.id);
+    return h && !h.deadAt ? h : null;
+  }
+
+  /** The packs are born on the first tick, each round its den. */
+  private startWildlife(now: number) {
+    this.wildlifeStarted = true;
+    packDens(this.seed).forEach((_, pack) => {
+      for (let n = 0; n < PACK_SIZE; n++) this.litters.push({ pack, at: now });
+    });
+  }
+
+  private tickWildlife(now: number, dt: number): Outgoing[] {
+    if (!this.wildlife) return [];
+    if (!this.wildlifeStarted) this.startWildlife(now);
+    const dens = packDens(this.seed);
+    this.litters = this.litters.filter((l) => {
+      if (l.at > now) return true;
+      const [dx, dz] = dens[l.pack];
+      const a = this.houndRand() * Math.PI * 2;
+      const r = 1 + this.houndRand() * 5;
+      const h = newHound(this.nextHoundId++, l.pack, dx + Math.cos(a) * r, dz + Math.sin(a) * r, this.seed, this.houndRand() * Math.PI * 2);
+      this.hounds.set(h.id, h);
+      return false;
+    });
+    if (dt <= 0) return [];
+    const out: Outgoing[] = [];
+    for (const h of this.hounds.values()) {
+      if (h.deadAt) {
+        if (now - h.deadAt > ASHHOUND.corpse * 1000) this.hounds.delete(h.id);
+        continue;
+      }
+      out.push(...(h.owner === null ? this.tickWild(h, dens[h.pack], now, dt) : this.tickTame(h, now, dt)));
+    }
+    spread([...this.hounds.values()]);
+    for (const h of this.hounds.values()) if (!h.deadAt) h.y = terrainHeight(this.seed, h.x, h.z);
+    return out;
+  }
+
+  private tickWild(h: Hound, den: [number, number], now: number, dt: number): Outgoing[] {
+    if (h.fed > 0 && now > h.calmUntil + 30000) [h.fed, h.fedBy] = [0, null];
+    if (now < h.fleeUntil && h.fleeFrom) {
+      const [fx, fz] = h.fleeFrom;
+      const away = Math.hypot(h.x - fx, h.z - fz) || 1;
+      this.go(h, h.x + ((h.x - fx) / away) * 10, h.z + ((h.z - fz) / away) * 10, ASHHOUND.run, now, dt, 0);
+      return [];
+    }
+    // Let go of someone who got away, died, or has been feeding it meat.
+    const at = h.target && this.preyAt(h.target);
+    const calm = (prey: Prey) => prey.kind === 'player' && prey.id === h.fedBy && now < h.calmUntil;
+    if (h.target && (!at || Math.hypot(at.x - den[0], at.z - den[1]) > ASHHOUND.leash || Math.hypot(at.x - h.x, at.z - h.z) > ASHHOUND.sight * 2 || calm(h.target))) {
+      h.target = null;
+    }
+    if (!h.target) {
+      // The nearest survivor close enough to notice (and not just woken up). Tame hounds are
+      // left alone unless they start a fight.
+      let best: Prey | null = null;
+      let bestD: number = ASHHOUND.sight;
+      for (const p of this.players.values()) {
+        if (p.dead || now < p.safeUntil || calm({ kind: 'player', id: p.id })) continue;
+        const d = Math.hypot(p.x - h.x, p.z - h.z);
+        if (d < bestD && Math.hypot(p.x - den[0], p.z - den[1]) < ASHHOUND.leash) [best, bestD] = [{ kind: 'player', id: p.id }, d];
+      }
+      if (best) {
+        h.target = best;
+        this.alertPack(h, best);
+      }
+    }
+    if (h.target) return this.hunt(h, now, dt);
+    if (h.hp < ASHHOUND.maxHp) h.hp = Math.min(ASHHOUND.maxHp, h.hp + dt);
+    // Nothing to chase: amble about near the den, resting between walks.
+    if (now < h.restUntil) {
+      this.go(h, h.x, h.z, 0, now, dt, 0);
+      return [];
+    }
+    if (!h.wanderTo) {
+      const a = this.houndRand() * Math.PI * 2;
+      const r = 2 + this.houndRand() * 10;
+      const to: [number, number] = [den[0] + Math.cos(a) * r, den[1] + Math.sin(a) * r];
+      if (!clearOfRuins(this.seed, to[0], to[1])) {
+        h.restUntil = now + 1000;
+        return [];
+      }
+      h.wanderTo = to;
+    }
+    const [wx, wz] = h.wanderTo;
+    this.go(h, wx, wz, ASHHOUND.walk, now, dt, 0);
+    // There, or stuck against something: rest a while, then pick somewhere else.
+    if (Math.hypot(wx - h.x, wz - h.z) < 0.5 || h.anim === 'idle') {
+      h.wanderTo = null;
+      h.restUntil = now + 3000 + this.houndRand() * 7000;
+    }
+    return [];
+  }
+
+  /** A tame hound keeps near its owner and goes for anyone fighting them. */
+  private tickTame(h: Hound, now: number, dt: number): Outgoing[] {
+    const owner = this.players.get(h.owner!);
+    if (h.hp < ASHHOUND.maxHp) h.hp = Math.min(ASHHOUND.maxHp, h.hp + dt * 0.5);
+    if (!owner || owner.dead) {
+      h.target = null;
+      this.go(h, h.x, h.z, 0, now, dt, 0);
+      return [];
+    }
+    const at = h.target && this.preyAt(h.target);
+    if (h.target && (!at || Math.hypot(at.x - owner.x, at.z - owner.z) > 30)) h.target = null;
+    if (!h.target) {
+      for (const feud of [this.hurtBy.get(owner.id), this.hurt.get(owner.id)]) {
+        if (!feud || now - feud.at > FEUD_SECONDS * 1000) continue;
+        const prey = feud.prey;
+        const mine = prey.kind === 'hound' ? this.hounds.get(prey.id)?.owner === owner.id : prey.id === owner.id;
+        if (!mine && this.preyAt(prey)) h.target = prey;
+      }
+    }
+    if (!h.target) {
+      // Wild hounds that come for its owner.
+      for (const o of this.hounds.values()) {
+        if (o.owner === null && !o.deadAt && o.target?.kind === 'player' && o.target.id === owner.id && Math.hypot(o.x - h.x, o.z - h.z) < ASHHOUND.sight) {
+          h.target = { kind: 'hound', id: o.id };
+        }
+      }
+    }
+    if (h.target) return this.hunt(h, now, dt);
+    const d = Math.hypot(owner.x - h.x, owner.z - h.z);
+    if (d > 40) {
+      // Left far behind: it catches up the way a dog finds its way home.
+      const a = this.houndRand() * Math.PI * 2;
+      h.x = owner.x + Math.cos(a) * 3;
+      h.z = owner.z + Math.sin(a) * 3;
+      h.y = terrainHeight(this.seed, h.x, h.z);
+      if (blocked(this.pieces.values(), h.x, h.y, h.z)) [h.x, h.y, h.z] = [owner.x, owner.y, owner.z];
+    }
+    this.go(h, owner.x, owner.z, d > 7 ? ASHHOUND.run : d > 3 ? ASHHOUND.walk * 2 : 0, now, dt, 2.2);
+    return [];
+  }
+
+  /** Runs at its target and bites when close. */
+  private hunt(h: Hound, now: number, dt: number): Outgoing[] {
+    const at = this.preyAt(h.target!)!;
+    const d = Math.hypot(at.x - h.x, at.z - h.z);
+    if (d > ASHHOUND.biteRange || Math.abs(at.y - h.y) > 1.3) {
+      this.go(h, at.x, at.z, ASHHOUND.run, now, dt, ASHHOUND.biteRange * 0.7);
+      return [];
+    }
+    turnTo(h, yawTowards(h.x, h.z, at.x, at.z), dt);
+    if (now < h.nextBiteAt) {
+      this.go(h, h.x, h.z, 0, now, dt, 0);
+      if (h.anim === 'idle') h.anim = 'snarl';
+      return [];
+    }
+    h.nextBiteAt = now + ASHHOUND.biteEvery * 1000;
+    h.anim = 'attack';
+    h.animUntil = now + 900;
+    const by: Prey = { kind: 'hound', id: h.id };
+    if (h.target!.kind === 'hound') return this.hurtHound(this.hounds.get(h.target!.id)!, ASHHOUND.bite, by, now);
+    return this.bite(this.players.get(h.target!.id)!, h, now);
+  }
+
+  /** A hound's bite on a survivor: mostly the legs, through whatever armour is there. */
+  private bite(p: Player, h: Hound, now: number): Outgoing[] {
+    const zone: ArmourSlot = this.houndRand() < 0.6 ? 'legs' : 'chest';
+    p.hp = Math.max(0, p.hp - ASHHOUND.bite * armourFactor(p.wear, zone));
+    p.sentHp = Math.round(p.hp);
+    if (h.owner !== null) this.hurt.set(h.owner, { prey: { kind: 'player', id: p.id }, at: now });
+    this.hurtBy.set(p.id, { prey: { kind: 'hound', id: h.id }, at: now });
+    const armour = !!p.wear[ARMOUR_SLOTS.indexOf(zone)];
+    const out: Outgoing[] = [{ to: p.id, msg: { t: 'health', hp: p.sentHp, from: [h.x, h.y + 0.6, h.z], armour } }];
+    if (p.hp <= 0) return [...out, ...this.kill(p, null, null, false, h.owner === null ? 'ashhound' : undefined, h.name ?? undefined)];
+    if (armour) out.push(...this.wearArmour(p, new Set([zone])));
+    return out;
+  }
+
+  /** Steps towards a spot (or stands, at speed 0) and picks the animation to match. */
+  private go(h: Hound, tx: number, tz: number, speed: number, now: number, dt: number, stop: number) {
+    // Busy biting, flinching or eating: it stands where it is until done.
+    const busy = now < h.animUntil;
+    const moved = speed > 0 && !busy ? steer(h, tx, tz, speed, dt, stop, this.seed, this.pieces) : 0;
+    if (!busy) h.anim = moved / dt > 3.5 ? 'run' : moved / dt > 0.2 ? 'walk' : 'idle';
   }
 
   /** Removes a deployable from the world, telling everyone. */

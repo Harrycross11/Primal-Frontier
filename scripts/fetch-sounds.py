@@ -4,7 +4,8 @@ Every sound comes from Freesound under CC0 (public domain); each is credited in 
 anyway. Each recording is cut down to the one shot, swing or hit the game needs: the cut
 starts on the first sharp attack after the given time, fades out at the end, and is
 normalised. The output is committed, so this only needs running again to change a sound.
-Needs ffmpeg, numpy and network access to freesound.org.
+Needs ffmpeg, numpy and network access to freesound.org (and opengameart.org, plus py7zr for its
+archives, for the animal sounds).
 
     python3 scripts/fetch-sounds.py                 # every sound
     python3 scripts/fetch-sounds.py shot-l96        # just these
@@ -94,6 +95,20 @@ SOUNDS = {
 }
 
 
+# Animal sounds from OpenGameArt, all CC0: our name: (file, the recording inside it if it is an
+# archive, seconds in, seconds to keep, credit).
+QUBODUP = 'qubodup (https://opengameart.org/content/dog-snarl-grunt-grumble)'
+OGA_SOUNDS = {
+    'hound-growl': ('dog_0.7z', 'dog/dog-growl.flac', 0.0, 0.58, f'"Dog Snarl Grunt Grumble" by {QUBODUP}'),
+    'hound-growl2': ('dog-growl.ogg', None, 0.0, 0.6, '"Dog Growl" by bonebrah (https://opengameart.org/content/dog-growl)'),
+    'hound-grumble': ('dog_0.7z', 'dog/dog-grumble.flac', 0.0, 0.6, f'"Dog Snarl Grunt Grumble" by {QUBODUP}'),
+    'hound-snarl': ('dog_0.7z', 'dog/dog-snarl.flac', 0.0, 0.7, f'"Dog Snarl Grunt Grumble" by {QUBODUP}'),
+    'hound-bark': ('dog.7z', 'Dog/Dog Bark.wav', 0.0, 0.39, '"Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds)'),
+    'hound-hurt': ('dog-frieda-grunt-96khz-01.flac', None, 0.0, 0.58, '"Dog Grunt" by qubodup (https://opengameart.org/content/dog-grunt)'),
+    'hound-whine': ('dog.7z', 'Dog/Sad Dog.wav', 0.0, 1.6, '"Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds)'),
+}
+
+
 def get(url: str) -> bytes:
     req = urllib.request.Request(url, headers={'User-Agent': 'primal-frontier-fetch'})
     with urllib.request.urlopen(req) as r:
@@ -126,31 +141,65 @@ def credit(name: str, preview: str) -> str:
     return f'- {name}.mp3: {what} ({page.url}), CC0'
 
 
+def old_credits() -> dict[str, str]:
+    """The credit lines already written, by sound name, so a partial run keeps the others."""
+    try:
+        with open(os.path.join(OUT, 'CREDITS.md')) as f:
+            return {m[1]: m[0] for m in re.finditer(r'^- ([\w-]+)\.mp3: .*$', f.read(), re.M)}
+    except FileNotFoundError:
+        return {}
+
+
+def save(y: np.ndarray, name: str, tmp: str):
+    wav = os.path.join(tmp, 'cut.f32')
+    y.astype(np.float32).tofile(wav)
+    subprocess.run(
+        ['ffmpeg', '-v', 'quiet', '-y', '-f', 'f32le', '-ar', str(RATE), '-ac', '1', '-i', wav, '-b:a', '80k', os.path.join(OUT, f'{name}.mp3')],
+        check=True,
+    )
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     only = sys.argv[1:]
+    old = old_credits()
     credits = []
     for name, (preview, start, length) in SOUNDS.items():
-        credits.append(credit(name, preview))
         if only and name not in only:
+            credits.append(old.get(name) or credit(name, preview))
             continue
+        credits.append(credit(name, preview))
         sid = int(preview.split('_')[0])
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, 'src.mp3')
             with open(src, 'wb') as f:
                 f.write(get(f'https://cdn.freesound.org/previews/{sid // 1000}/{preview}-hq.mp3'))
-            y = cut(src, start, length)
-            wav = os.path.join(tmp, 'cut.f32')
-            y.astype(np.float32).tofile(wav)
-            subprocess.run(
-                ['ffmpeg', '-v', 'quiet', '-y', '-f', 'f32le', '-ar', str(RATE), '-ac', '1', '-i', wav, '-b:a', '80k', os.path.join(OUT, f'{name}.mp3')],
-                check=True,
-            )
+            save(cut(src, start, length), name, tmp)
+        print('saved', name, f'{length:.2f}s')
+    for name, (file, member, start, length, by) in OGA_SOUNDS.items():
+        credits.append(f'- {name}.mp3: {by}, CC0')
+        if only and name not in only:
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, file)
+            with open(src, 'wb') as f:
+                f.write(get(f'https://opengameart.org/sites/default/files/{file}'))
+            if member:
+                import py7zr
+
+                with py7zr.SevenZipFile(src) as archive:
+                    archive.extract(tmp, [member])
+                src = os.path.join(tmp, member)
+            save(cut(src, start, length), name, tmp)
         print('saved', name, f'{length:.2f}s')
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
-        f.write('# Sounds\n\nRecordings from Freesound, all CC0 (public domain), cut to one shot, swing or hit.\n\n' + '\n'.join(credits) + '\n')
+        f.write(
+            '# Sounds\n\nRecordings from Freesound and OpenGameArt, all CC0 (public domain), cut to one shot, swing, hit or call.\n\n'
+            + '\n'.join(credits)
+            + '\n'
+        )
     with open(os.path.join(OUT, 'index.json'), 'w') as f:
-        json.dump(sorted(SOUNDS), f)
+        json.dump(sorted([*SOUNDS, *OGA_SOUNDS]), f)
 
 
 if __name__ == '__main__':

@@ -629,7 +629,7 @@ export class Avatar {
   }
 }
 
-function nameTag(text: string, color: number): THREE.Sprite {
+export function nameTag(text: string, color: number): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 64;

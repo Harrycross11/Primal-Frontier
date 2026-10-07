@@ -431,6 +431,8 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'bottledWater':
     case 'antiRadPills':
     case 'mushroom':
+    case 'rawMeat':
+    case 'cookedMeat':
       // Held upright in the palm.
       return buildOtherWeapon(item)?.rotateX(-Math.PI / 2).translateY(-0.03) ?? null;
     case 'buildingPlan': {

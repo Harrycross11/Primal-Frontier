@@ -194,9 +194,9 @@ export class InventoryUi {
       const ore = FURNACE_ORE_SLOTS.reduce((n, i) => n + (d.slots[i]?.count ?? 0), 0);
       $('furnace-status').textContent = d.on
         ? ore > 0
-          ? `Smelting: ${ore} ore left, ${fuel} wood left`
+          ? `Smelting and cooking: ${ore} left, ${fuel} wood left`
           : `Burning wood into charcoal (${fuel} wood left)`
-        : 'Add wood as fuel and metal, sulfur or high quality ore, then light it.';
+        : 'Add wood as fuel and metal, sulfur or high quality ore (or raw meat to cook), then light it.';
     }
   }
 

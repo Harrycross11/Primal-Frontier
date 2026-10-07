@@ -448,6 +448,32 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       part(g, new THREE.CylinderGeometry(0.027, 0.027, 0.018, 18), mat('pill-cap', () => new THREE.MeshStandardMaterial({ color: 0xece8e0, roughness: 0.6 })), 0, 0.084, 0);
       return g;
     }
+    case 'rawMeat':
+    case 'cookedMeat': {
+      // A hunk of hound haunch on the bone: raw and glistening, or seared dark at the edges.
+      const raw = item === 'rawMeat';
+      const flesh = mat(raw ? 'meat-raw' : 'meat-cooked', () =>
+        raw ? new THREE.MeshStandardMaterial({ color: 0x9a2e2a, roughness: 0.35 }) : new THREE.MeshStandardMaterial({ color: 0x5a3220, roughness: 0.8 }),
+      );
+      const fat = mat(raw ? 'meat-fat' : 'meat-char', () =>
+        raw ? new THREE.MeshStandardMaterial({ color: 0xe0c8b0, roughness: 0.6 }) : new THREE.MeshStandardMaterial({ color: 0x2a1810, roughness: 0.95 }),
+      );
+      const lump = new THREE.SphereGeometry(0.05, 14, 10);
+      // Pull the sphere into an uneven slab, fuller at one end.
+      const pos = lump.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        pos.setXYZ(i, x * 1.5 * (1 + x * 3), pos.getY(i) * 0.55 + Math.sin(x * 60) * 0.003, pos.getZ(i) * (1.05 - x * 2));
+      }
+      lump.computeVertexNormals();
+      part(g, lump, flesh, 0, 0.028, 0);
+      part(g, new THREE.TorusGeometry(0.03, 0.006, 5, 14, Math.PI).rotateX(Math.PI / 2).scale(1.6, 1, 1), fat, 0.02, 0.04, 0);
+      const bone = mat('meat-bone', () => new THREE.MeshStandardMaterial({ color: 0xe8dfcc, roughness: 0.7 }));
+      part(g, new THREE.CylinderGeometry(0.008, 0.009, 0.08, 8).rotateZ(Math.PI / 2), bone, -0.1, 0.028, 0);
+      part(g, new THREE.SphereGeometry(0.014, 8, 6), bone, -0.14, 0.028, 0.006);
+      part(g, new THREE.SphereGeometry(0.013, 8, 6), bone, -0.14, 0.028, -0.008);
+      return g;
+    }
     case 'mushroom': {
       const stem = mat('shroom-stem', () => new THREE.MeshStandardMaterial({ color: 0xd8cdb4, roughness: 0.9 }));
       const cap = mat('shroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));

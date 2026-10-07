@@ -63,6 +63,8 @@ SCANS = {
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
 CHARACTERS = {
     'survivor': 'f56ffc64d18c40cf95d17559542ca44c',
+    # A spotted hyena, re-coloured in the game into the ash-grey Ashhound.
+    'ashhound': '134831b49ca54a1ab8f5bf28441fc2fc',
 }
 
 # Game-ready Sketchfab models for held weapons and tools: kept as modelled, with their textures

@@ -3,6 +3,7 @@
 
 import type { Piece, PieceKind, WallEdit } from './building.ts';
 import type { Vec3 } from './combat.ts';
+import type { CreatureState } from './creatures.ts';
 import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
@@ -33,6 +34,9 @@ export interface SlotRef {
   c: 'me' | 'wear' | number;
   i: number;
 }
+
+/** What killed someone when no player did: hunger, thirst, radiation or a wild Ashhound. */
+export type DeathCause = SurvivalCause | 'ashhound';
 
 export interface CraftJob {
   item: ItemId;
@@ -73,6 +77,7 @@ export type ServerMessage =
       seed: number;
       you: PlayerState;
       players: PlayerState[];
+      creatures: CreatureState[];
       resources: ResourceNode[];
       pieces: Piece[];
       deployables: Deployable[];
@@ -81,7 +86,7 @@ export type ServerMessage =
       hp: number;
       vitals: Vitals;
     }
-  | { t: 'state'; players: PlayerState[] }
+  | { t: 'state'; players: PlayerState[]; creatures: CreatureState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }
   /** A node's amount changed: `by` gathered from it, or it grew back (no `by`). */
@@ -98,7 +103,7 @@ export type ServerMessage =
   | { t: 'correct'; x: number; y: number; z: number }
   | { t: 'notice'; text: string }
   /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
-  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: SurvivalCause }
+  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause }
   /** Your hunger, thirst and radiation poisoning, and the radiation per second where you stand (after protection). */
   | { t: 'vitals'; food: number; water: number; rads: number; level: number }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
@@ -108,5 +113,5 @@ export type ServerMessage =
   /** Your health changed; `from` is where the damage came from, if anywhere, and `armour` if your armour took some of it. */
   | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
-  | { t: 'died'; by: string | null; item: ItemId | null; cause?: SurvivalCause }
+  | { t: 'died'; by: string | null; item: ItemId | null; cause?: DeathCause }
   | { t: 'full' };

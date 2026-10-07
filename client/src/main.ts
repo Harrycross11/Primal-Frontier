@@ -16,6 +16,7 @@ import {
 } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
+import { ASHHOUND } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
@@ -23,6 +24,7 @@ import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../.
 import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
+import { Creatures } from './creatures.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
 import { LookPicker } from './lookPicker.ts';
@@ -65,8 +67,8 @@ const RESOURCE_SURFACE: Record<ResourceNode['kind'], Surface> = {
   mushroom: 'hemp',
   waterBarrel: 'dirt',
 };
-const SURVIVAL_DEATHS = { starvation: 'You starved to death.', thirst: 'You died of thirst.', radiation: 'Radiation poisoning killed you.' } as const;
-const SURVIVAL_FEED = { starvation: 'starved', thirst: 'died of thirst', radiation: 'died of radiation poisoning' } as const;
+const SURVIVAL_DEATHS = { starvation: 'You starved to death.', thirst: 'You died of thirst.', radiation: 'Radiation poisoning killed you.', ashhound: 'An Ashhound pack tore you apart.' } as const;
+const SURVIVAL_FEED = { starvation: 'starved', thirst: 'died of thirst', radiation: 'died of radiation poisoning', ashhound: 'was killed by Ashhounds' } as const;
 
 interface Remote {
   state: PlayerState;
@@ -129,6 +131,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const effects = new Effects(world.scene);
   effects.listener = camera;
   effects.startAmbience();
+  const creatures = new Creatures(world.scene, effects);
+  creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
@@ -217,6 +221,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           r.state = p;
           r.target.set(p.x, p.y, p.z);
         }
+        creatures.sync(m.creatures);
         break;
       case 'joined':
         addRemote(m.player);
@@ -496,6 +501,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, t);
       if (hit) t = hit.t;
     }
+    const hound = creatures.ray([o.x, o.y, o.z], [d.x, d.y, d.z], t);
+    if (hound) t = hound.t;
     return o.clone().addScaledVector(d, t);
   }
 
@@ -567,6 +574,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aimDeployable: Deployable | null = null;
   /** The survivor under the crosshair within a few metres, for melee. */
   let aimPlayer: Remote | null = null;
+  /** Likewise an Ashhound, for melee and feeding. */
+  let aimHound: ReturnType<Creatures['ray']> = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
   let proposal: Piece | null = null;
 
@@ -608,11 +617,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         aimDeployable = null;
       }
     }
+    aimHound = creatures.ray([o.x, o.y, o.z], [d.x, d.y, d.z], best);
+    if (aimHound) {
+      aimPlayer = null;
+      aimResource = null;
+      aimDeployable = null;
+    }
   }
 
   function isVisible(o: THREE.Object3D): boolean {
     for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
     return true;
+  }
+
+  function houndInReach(at: THREE.Vector3) {
+    return Math.hypot(at.x - controller.position.x, at.z - controller.position.z) < ASHHOUND.feedRange;
   }
 
   function resourceInRange(node: ResourceNode) {
@@ -631,10 +650,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       net.send({ t: 'use', slot: ui.active });
       me.swing();
       const c = ITEMS[item].consume;
+      // Held out to a hound rather than eaten.
+      if (item === 'cookedMeat' && aimHound && houndInReach(aimHound.view.root.position)) return;
       if (c) effects.consumeSound(c.rads ? 'pills' : c.food ? 'eat' : 'drink', null);
       return;
     }
-    if (aimPlayer && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
+    if ((aimPlayer || aimHound) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
       if (!proposal) return;
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
@@ -769,6 +790,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
     if (aimPlayer) return { text: aimPlayer.state.name };
+    if (aimHound) {
+      const s = aimHound.view.state;
+      const text = creatures.describe(aimHound.view, welcome.id, item, houndInReach(aimHound.view.root.position));
+      return s.anim === 'dead' ? { text } : { text, health: s.hp };
+    }
     if (aimDeployable) {
       const d = aimDeployable;
       if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
@@ -800,6 +826,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const dist = (r: { x: number; z: number }) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
   let portrait: { angle: number; distance: number } | null = null;
   let fixedView: { from: number[]; to: number[] } | null = null;
+  let watched: { id: number; offset: number[] } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
     state: () => ({
       id: welcome.id,
@@ -852,6 +879,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return true;
     },
     reload: () => net.send({ t: 'reload', slot: ui.active }),
+    /** Uses (eats, feeds, applies) whatever is in your hands. */
+    use: () => net.send({ t: 'use', slot: ui.active }),
+    hounds: () => [...creatures.views.values()].map((v) => v.state),
     respawn: () => net.send({ t: 'respawn' }),
     aim: (on: boolean) => (aiming = on),
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
@@ -868,6 +898,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
     /** Points the camera at your own survivor from the front, for character screenshots. */
     portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
+    /** Keeps the camera on a hound from an offset, for screenshots of them moving about. */
+    watchHound: (id: number | null, offset: number[] = [2.6, 1.2, 1.6]) => (watched = id === null ? null : { id, offset }),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
     view: (from: number[] | null, to: number[] = [0, 0, 0]) => (fixedView = from ? { from, to } : null),
     setQuality: (q: 'high' | 'low') => {
@@ -931,6 +963,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       camera.position.set(p.x + Math.sin(a) * portrait.distance, p.y + 1.45, p.z + Math.cos(a) * portrait.distance);
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
+    const hound = watched && creatures.views.get(watched.id);
+    if (hound) fixedView = { from: hound.root.position.clone().add(new THREE.Vector3().fromArray(watched!.offset)).toArray(), to: hound.root.position.clone().setY(hound.root.position.y + 0.5).toArray() };
     if (fixedView) {
       camera.position.fromArray(fixedView.from);
       camera.lookAt(new THREE.Vector3().fromArray(fixedView.to));
@@ -944,6 +978,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.setWear(r.state.wear ?? []);
       r.avatar.update(dt, r.state.moving);
     }
+    creatures.update(dt);
 
     updateAim();
     updateGhost();

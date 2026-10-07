@@ -217,6 +217,14 @@ export class Effects {
     src.start(now, Math.random() * 0.6, 0.3);
   }
 
+  /** An Ashhound's growl, bark, yelp or whine from where it stands, pitched a little low. */
+  creatureSound(name: string, at: THREE.Vector3, level = 1) {
+    if (!this.context()) return;
+    const { near, pan, distance } = this.placed(at, 6);
+    if (near < 0.04) return;
+    this.play(name, pan, 0.08, near * level * 0.9, 0.84 + Math.random() * 0.12, 18000 - Math.min(15000, distance * 300));
+  }
+
   /** One footstep on dirt, a wood, stone or metal floor; quieter for others further away. */
   footstep(surface: Surface, at: THREE.Vector3 | null, sprint = false) {
     const a = this.context();

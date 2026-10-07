@@ -240,8 +240,10 @@ async function load(loader: GLTFLoader, name: string) {
 }
 
 /** Rigged characters, kept whole (skeleton and skinned meshes) rather than merged. */
-const CHARACTERS = ['survivor'];
+const CHARACTERS = ['survivor', 'ashhound'];
 const characters = new Map<string, THREE.Object3D>();
+/** Animations that came with a character, by name. */
+const clips = new Map<string, THREE.AnimationClip[]>();
 
 async function loadCharacter(loader: GLTFLoader, name: string) {
   const gltf = await loader.loadAsync(`/models/${name}.glb`);
@@ -256,6 +258,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
     if (m.map) m.map.anisotropy = 8;
   });
   characters.set(name, gltf.scene);
+  clips.set(name, gltf.animations);
 }
 
 /**
@@ -277,6 +280,11 @@ export async function loadModels(progress?: (done: number, total: number) => voi
 export function character(name: string): THREE.Object3D | undefined {
   const scene = characters.get(name);
   return scene && cloneSkinned(scene);
+}
+
+/** The animations a rigged character came with (none if it has none or didn't load). */
+export function characterClips(name: string): THREE.AnimationClip[] {
+  return clips.get(name) ?? [];
 }
 
 export function model(name: string): Model | undefined {

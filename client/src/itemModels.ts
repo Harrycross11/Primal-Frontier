@@ -252,6 +252,11 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
       w.rotation.x = kind === 'weapon' ? -0.75 : -0.4;
       // Lay the crossbow's limbs toward the camera so they show.
       if (item === 'crossbow') w.rotation.set(-0.6, 0, 1.2);
+      // Meat lies flat, seen from above at an angle.
+      if (item === 'rawMeat' || item === 'cookedMeat') {
+        w.rotation.set(0.9, 0, 0.3);
+        return { model: wrap(w), view: 'front' };
+      }
       // Cans, bottles and pills stand upright, seen from the front.
       if (kind === 'food' || item === 'antiRadPills') {
         w.rotation.x = 0.25;
