@@ -10,7 +10,7 @@ import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
-import { BOULDERS, WRECKS, model } from './models.ts';
+import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery } from './scenery.ts';
 import {
@@ -343,7 +343,9 @@ export class World {
       if (collide) this.cameraBlockers.push(mesh);
       return mesh;
     };
-    if (d.kind === 'ruin') {
+    if (d.kind === 'ruin' && model('ruin-a')) {
+      this.scannedRuin(g, d, rand);
+    } else if (d.kind === 'ruin') {
       // A burnt-out concrete house: broken walls of uneven height, a floor slab and rebar.
       const w = 7 + rand() * 4;
       const l = 6 + rand() * 4;
@@ -427,8 +429,73 @@ export class World {
     this.scene.add(g);
   }
 
+  /**
+   * A ruin built from scans: the gutted concrete frame, the broken stairwell block, or the
+   * graffiti wall, each with a heap of broken concrete and loose chunks around it. Turned to a
+   * quarter turn so its colliders, which are boxes along the world axes, fit it closely.
+   */
+  private scannedRuin(g: THREE.Group, d: Decor, rand: () => number) {
+    g.rotation.y = Math.round(d.rot / (Math.PI / 2)) * (Math.PI / 2);
+    const place = (m: Model, x: number, z: number, turn = 0, scale = 1, collide = true) => {
+      const mesh = new THREE.Mesh(m.geometry, m.material);
+      mesh.position.set(x, -0.15 * scale, z);
+      mesh.rotation.y = turn;
+      mesh.scale.setScalar(scale);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+      if (collide) this.cameraBlockers.push(mesh);
+      return mesh;
+    };
+    /** An invisible wall for walking into, in the ruin's own space. */
+    const block = (x: number, z: number, w: number, h: number, depth: number) => {
+      const o = new THREE.Mesh();
+      o.position.set(x, h / 2, z);
+      g.add(o);
+      this.pushCollider(g, o, w, h, depth);
+    };
+    const pile = model('rubble-pile');
+    const kind = d.variant % 3;
+    if (kind === 0) {
+      // The concrete frame: walk in through the gaps in the middle of each side.
+      const frame = model('ruin-a')!;
+      place(frame, 0, 0, d.variant % 2 ? Math.PI : 0);
+      const size = frame.geometry.boundingBox!.getSize(new THREE.Vector3());
+      const [w, l, h] = [size.x, size.z, size.y];
+      for (const s of [-1, 1]) {
+        for (const e of [-1, 1]) {
+          block((s * w) / 4 + (s * 1.5) / 2, (e * l) / 2, w / 2 - 1.5, h, 0.5);
+          block((e * w) / 2, (s * l) / 4 + (s * 1.5) / 2, 0.5, h, l / 2 - 1.5);
+        }
+      }
+      if (pile) place(pile, w / 2 + 2.5, (rand() - 0.5) * l * 0.6, rand() * 6, 0.8 + rand() * 0.3, false);
+    } else if (kind === 1 && model('ruin-b')) {
+      // The stairwell block, solid to walk into, with its fallen front piled up beside it.
+      const tower = model('ruin-b')!;
+      place(tower, 0, 0);
+      const size = tower.geometry.boundingBox!.getSize(new THREE.Vector3());
+      block(0, 0, size.x * 0.9, size.y, size.z * 0.9);
+      if (pile) place(pile, (rand() - 0.5) * size.x, size.z / 2 + 2.6, rand() * 6, 0.9 + rand() * 0.3, false);
+    } else {
+      // A lone graffiti-covered wall, all that is left standing, with the rest heaped beside it.
+      const wall = model('ruin-wall') ?? model('ruin-a')!;
+      place(wall, 0, 0);
+      const size = wall.geometry.boundingBox!.getSize(new THREE.Vector3());
+      block(0, 0, size.x * 0.85, 3, 0.8);
+      if (pile) place(pile, (rand() - 0.5) * 2, size.z / 2 + 3, rand() * 6, 1 + rand() * 0.3, false);
+    }
+    // Loose chunks of concrete kicked out across the ground.
+    const chunks = variants('rubble-chunks');
+    for (let n = 0; n < 14 && chunks.length; n++) {
+      const a = rand() * Math.PI * 2;
+      const r = 5 + rand() * 6;
+      const chunk = place(chunks[n % chunks.length], Math.cos(a) * r, Math.sin(a) * r, rand() * 6, 0.6 + rand() * 1.4, false);
+      chunk.position.y = -0.05;
+    }
+  }
+
   /** Registers a box-shaped mesh inside a rotated group as an axis-aligned collider. */
-  private pushCollider(g: THREE.Group, mesh: THREE.Mesh, w: number, h: number, d: number) {
+  private pushCollider(g: THREE.Group, mesh: THREE.Object3D, w: number, h: number, d: number) {
     g.updateMatrixWorld(true);
     const b = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(w, h, d));
     b.applyMatrix4(mesh.matrixWorld);

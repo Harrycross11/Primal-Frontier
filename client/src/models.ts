@@ -53,6 +53,13 @@ const FIT: Record<string, Fit> = {
   'wreck-d': { width: 4.7 },
   'wreck-e': { width: 3.9 },
   'wreck-f': { width: 4.6 },
+  // Ruins at real size: a gutted two-storey concrete frame, a tall broken stairwell block, a
+  // freestanding graffiti wall, a heap of broken reinforced concrete and loose chunks.
+  'ruin-a': { width: 14 },
+  'ruin-b': { height: 8 },
+  'ruin-wall': { width: 6 },
+  'rubble-pile': { width: 5 },
+  'rubble-chunks': { width: 0.5, set: true },
   // Held guns, turned so the barrel points along +z, at their real overall lengths.
   'gun-assaultRifle': { length: 0.88, turn: [0, -Math.PI / 2, 0] },
   'gun-boltRifle': { length: 1.23, drop: /bayonet/ },

@@ -44,7 +44,7 @@ MODELS = {
 }
 
 # Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
-# Our name: (Sketchfab model uid, target triangles).
+# Our name: (Sketchfab model uid, target triangles, simplify-scan flags, largest texture size).
 SCANS = {
     'wreck-a': ('483fe7f26336463fba66638ca4200c5a', 8000),
     'wreck-b': ('263fd595fa4a45e988d5c6e236cbf293', 8000),
@@ -52,6 +52,12 @@ SCANS = {
     'wreck-d': ('222688561ba74a638c51a8af36ad0255', 8000),
     'wreck-e': ('916b51c7e5644eb2a6c9b3797ebb08cf', 8000),
     'wreck-f': ('b64174d7bea644a7b86f8d1aa980dc51', 8000),
+    # Ruins: two wrecked concrete buildings, a graffiti wall, a rubble pile and loose chunks.
+    'ruin-a': ('2a3a3d676ebf47b9b0d44e468fde1b15', 40000, ['--keep-heading'], 2048),
+    'ruin-b': ('ba927bcd6a254cb6bcfd27d7d16e417f', 40000, ['--keep-heading'], 2048),
+    'ruin-wall': ('3fd44346135d4a66bb8fc4a9f272c5d1', 12000, [], 2048),
+    'rubble-pile': ('a06fea588d0a4094869a07527fdc4ec8', 14000, ['--keep-heading'], 1024),
+    'rubble-chunks': ('0d654a6e33624665ad20c5191f5d9d95', 6000, ['--keep-heading', '--split'], 1024),
 }
 
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
@@ -173,7 +179,8 @@ def main():
             subprocess.run(CLI + ['simplify', full, out, '--ratio', f'{ratio:.4f}', '--error', '0.01'], check=True, capture_output=True)
             print('saved', name, triangles(full), '->', triangles(out), 'triangles')
     scans = []
-    for name, (uid, budget) in SCANS.items():
+    for name, (uid, budget, *extra) in SCANS.items():
+        flags, size = extra if extra else ([], None)
         scans.append(sketchfab_credit(name, uid, 'simplified'))
         if only and name not in only:
             continue
@@ -184,9 +191,14 @@ def main():
                 f.write(get(link['glb']['url']))
             out = os.path.join(OUT, f'{name}.glb')
             result = subprocess.run(
-                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'simplify-scan.ts'), full, out, str(budget)],
+                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'simplify-scan.ts'), full, out, str(budget), *flags],
                 check=True, capture_output=True, text=True,
             )
+            if size:
+                with open(out, 'rb') as f:
+                    slim = slim_textures(f.read(), size)
+                with open(out, 'wb') as f:
+                    f.write(slim)
             print('saved', name, result.stdout.strip())
     for name, uid in PROPS.items():
         scans.append(sketchfab_credit(name, uid, 'textures resized'))

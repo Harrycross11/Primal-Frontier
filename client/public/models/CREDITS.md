@@ -11,12 +11,12 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - barrel: https://polyhaven.com/a/barrel_03
 - tyre: https://polyhaven.com/a/old_tyre
 - dry-grass: https://polyhaven.com/a/grass_medium_02
-- grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 - dry-bush: https://polyhaven.com/a/wild_rooibos_bush
 - branches: https://polyhaven.com/a/dry_branches_medium_01
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
 - stones: https://polyhaven.com/a/namaqualand_stones_01
 - stump: https://polyhaven.com/a/tree_stump_01
+- grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
 
@@ -26,6 +26,11 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - wreck-d: "Destroyed Car 06 (Raw Scan)" by Renafox (https://sketchfab.com/3d-models/destroyed-car-06-raw-scan-222688561ba74a638c51a8af36ad0255), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - wreck-e: "Destroyed Car 07 (Raw Scan)" by Renafox (https://sketchfab.com/3d-models/destroyed-car-07-raw-scan-916b51c7e5644eb2a6c9b3797ebb08cf), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - wreck-f: "Gutted Car (Free Raw Scan)" by Renafox (https://sketchfab.com/3d-models/gutted-car-free-raw-scan-b64174d7bea644a7b86f8d1aa980dc51), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- ruin-a: "Disaster Scene: Broken Walls, Exposed Rebar" by prabinpandey631 (https://sketchfab.com/3d-models/disaster-scene-broken-walls-exposed-rebar-2a3a3d676ebf47b9b0d44e468fde1b15), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- ruin-b: "Ruined City Building – Game-Ready PBR" by prabinpandey631 (https://sketchfab.com/3d-models/ruined-city-building-game-ready-pbr-ba927bcd6a254cb6bcfd27d7d16e417f), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- ruin-wall: "Ruined Wall Photogrammetry scan" by photogrammexico (https://sketchfab.com/3d-models/ruined-wall-photogrammetry-scan-3fd44346135d4a66bb8fc4a9f272c5d1), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- rubble-pile: "Blocks of reinforced concrete scrap" by Оrрндп ЯТG (https://sketchfab.com/3d-models/blocks-of-reinforced-concrete-scrap-a06fea588d0a4094869a07527fdc4ec8), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- rubble-chunks: "Set of 4 Concrete rubble chunks" by matousekfoto (https://sketchfab.com/3d-models/set-of-4-concrete-rubble-chunks-0d654a6e33624665ad20c5191f5d9d95), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - gun-assaultRifle: "AK-47  - Game Ready Assault Rifle Weapon" by Billy Jackman (https://sketchfab.com/3d-models/ak-47-game-ready-assault-rifle-weapon-dc58144409534abbb60970638d171f9f), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-boltRifle: "Mosin Nagant M91" by MaX3Dd (https://sketchfab.com/3d-models/mosin-nagant-m91-92ede39f23bd40c7982c727dfd7c4be0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-l96: "PGM Ultima Ratio · Game-Ready Sniper Rifle" by flip 3D (https://sketchfab.com/3d-models/pgm-ultima-ratio-game-ready-sniper-rifle-34611493b4104bdba2ce6beabfeb4465), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
