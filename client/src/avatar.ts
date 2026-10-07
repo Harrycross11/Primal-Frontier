@@ -102,7 +102,7 @@ export class Avatar {
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
   private muzzle: THREE.Object3D | null = null;
   /** Where the hands go on the gun or bow in hand, in its model space, and where its butt is. */
-  private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; butt?: THREE.Vector3; top?: number } | null = null;
+  private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; fore?: boolean; butt?: THREE.Vector3; top?: number } | null = null;
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
@@ -452,11 +452,15 @@ export class Avatar {
       // The shooting hand wraps the grip from the right; the other hand lies palm up under the
       // handguard, or cups the shooting hand on a pistol.
       // Fingers wrap forward and down round the grip, and across under the handguard.
-      // The fist closes round the front of the grip, so the palm sits a little ahead of its middle.
-      const grip = on(hands.palm).addScaledVector(gunAhead, this.pose === 'rifle' ? 0.045 : 0.02);
-      scan.reach('elbowR', grip, grip, poleR, left, gunAhead.clone().addScaledVector(gunUp, -0.3));
+      // The scanned hand's bulk sits above and ahead of its palm point, so a long gun's grip is
+      // aimed for a little low and behind its middle to put the fist round it.
+      const grip = this.pose === 'rifle' ? on(hands.palm).addScaledVector(gunAhead, 0.01).addScaledVector(gunUp, -0.035) : on(hands.palm).addScaledVector(gunAhead, 0.02).addScaledVector(gunUp, -0.02);
+      scan.reach('elbowR', grip, grip, poleR, left, gunAhead.clone().addScaledVector(gunUp, -0.6));
       const hold = hands.hold ?? hands.palm.clone().add(new THREE.Vector3(0, -0.05, 0));
-      if (hands.hold) scan.reach('elbowL', on(hold), on(hold), poleL, gunUp, right);
+      // A front grip is held like a second pistol grip, from the left; a handguard rests on the
+      // upturned palm, fingers running forward and round its far side.
+      if (hands.hold && hands.fore) scan.reach('elbowL', on(hold), on(hold), poleL, right, gunAhead.clone().addScaledVector(gunUp, -0.6));
+      else if (hands.hold) scan.reach('elbowL', on(hold), on(hold), poleL, gunUp, gunAhead.clone().addScaledVector(right, 0.6));
       else scan.reach('elbowL', on(hold), on(hold), poleL, gunUp.clone().add(right).normalize(), gunAhead.clone().add(right));
     }
     scan.curl('elbowR', 1);
