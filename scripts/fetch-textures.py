@@ -9,6 +9,8 @@ script only needs running again to change or add a texture. Needs Pillow and num
 import io
 import json
 import os
+import subprocess
+import sys
 import urllib.request
 
 from PIL import Image
@@ -78,3 +80,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # Shrink what was just fetched for download (WebP textures, Draco meshes).
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), 'compress-assets.py')], check=True)

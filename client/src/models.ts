@@ -3,6 +3,7 @@
 // build in code. If a file fails to load the game falls back to those shapes.
 
 import * as THREE from 'three';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -257,14 +258,19 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
   characters.set(name, gltf.scene);
 }
 
-/** Loads every model; resolves even if some fail, so a missing file never stops the game. */
-export async function loadModels(): Promise<void> {
-  const loader = new GLTFLoader();
+/**
+ * Loads every model; resolves even if some fail, so a missing file never stops the game.
+ * `progress` hears how many of them have finished.
+ */
+export async function loadModels(progress?: (done: number, total: number) => void): Promise<void> {
+  // The files are Draco-compressed (see scripts/compress-assets.py); the decoder is served
+  // from /draco.
+  const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
   const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
-  await Promise.all([
-    ...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))),
-    ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n))),
-  ]);
+  const jobs = [...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
+  let done = 0;
+  progress?.(0, jobs.length);
+  await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
 }
 
 /** A fresh copy of a rigged character with its own skeleton, or none if it didn't load. */

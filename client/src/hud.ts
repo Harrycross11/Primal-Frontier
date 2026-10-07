@@ -32,6 +32,13 @@ export class Hud {
     input.focus();
   }
 
+  /** How far the models have loaded, under the join button. */
+  setLoading(done: number, total: number) {
+    const el = $('loading');
+    el.hidden = done >= total;
+    ($('loading-fill') as HTMLElement).style.width = `${Math.round((done / total) * 100)}%`;
+  }
+
   showJoinError(text: string) {
     $('join-error').textContent = text;
     ($('play') as HTMLButtonElement).disabled = false;
@@ -58,7 +65,7 @@ export class Hud {
   }
 
   setQuality(q: Quality) {
-    $('quality').textContent = q === 'high' ? 'High' : 'Low';
+    $('quality').textContent = q[0].toUpperCase() + q.slice(1);
   }
 
   notice(text: string) {

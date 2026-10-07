@@ -29,6 +29,10 @@
       #play { margin-top: 14px; width: 100%; padding: 14px; font-size: 20px; font-weight: 800; border: 0;
         border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; box-shadow: 0 4px 0 #9a4614; }
       #play:disabled { opacity: .6; cursor: wait; }
+      #loading { margin-top: 12px; font-size: 13px; opacity: .8; }
+      #loading[hidden] { display: none; }
+      #loading .bar { height: 6px; margin-top: 6px; border-radius: 3px; background: rgba(0,0,0,.35); overflow: hidden; }
+      #loading-fill { width: 0; height: 100%; background: var(--accent); transition: width .2s; }
       #join-error { min-height: 22px; margin-top: 12px; color: #ffb199; }
       #join { overflow-y: auto; }
       #look { margin-top: 14px; text-align: left; border: 2px solid #8a7356; border-radius: 12px; background: rgba(0,0,0,.25); }
@@ -253,6 +257,7 @@
           </div>
         </details>
         <button id="play">Enter the wasteland</button>
+        <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
         <div id="join-error"></div>
         <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
           Left click hit, build or shoot · Right click aim · R reload · 1–6 belt · Tab inventory and crafting · E open</div>

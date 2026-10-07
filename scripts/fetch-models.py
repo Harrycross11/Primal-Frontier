@@ -263,3 +263,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # Shrink what was just fetched for download (WebP textures, Draco meshes).
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), 'compress-assets.py')], check=True)

@@ -23,7 +23,7 @@ import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../.
 import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
-import { Graphics } from './graphics.ts';
+import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
 import { LookPicker } from './lookPicker.ts';
 import { loadModels } from './models.ts';
@@ -77,7 +77,7 @@ interface Remote {
 const hud = new Hud();
 
 // Start loading the scanned models straight away; joining waits for them.
-const modelsReady = loadModels();
+const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
 const picker = new LookPicker(modelsReady);
 
 hud.onPlay(async (name) => {
@@ -428,7 +428,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
     if (e.code === 'KeyO') {
-      gfx.setQuality(gfx.quality === 'high' ? 'low' : 'high');
+      gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
     }
   });

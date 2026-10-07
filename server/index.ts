@@ -1,8 +1,9 @@
 // Dedicated game server: serves the built client over HTTP and runs the game over a WebSocket at /ws.
 
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, relative, resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { WebSocket, WebSocketServer } from 'ws';
 import { TICK_RATE } from '../shared/constants.ts';
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
@@ -19,8 +20,28 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.json': 'application/json',
+  '.glb': 'model/gltf-binary',
+  '.mp3': 'audio/mpeg',
+  '.wasm': 'application/wasm',
 };
+
+/** Files worth gzipping: text, the sky's HDR image and the Draco decoder. Images, sounds and
+ * compressed models are already as small as gzip would make them. */
+const GZIP = new Set(['.html', '.js', '.css', '.svg', '.json', '.hdr', '.wasm']);
+const gzipped = new Map<string, { mtime: number; data: Buffer }>();
+
+/**
+ * How long browsers may keep a file without asking again. Built scripts have their content's
+ * hash in their name, so they never change; models, textures and sounds change only with a
+ * deploy, so a day is safe; the page itself is always checked.
+ */
+function cacheFor(path: string): string {
+  if (path.startsWith('assets/')) return 'public, max-age=31536000, immutable';
+  if (/^(models|textures|sounds|draco)\//.test(path)) return 'public, max-age=86400';
+  return 'no-cache';
+}
 
 const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
@@ -39,7 +60,27 @@ const http = createServer((req, res) => {
     res.writeHead(500, { 'content-type': 'text/plain' }).end('Client not built. Run `npm run build` first.');
     return;
   }
-  res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
+  const stat = statSync(file);
+  const ext = extname(file);
+  const headers: Record<string, string> = {
+    'content-type': TYPES[ext] ?? 'application/octet-stream',
+    'cache-control': cacheFor(relative(CLIENT_DIR, file).replaceAll('\\', '/')),
+    'last-modified': stat.mtime.toUTCString(),
+    vary: 'accept-encoding',
+  };
+  const since = req.headers['if-modified-since'];
+  if (since && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000)) {
+    res.writeHead(304, headers).end();
+    return;
+  }
+  if (GZIP.has(ext) && /\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) {
+    let hit = gzipped.get(file);
+    if (!hit || hit.mtime !== stat.mtimeMs) gzipped.set(file, (hit = { mtime: stat.mtimeMs, data: gzipSync(readFileSync(file)) }));
+    res.writeHead(200, { ...headers, 'content-encoding': 'gzip', 'content-length': String(hit.data.length) });
+    res.end(hit.data);
+    return;
+  }
+  res.writeHead(200, { ...headers, 'content-length': String(stat.size) });
   createReadStream(file).pipe(res);
 });
 
