@@ -3,3 +3,4 @@ dist/
 *.log
 .smoke/
 __pycache__/
+data/

@@ -76,6 +76,17 @@ interface Remote {
 
 const hud = new Hud();
 
+/** A private random id kept in this browser, so the server gives back your survivor next time. */
+function survivorToken(): string | undefined {
+  try {
+    let token = localStorage.getItem('pf-token');
+    if (!token) localStorage.setItem('pf-token', (token = crypto.randomUUID()));
+    return token;
+  } catch {
+    return undefined;
+  }
+}
+
 // Start loading the scanned models straight away; joining waits for them.
 const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
 const picker = new LookPicker(modelsReady);
@@ -88,7 +99,7 @@ hud.onPlay(async (name) => {
     hud.showJoinError((e as Error).message);
     return;
   }
-  net.send({ t: 'join', name, look: picker.look });
+  net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);

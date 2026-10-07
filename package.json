@@ -16,6 +16,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "pg": "8.23.1",
     "three": "0.186.1",
     "tsx": "4.23.15",
     "ws": "8.22.0"
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/three": "^0.186.0",
     "@types/ws": "^8.5.0",
     "concurrently": "^9.0.0",

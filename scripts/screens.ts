@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 const PORT = 3997;
 mkdirSync('.smoke', { recursive: true });
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), SEED: process.env.SEED ?? '424242', START_KIT: '500' },
+  env: { ...process.env, PORT: String(PORT), SEED: process.env.SEED ?? '424242', START_KIT: '500', NO_SAVE: '1' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise<void>((resolve) => server.stdout!.on('data', (d) => String(d).includes('server on') && resolve()));

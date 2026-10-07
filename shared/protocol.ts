@@ -42,7 +42,8 @@ export interface CraftJob {
 }
 
 export type ClientMessage =
-  | { t: 'join'; name: string; look?: Look }
+  /** `token` is a private random id the browser keeps, so a returning player gets their survivor back. */
+  | { t: 'join'; name: string; look?: Look; token?: string }
   | { t: 'move'; x: number; y: number; z: number; yaw: number; moving: boolean; slot: number }
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }

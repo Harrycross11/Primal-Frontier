@@ -12,7 +12,7 @@ const URL = `http://localhost:${PORT}`;
 mkdirSync('.smoke', { recursive: true });
 
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), SEED: '424242' },
+  env: { ...process.env, PORT: String(PORT), SEED: '424242', NO_SAVE: '1' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise<void>((resolve) => server.stdout!.on('data', (d) => String(d).includes('server on') && resolve()));
