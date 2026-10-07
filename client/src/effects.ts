@@ -795,6 +795,10 @@ const MELEE_SOUNDS: Partial<Record<ItemId, { swing: [string, number]; wood: [str
   salvagedSword: { swing: ['swing-sword', 1], wood: ['hit-blade', 0.9], stone: ['hit-clang', 0.95] },
   woodenSpear: { swing: ['swing-thrust', 1], wood: ['hit-stab', 1], stone: ['hit-stone', 1.25] },
   stoneSpear: { swing: ['swing-thrust2', 1], wood: ['hit-stab', 0.9], stone: ['hit-stone', 1.1] },
+  combatKnife: { swing: ['swing-knife', 1.1], wood: ['hit-knife', 1], stone: ['hit-clang', 1.3] },
+  nailBat: { swing: ['swing-bat', 1], wood: ['hit-bat', 1], stone: ['hit-rock', 0.8] },
+  fireAxe: { swing: ['swing-fireAxe', 0.95], wood: ['hit-split', 1], stone: ['hit-pick', 0.9] },
+  sledgehammer: { swing: ['swing-sledge', 0.9], wood: ['hit-bat', 0.75], stone: ['hit-sledge', 1] },
 };
 
 /** How each gun sounds: the level of each layer, the pitch of its punch, how long it rings and how its action works. */

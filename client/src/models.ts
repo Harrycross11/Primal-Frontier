@@ -26,6 +26,11 @@ interface Fit {
   length?: number;
   /** Parts of the file left out, by mesh name: spare magazines, bayonets, loose rounds. */
   drop?: RegExp;
+  /**
+   * Loose bits merged into the same mesh as the gun, such as a shell lying beside it, cut out by
+   * boxes of [back, front, bottom, top] as fractions of the turned model's length and height.
+   */
+  cut?: [number, number, number, number][];
   turn?: [number, number, number];
   /** The file is a set of variants side by side; each top-level object becomes its own model. */
   set?: boolean;
@@ -93,6 +98,31 @@ const FIT: Record<string, Fit> = {
   'tool-salvagedSword': { height: 0.9, turn: [-Math.PI / 2, Math.PI, -Math.PI / 2] },
   'tool-woodenSpear': { height: 2 },
   'tool-stoneSpear': { height: 2, turn: [0.97, 0, 0] },
+  // The higher-tier weapons. Spare rounds and magazines lying beside a gun are left out.
+  'gun-m4': { length: 0.84 },
+  'gun-scarH': { length: 0.97, turn: [0, -Math.PI / 2, 0], drop: /^Bullet/ },
+  'gun-m14': { length: 1.12, turn: [0, -Math.PI / 2, 0] },
+  'gun-hk416': { length: 0.8 },
+  'gun-aug': { length: 0.79, turn: [0, -Math.PI / 2, 0] },
+  'gun-vector': { length: 0.7 },
+  'gun-ump45': { length: 0.69, turn: [0, -Math.PI / 2, 0] },
+  'gun-p90': { length: 0.5, turn: [0, Math.PI, 0] },
+  'gun-deagle': { length: 0.27, drop: /^Bullet(Case)?_low/ },
+  // The file holds two copies of the pistol and a loose magazine.
+  'gun-m1911': { length: 0.216, turn: [0, Math.PI, 0], drop: /002|magazine_empty/ },
+  // A shell stands beside the grip in the same mesh as the gun.
+  'gun-spas12': { length: 1.04, turn: [0, Math.PI, 0], cut: [[0.32, 0.38, -0.01, 0.3]] },
+  'gun-saiga12': { length: 1.0, turn: [0, -Math.PI / 2, 0] },
+  'gun-m82': { length: 1.45, turn: [0, Math.PI, 0], drop: /Cartridge|NATO_Bullet/, cut: [[0.49, 0.56, 0.38, 0.52]] },
+  'gun-svd': { length: 1.22, turn: [0, Math.PI, 0] },
+  'gun-m60': { length: 1.1, turn: [0, Math.PI / 2, 0], cut: [[0.3, 0.4, 0.8, 1.01]] },
+  // Lies diagonally in its file; stood up with the string at the back.
+  'gun-compoundBow': { height: 0.95, turn: [0.84, 0, 0] },
+  'tool-combatKnife': { height: 0.33, turn: [0, 0, Math.PI / 2] },
+  'tool-nailBat': { height: 0.84, turn: [Math.PI / 2, 0, 0] },
+  'tool-fireAxe': { height: 0.9, turn: [-0.048, 0.263, -1.542] },
+  // Lies at an angle in all three axes; found by lining the handle up with y and the head with z.
+  'tool-sledgehammer': { height: 0.9, turn: [-2.679, -0.679, 2.835] },
 };
 
 const models = new Map<string, Model[]>();
@@ -111,9 +141,10 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
     materials.push(mesh.material as THREE.MeshStandardMaterial);
   });
   if (!parts.length) return undefined;
+  if (fit.turn) for (const geo of parts) geo.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...fit.turn)));
+  if (fit.cut) cutBoxes(parts, fit.cut);
   const single = materials.every((m) => m === materials[0]);
   const geometry = parts.length === 1 ? parts[0] : mergeGeometries(parts, !single)!;
-  if (fit.turn) geometry.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...fit.turn)));
   geometry.computeBoundingBox();
   const box = geometry.boundingBox!;
   const size = box.getSize(new THREE.Vector3());
@@ -136,6 +167,35 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
     }
   }
   return { geometry, material: single ? mats[0] : mats };
+}
+
+/** Removes the triangles whose middle falls inside any of the boxes (see Fit.cut). */
+function cutBoxes(parts: THREE.BufferGeometry[], boxes: [number, number, number, number][]) {
+  const all = new THREE.Box3();
+  for (const geo of parts) {
+    geo.computeBoundingBox();
+    all.union(geo.boundingBox!);
+  }
+  const size = all.getSize(new THREE.Vector3());
+  const inside = (y: number, z: number) => {
+    const fz = (z - all.min.z) / size.z;
+    const fy = (y - all.min.y) / size.y;
+    return boxes.some(([z0, z1, y0, y1]) => fz > z0 && fz < z1 && fy > y0 && fy < y1);
+  };
+  for (let i = 0; i < parts.length; i++) {
+    const geo = parts[i].index ? parts[i] : parts[i].setIndex([...Array(parts[i].attributes.position.count).keys()]);
+    const pos = geo.attributes.position;
+    const idx = geo.index!.array;
+    const kept: number[] = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]];
+      const y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
+      const z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+      if (!inside(y, z)) kept.push(a, b, c);
+    }
+    // Unindexed, so the cut-away vertices go too and no longer count towards the model's size.
+    parts[i] = geo.setIndex(kept).toNonIndexed();
+  }
 }
 
 const foliageMats = new Map<string, THREE.MeshStandardMaterial>();

@@ -48,7 +48,7 @@ const RESOURCE_NAMES = {
 } as const;
 const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
 const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
-const SCOPED: ItemId[] = ['boltRifle', 'l96'];
+const SCOPED: ItemId[] = ['boltRifle', 'l96', 'svd', 'm82'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
 /** What each resource sounds like and sheds when hit. */

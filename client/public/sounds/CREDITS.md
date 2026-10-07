@@ -19,6 +19,22 @@ Recordings from Freesound, all CC0 (public domain), cut to one shot, swing or hi
 - shot-l96.mp3: "Sniper Rifle M24 SFX.mp3" by kennysvoice (https://freesound.org/people/kennysvoice/sounds/351777/), CC0
 - shot-huntingBow.mp3: "Bow Release (Bow and Arrow) 4" by Ali_6868 (https://freesound.org/people/Ali_6868/sounds/384917/), CC0
 - shot-crossbow.mp3: "Crossbow Firing" by GameWithBepis (https://freesound.org/people/GameWithBepis/sounds/561475/), CC0
+- shot-compoundBow.mp3: "Arrow Release and Hit.wav" by calvarychurchatlanta (https://freesound.org/people/calvarychurchatlanta/sounds/179996/), CC0
+- shot-m1911.mp3: "Colt 1911" by areniporgen (https://freesound.org/people/areniporgen/sounds/740897/), CC0
+- shot-deagle.mp3: "Magnum Research Desert Eagle" by areniporgen (https://freesound.org/people/areniporgen/sounds/712310/), CC0
+- shot-ump45.mp3: "Submachine Gun.wav" by morganpurkis (https://freesound.org/people/morganpurkis/sounds/390663/), CC0
+- shot-vector.mp3: "Uzi burst.mp3" by CraftyIndividual (https://freesound.org/people/CraftyIndividual/sounds/418433/), CC0
+- shot-p90.mp3: "FN P90 (Full Auto)" by areniporgen (https://freesound.org/people/areniporgen/sounds/740896/), CC0
+- shot-spas12.mp3: "SPAS-12" by duesto (https://freesound.org/people/duesto/sounds/156904/), CC0
+- shot-saiga12.mp3: "Saiga 12k Gunshot(12ga).mp3" by Kobrakon47 (https://freesound.org/people/Kobrakon47/sounds/569309/), CC0
+- shot-m4.mp3: "Colt M4A1 SOCOM" by areniporgen (https://freesound.org/people/areniporgen/sounds/737569/), CC0
+- shot-hk416.mp3: "carbine single.wav" by cognito perceptu (https://freesound.org/people/cognito%20perceptu/sounds/46655/), CC0
+- shot-aug.mp3: "An automatic rifle being shot once, and then fired in a 4-round burst // very airy forest reverb" by serøutōnin--deprivəd (https://freesound.org/people/ser%C3%B8ut%C5%8Dnin--depriv%C9%99d/sounds/855653/), CC0
+- shot-scarH.mp3: "FN SCAR-H" by areniporgen (https://freesound.org/people/areniporgen/sounds/702225/), CC0
+- shot-m14.mp3: "Izhmash Saiga MK-106.wav" by areniporgen (https://freesound.org/people/areniporgen/sounds/696023/), CC0
+- shot-svd.mp3: "Sniper Fire" by qubodup (https://freesound.org/people/qubodup/sounds/182790/), CC0
+- shot-m82.mp3: "50 cal shot.wav" by ajhartman42295 (https://freesound.org/people/ajhartman42295/sounds/668071/), CC0
+- shot-m60.mp3: "Authentic M60 Firing.mp3" by FranklinRook1984 (https://freesound.org/people/FranklinRook1984/sounds/538302/), CC0
 - bolt-boltRifle.mp3: "Mosin Nagant Bolt (fast).wav" by rammbostein (https://freesound.org/people/rammbostein/sounds/267895/), CC0
 - bolt-l96.mp3: "Sniper Rifle M24 SFX.mp3" by kennysvoice (https://freesound.org/people/kennysvoice/sounds/351777/), CC0
 - swing-light.mp3: "Woosh (stick swung in the air)" by Dalesome (https://freesound.org/people/Dalesome/sounds/352719/), CC0
@@ -30,6 +46,10 @@ Recordings from Freesound, all CC0 (public domain), cut to one shot, swing or hi
 - swing-sword.mp3: "Swosh Sword Swing" by qubodup (https://freesound.org/people/qubodup/sounds/59992/), CC0
 - swing-thrust.mp3: "Whoosh" by qubodup (https://freesound.org/people/qubodup/sounds/60013/), CC0
 - swing-thrust2.mp3: "SWOSH-01 44.1kHz" by qubodup (https://freesound.org/people/qubodup/sounds/59988/), CC0
+- swing-knife.mp3: "slashkut.wav" by Abyssmal (https://freesound.org/people/Abyssmal/sounds/35213/), CC0
+- swing-bat.mp3: "bat swoosh" by MrGungus (https://freesound.org/people/MrGungus/sounds/766542/), CC0
+- swing-fireAxe.mp3: "Axe Slash 1" by smokebomb99 (https://freesound.org/people/smokebomb99/sounds/147290/), CC0
+- swing-sledge.mp3: "FX - Swoosh - Low Pitch" by bolkmar (https://freesound.org/people/bolkmar/sounds/475135/), CC0
 - hit-chop.mp3: "Chopping wood 01" by micahlg (https://freesound.org/people/micahlg/sounds/421928/), CC0
 - hit-chop2.mp3: "Chopping wood 02" by micahlg (https://freesound.org/people/micahlg/sounds/421929/), CC0
 - hit-axe.mp3: "Axe Chop.mp3" by Evcy (https://freesound.org/people/Evcy/sounds/583272/), CC0
@@ -39,3 +59,7 @@ Recordings from Freesound, all CC0 (public domain), cut to one shot, swing or hi
 - hit-blade.mp3: "Sword Hitting Wood" by hushless (https://freesound.org/people/hushless/sounds/783059/), CC0
 - hit-clang.mp3: "Sword Clash.wav" by Bird_man (https://freesound.org/people/Bird_man/sounds/275159/), CC0
 - hit-stab.mp3: "Knife thrust into wall" by NeoSpica (https://freesound.org/people/NeoSpica/sounds/504618/), CC0
+- hit-knife.mp3: "Knife Stab.wav" by Mixedupmoviestuff (https://freesound.org/people/Mixedupmoviestuff/sounds/179222/), CC0
+- hit-bat.mp3: "Wooden Thud (Mono)" by Breviceps (https://freesound.org/people/Breviceps/sounds/449955/), CC0
+- hit-split.mp3: "Log Split" by Veridiansunrise (https://freesound.org/people/Veridiansunrise/sounds/177045/), CC0
+- hit-sledge.mp3: "Hitting a brick with a sledgehammer. OWI.wav" by JesterWhoo (https://freesound.org/people/JesterWhoo/sounds/706979/), CC0

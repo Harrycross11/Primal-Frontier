@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
 import { character } from './models.ts';
-import { gunHands } from './guns.ts';
+import { PISTOLS, gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
 import { ScanBody } from './scanBody.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
@@ -18,8 +18,11 @@ import { clothSurface, leatherSurface } from './textures.ts';
 // are darker than jackets, as they usually are, so the outfit reads as separate pieces.
 /** Between the scanned survivor's eyes, in the survivor's model space. */
 const EYE = new THREE.Vector3(0, 1.655, 0.085);
-/** Guns aimed through a scope, whose eye line runs through the scope rather than the iron sights. */
-const SCOPED: ItemId[] = ['boltRifle', 'l96', 'm249'];
+/**
+ * Guns aimed along their top, through a scope or sights raised well above the bore, rather than
+ * just over the barrel.
+ */
+const SCOPED: ItemId[] = ['boltRifle', 'l96', 'm249', 'svd', 'm82', 'm4', 'scarH', 'm14', 'hk416', 'aug', 'vector', 'ump45', 'p90', 'spas12', 'saiga12', 'm60'];
 
 const JACKETS = [0x5a5c3e, 0x6a5440, 0x48494a, 0x46505e, 0x7c7052, 0x6e4e3a];
 const TROUSERS = [0x3f3c35, 0x4a4436, 0x363a3f, 0x544a3b];
@@ -300,7 +303,7 @@ export class Avatar {
     if (model) this.hand.add(model);
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;
-    this.pose = !w || w.class === 'melee' ? 'normal' : item === 'huntingBow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
+    this.pose = !w || w.class === 'melee' ? 'normal' : w.class === 'bow' && item !== 'crossbow' ? 'bow' : item && PISTOLS.includes(item) ? 'pistol' : 'rifle';
     // A bow is gripped at its middle, and the other hand rests on the string.
     this.hands = this.pose === 'normal' || !item ? null : gunHands(item);
   }

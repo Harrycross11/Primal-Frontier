@@ -8,7 +8,7 @@ import { DEPLOYABLE_KINDS, type DeployableKind } from '../../shared/deployables.
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { mulberry32 } from '../../shared/terrain.ts';
 import { buildArmourModel } from './armour.ts';
-import { GUN_LOOKS, buildGun, buildOtherWeapon } from './guns.ts';
+import { GUN_LOOKS, PISTOLS, buildGun, buildOtherWeapon } from './guns.ts';
 import { buildBoulder, buildDeployable, buildHeldItem } from './props.ts';
 import { barkSurface, clothSurface, concreteSurface, gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -242,6 +242,12 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
   const kind = ITEMS[item].kind;
   if (kind === 'weapon' || kind === 'medical' || kind === 'food') {
     const w = buildOtherWeapon(item);
+    // Scanned guns with no code-built look, such as the higher-tier rifles and the compound bow.
+    const scanned = !w && ITEMS[item].weapon && ITEMS[item].weapon!.class !== 'melee' ? buildGun(item) : null;
+    if (scanned) {
+      scanned.rotation.x = PISTOLS.includes(item) ? 0 : -0.55;
+      return { model: wrap(scanned), view: 'side' };
+    }
     if (w) {
       w.rotation.x = kind === 'weapon' ? -0.75 : -0.4;
       // Lay the crossbow's limbs toward the camera so they show.

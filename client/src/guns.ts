@@ -136,7 +136,30 @@ const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number; pa
   // The bow is lengths as seen side on, string at the back: grip is the riser, palm the string
   // where the arrow nocks, hold the fist round the riser.
   huntingBow: { grip: [0.86, 0.5], bore: 0.55, palm: [0.02, 0.53], hold: [0.86, 0.47] },
+  compoundBow: { grip: [0.86, 0.42], bore: 0.38, palm: [0.03, 0.38], hold: [0.86, 0.42] },
+  // Pistols.
+  deagle: { grip: [0.25, 0.68], bore: 0.85, palm: [0.2, 0.35] },
+  m1911: { grip: [0.25, 0.68], bore: 0.88, palm: [0.2, 0.3] },
+  // SMGs. The Vector and AUG have a vertical foregrip; the P90's other hand goes under its nose.
+  ump45: { grip: [0.45, 0.56], bore: 0.75, palm: [0.41, 0.42], hold: [0.66, 0.68] },
+  vector: { grip: [0.4, 0.78], bore: 0.72, palm: [0.36, 0.62], hold: [0.86, 0.5] },
+  p90: { grip: [0.6, 0.45], bore: 0.4, palm: [0.58, 0.28], hold: [0.85, 0.3] },
+  // Shotguns.
+  spas12: { grip: [0.29, 0.5], bore: 0.85, palm: [0.27, 0.3], hold: [0.58, 0.55] },
+  saiga12: { grip: [0.3, 0.68], bore: 0.8, palm: [0.28, 0.48], hold: [0.5, 0.76] },
+  // Rifles. The M4 and AUG have a vertical foregrip; the M14 is held at the wrist of its wooden stock.
+  m4: { grip: [0.33, 0.5], bore: 0.7, palm: [0.31, 0.36], hold: [0.66, 0.38] },
+  hk416: { grip: [0.34, 0.55], bore: 0.8, palm: [0.31, 0.3], hold: [0.65, 0.68] },
+  aug: { grip: [0.46, 0.55], bore: 0.62, palm: [0.43, 0.35], hold: [0.79, 0.3] },
+  scarH: { grip: [0.19, 0.42], bore: 0.6, palm: [0.15, 0.25], hold: [0.52, 0.47] },
+  m14: { grip: [0.3, 0.55], bore: 0.82, palm: [0.28, 0.45], hold: [0.55, 0.6] },
+  svd: { grip: [0.25, 0.5], bore: 0.6, palm: [0.23, 0.3], hold: [0.45, 0.5] },
+  m82: { grip: [0.24, 0.48], bore: 0.68, palm: [0.22, 0.32], hold: [0.42, 0.55] },
+  m60: { grip: [0.3, 0.45], bore: 0.6, palm: [0.27, 0.28], hold: [0.48, 0.4] },
 };
+
+/** Guns held out in front at arm's length rather than shouldered. */
+export const PISTOLS: ItemId[] = ['revolver', 'semiPistol', 'eoka', 'm1911', 'deagle'];
 
 /** The scanned model's grip and muzzle in its own geometry, if it loaded. */
 function scanned(item: ItemId) {

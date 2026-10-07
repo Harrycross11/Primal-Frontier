@@ -94,7 +94,30 @@ PROPS = {
     'tool-salvagedSword': 'd26a0700b3b3459a9bd5c9a68baacd42',
     'tool-woodenSpear': '2a2b1d94f53249df835c4555bb577d47',
     'tool-stoneSpear': 'ee07f678f5b349f88fad2964d594d26a',
+    'gun-m4': '1b858701dd7142d9b82bbe3fd121a97b',
+    'gun-scarH': '2de2a57a36c74b448bea0c5c2302d2e9',
+    'gun-m14': '108f19f0f641425daa3a55e54639188e',
+    'gun-hk416': '8e3e39f4c0a24937a3fb2ecece17e75f',
+    'gun-aug': '62ca412c88a64c0287774496b7f351fc',
+    'gun-vector': '609166faf8e5416f957c88e0af657e09',
+    'gun-ump45': '9f1c89e7d4764ff4bceffb6c67839c7a',
+    'gun-p90': '82d8b9f1e02b48f9b012698dcfa3352b',
+    'gun-deagle': 'cabde59f5cf24effaf80536e35d04e95',
+    'gun-m1911': '80a0b8a6c4314da4a7b3a7cfe6cec1d4',
+    'gun-spas12': 'dfb4e1671b5b49e7b8a54cd120fc4d9f',
+    'gun-saiga12': '2f2cce6204f14a9e8f7812141e8d63a4',
+    'gun-m82': 'af16e974a47e463989311bcda6f51f87',
+    'gun-svd': '2ac78fb5a0eb40f5a02a5b0a9f566abf',
+    'gun-m60': 'cbf408387dc94a30abe11afb3698ac13',
+    'gun-compoundBow': '962312982e984e97882fb61cdc5c8cc7',
+    'tool-combatKnife': 'f088779fadce407483329b38685ea5d1',
+    'tool-nailBat': '48095b439ec5464db93337b2c3457fcc',
+    'tool-fireAxe': '23cd18766328497286c925705a724b43',
+    'tool-sledgehammer': '0d4f90b84b1f43ac9ade0eda770a1626',
 }
+# Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
+# 512 px to hold the download down; they are small on screen.
+SMALL_TEXTURES = [name for name in PROPS if list(PROPS).index(name) >= list(PROPS).index('gun-m4')]
 
 
 def slim_textures(glb: bytes, size: int = 1024) -> bytes:
@@ -218,7 +241,7 @@ def main():
             continue
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
-            f.write(slim_textures(get(link['glb']['url'])))
+            f.write(slim_textures(get(link['glb']['url']), 512 if name in SMALL_TEXTURES else 1024))
         print('saved', name)
     for name, uid in CHARACTERS.items():
         scans.append(sketchfab_credit(name, uid, 'animated by the game'))

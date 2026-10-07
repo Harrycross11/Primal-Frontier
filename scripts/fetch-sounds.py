@@ -44,6 +44,22 @@ SOUNDS = {
     'shot-l96': ('351777_2863152', 1.3, 2.55),  # M24 sniper rifle
     'shot-huntingBow': ('384917_984733', 0.3, 0.5),  # recurve bow release
     'shot-crossbow': ('561475_12429869', 0.0, 1.15),
+    'shot-compoundBow': ('179996_3033176', 0.25, 0.17),  # bow release, cut before the arrow lands
+    'shot-m1911': ('740897_15072041', 0.0, 1.8),  # Colt 1911
+    'shot-deagle': ('712310_15072041', 0.0, 1.2),  # Desert Eagle
+    'shot-ump45': ('390663_5937039', 0.0, 0.6),  # submachine gun, single shot
+    'shot-vector': ('418433_6481539', 0.96, 0.3),  # .45 Uzi: the last round of a burst, with its ring-out
+    'shot-p90': ('740896_15072041', 2.97, 0.55),  # FN P90: the last round of a burst
+    'shot-spas12': ('156904_2801073', 0.0, 1.4),  # SPAS-12
+    'shot-saiga12': ('569309_12809197', 0.3, 1.4),  # Saiga 12K
+    'shot-m4': ('737569_15072041', 0.0, 1.7),  # Colt M4A1
+    'shot-hk416': ('46655_57789', 0.3, 1.6),  # 5.56 carbine
+    'shot-aug': ('855653_7157894', 0.0, 1.3),  # automatic rifle, single shot
+    'shot-scarH': ('702225_15072041', 0.0, 1.4),  # FN SCAR-H
+    'shot-m14': ('696023_15072041', 0.0, 1.4),  # Saiga MK-106 .308 rifle
+    'shot-svd': ('182790_71257', 0.3, 1.4),  # sniper rifle
+    'shot-m82': ('668071_7842170', 0.0, 0.95),  # .50 calibre
+    'shot-m60': ('538302_6209324', 0.0, 0.12),  # M60, the first round of a burst
     # Working the bolt after a shot.
     'bolt-boltRifle': ('267895_4174990', 1.2, 1.6),  # Mosin-Nagant
     'bolt-l96': ('351777_2863152', 0.05, 1.15),  # M24
@@ -57,6 +73,10 @@ SOUNDS = {
     'swing-sword': ('59992_71257', 0.0, 0.42),
     'swing-thrust': ('60013_71257', 0.0, 0.43),
     'swing-thrust2': ('59988_71257', 0.0, 0.28),
+    'swing-knife': ('35213_307822', 0.0, 0.3),
+    'swing-bat': ('766542_15468302', 0.15, 0.4),  # a baseball bat
+    'swing-fireAxe': ('147290_1401157', 0.0, 0.45),
+    'swing-sledge': ('475135_2927958', 0.0, 0.7),  # a low, heavy whoosh
     # A tool striking wood, rock or metal.
     'hit-chop': ('421928_8090574', 0.0, 0.27),  # chopping wood
     'hit-chop2': ('421929_8090574', 0.0, 0.25),
@@ -67,6 +87,10 @@ SOUNDS = {
     'hit-blade': ('783059_16503936', 0.0, 0.21),  # a sword hitting wood
     'hit-clang': ('275159_4745081', 0.0, 0.4),  # steel blade on something hard
     'hit-stab': ('504618_7704891', 0.2, 0.55),  # a point driven into wood
+    'hit-knife': ('179222_3337554', 0.0, 0.35),  # a knife stab
+    'hit-bat': ('449955_9159316', 0.0, 0.3),  # a wooden thud
+    'hit-split': ('177045_46808', 0.0, 0.38),  # an axe splitting a log
+    'hit-sledge': ('706979_14781925', 0.9, 0.4),  # a sledgehammer on brick
 }
 
 
