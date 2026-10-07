@@ -293,7 +293,7 @@ export class Avatar {
     const w = item ? ITEMS[item].weapon : undefined;
     this.pose = !w || w.class === 'melee' ? 'normal' : item === 'huntingBow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
     // A bow is gripped at its middle, and the other hand rests on the string.
-    this.hands = this.pose === 'normal' || !item ? null : this.pose === 'bow' ? { palm: new THREE.Vector3(0, 0.02, -0.14), hold: new THREE.Vector3(0, 0.02, 0.08) } : gunHands(item);
+    this.hands = this.pose === 'normal' || !item ? null : gunHands(item);
   }
 
   /** Dresses the survivor in the armour worn on their head, chest and legs. */

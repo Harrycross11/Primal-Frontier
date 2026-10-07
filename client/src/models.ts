@@ -74,9 +74,25 @@ const FIT: Record<string, Fit> = {
   'gun-semiPistol': { length: 0.216, drop: /_mag_/ },
   'gun-semiRifle': { length: 1.02, drop: /bayonet|clip/ },
   'gun-thompson': { length: 0.81, drop: /bullet/ },
+  'gun-eoka': { length: 0.3 },
+  // Lying on its side in the file, muzzle along -x.
+  'gun-waterpipe': { length: 0.6, turn: [-Math.PI / 2, Math.PI, Math.PI / 2] },
+  'gun-customSmg': { length: 0.78, turn: [0, -Math.PI / 2, 0] },
+  'gun-crossbow': { length: 0.8, turn: [0, Math.PI, 0] },
+  // Strung bow lying flat in the file; stood up with the string at the back.
+  'gun-huntingBow': { height: 1.3, turn: [-Math.PI / 2, 0, Math.PI / 2] },
   // Tools stand handle down, head up, the axe's edge and the pick's points along z.
   'tool-salvagedAxe': { height: 0.4, turn: [0, 0, -Math.PI / 2] },
   'tool-salvagedPickaxe': { height: 0.72, turn: [Math.PI, Math.PI / 2, 0] },
+  'tool-rock': { width: 0.12 },
+  'tool-stoneHatchet': { height: 0.45, turn: [0, Math.PI, 0] },
+  // Modelled leaning over; stood upright.
+  'tool-stonePickaxe': { height: 0.6, turn: [0.75, 0, 0] },
+  // Blades lie flat in their files; stood point up with the edge along z.
+  'tool-machete': { height: 0.6, turn: [0, Math.PI, -Math.PI / 2] },
+  'tool-salvagedSword': { height: 0.9, turn: [-Math.PI / 2, Math.PI, -Math.PI / 2] },
+  'tool-woodenSpear': { height: 2 },
+  'tool-stoneSpear': { height: 2, turn: [0.97, 0, 0] },
 };
 
 const models = new Map<string, Model[]>();

@@ -82,6 +82,18 @@ PROPS = {
     'gun-semiRifle': 'ada722d492344cba8633be150eea7e85',
     'tool-salvagedAxe': '30c5a2054fd9469796c0771dc52a0fa0',
     'tool-salvagedPickaxe': '83e334fc83ed4bb19592154e60e529c5',
+    'gun-eoka': '1e83dccd8d6e43a183fe48410750dfb4',
+    'gun-waterpipe': 'f0151ad09d414d1b8b8466bae9d38b56',
+    'gun-customSmg': 'd334c362b6534bfeaf21c0dd9dce7392',
+    'gun-crossbow': '0368b8111f5e4731beb025cd625b48a2',
+    'gun-huntingBow': 'a2385a27e8a4416a829a08469196a6ce',
+    'tool-rock': 'd9dbdfcf7d204e7c9ffb865b3e9579e4',
+    'tool-stoneHatchet': 'ce612acd03664358a5841316e35e0db7',
+    'tool-stonePickaxe': '9c1a373d8c1b4c249fb37ccba2a90a88',
+    'tool-machete': 'e3e3efb43edd4257afca9ee227c5299e',
+    'tool-salvagedSword': 'd26a0700b3b3459a9bd5c9a68baacd42',
+    'tool-woodenSpear': '2a2b1d94f53249df835c4555bb577d47',
+    'tool-stoneSpear': 'ee07f678f5b349f88fad2964d594d26a',
 }
 
 

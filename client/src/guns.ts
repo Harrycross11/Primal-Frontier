@@ -125,6 +125,17 @@ const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number; pa
   semiPistol: { grip: [0.31, 0.78], bore: 0.93, palm: [0.2, 0.375] },
   semiRifle: { grip: [0.27, 0.6], bore: 0.85, palm: [0.25, 0.57], hold: [0.55, 0.561] },
   thompson: { grip: [0.42, 0.53], bore: 0.83, palm: [0.41, 0.49], hold: [0.7, 0.678] },
+  eoka: { grip: [0.32, 0.8], bore: 0.86, palm: [0.29, 0.42] },
+  // A bolt-action pipe gun with a taped grip under the barrel block: the bolt tube rests in the
+  // shoulder like a stock, and the other hand takes the barrel under the lamp.
+  waterpipe: { grip: [0.68, 0.6], bore: 0.8, palm: [0.68, 0.3], hold: [0.88, 0.6] },
+  customSmg: { grip: [0.38, 0.68], bore: 0.92, palm: [0.36, 0.62], hold: [0.77, 0.82] },
+  // The crossbow is gripped at the wrist of the stock behind its trigger lever and supported
+  // under the stock in front of the lever, as far forward as an arm reaches. Its bore is the bolt groove.
+  crossbow: { grip: [0.38, 0.6], bore: 0.64, palm: [0.36, 0.55], hold: [0.6, 0.45] },
+  // The bow is lengths as seen side on, string at the back: grip is the riser, palm the string
+  // where the arrow nocks, hold the fist round the riser.
+  huntingBow: { grip: [0.86, 0.5], bore: 0.55, palm: [0.02, 0.53], hold: [0.86, 0.47] },
 };
 
 /** The scanned model's grip and muzzle in its own geometry, if it loaded. */
@@ -158,6 +169,7 @@ export function muzzleOffset(item: ItemId): THREE.Vector3 {
 export function gunHands(item: ItemId): { palm: THREE.Vector3; hold: THREE.Vector3 | null } {
   const scan = scanned(item);
   if (scan) return { palm: scan.palm, hold: scan.hold };
+  if (item === 'huntingBow') return { palm: new THREE.Vector3(0, 0.02, -0.14), hold: new THREE.Vector3(0, 0.02, 0.08) };
   const look = GUN_LOOKS[item];
   const m = muzzleOffset(item);
   // Code-built guns: the grip hangs below the receiver; the handguard is a little over a third of
@@ -167,9 +179,9 @@ export function gunHands(item: ItemId): { palm: THREE.Vector3; hold: THREE.Vecto
 
 export function buildGun(item: ItemId): THREE.Group | null {
   const look = GUN_LOOKS[item];
-  if (!look) return null;
-  const g = new THREE.Group();
   const scan = scanned(item);
+  if (!look && !scan) return null;
+  const g = new THREE.Group();
   if (scan) {
     const mesh = new THREE.Mesh(scan.model.geometry, scan.model.material);
     mesh.position.copy(scan.grip).negate();
@@ -179,6 +191,7 @@ export function buildGun(item: ItemId): THREE.Group | null {
     g.add(mesh);
     return g;
   }
+  if (!look) return null;
   const metal = finishMat(look.finish);
   const [len, h, w] = look.body;
   // The grip is at z = 0. Pistols hold the receiver forward of it; rifles reach further back.
