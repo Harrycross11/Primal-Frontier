@@ -22,6 +22,10 @@ interface Fit {
   width?: number;
   /** Height in metres. */
   height?: number;
+  /** Length along z in metres (guns, barrel along +z). */
+  length?: number;
+  /** Parts of the file left out, by mesh name: spare magazines, bayonets, loose rounds. */
+  drop?: RegExp;
   turn?: [number, number, number];
   /** The file is a set of variants side by side; each top-level object becomes its own model. */
   set?: boolean;
@@ -49,6 +53,23 @@ const FIT: Record<string, Fit> = {
   'wreck-d': { width: 4.7 },
   'wreck-e': { width: 3.9 },
   'wreck-f': { width: 4.6 },
+  // Held guns, turned so the barrel points along +z, at their real overall lengths.
+  'gun-assaultRifle': { length: 0.88, turn: [0, -Math.PI / 2, 0] },
+  'gun-boltRifle': { length: 1.23, drop: /bayonet/ },
+  'gun-doubleBarrel': { length: 1.1, turn: [0, -Math.PI / 2, 0] },
+  'gun-l96': { length: 1.2, turn: [0, Math.PI / 2, 0] },
+  'gun-lr300': { length: 0.92, turn: [0, Math.PI, 0] },
+  'gun-m249': { length: 1.04 },
+  'gun-mp5': { length: 0.7, turn: [0, Math.PI, 0] },
+  'gun-pumpShotgun': { length: 1.06, turn: [0, -Math.PI / 2, 0] },
+  'gun-revolver': { length: 0.3 },
+  // The file has a spare magazine lying beside the pistol.
+  'gun-semiPistol': { length: 0.216, drop: /_mag_/ },
+  'gun-semiRifle': { length: 1.02, drop: /bayonet|clip/ },
+  'gun-thompson': { length: 0.81, drop: /bullet/ },
+  // Tools stand handle down, head up, the axe's edge and the pick's points along z.
+  'tool-salvagedAxe': { height: 0.4, turn: [0, 0, -Math.PI / 2] },
+  'tool-salvagedPickaxe': { height: 0.72, turn: [Math.PI, Math.PI / 2, 0] },
 };
 
 const models = new Map<string, Model[]>();
@@ -59,7 +80,7 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
   root.updateMatrixWorld(true);
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh) return;
+    if (!mesh.isMesh || fit.drop?.test(mesh.name)) return;
     const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
     // Keep only what every part has, so the parts can be merged.
     for (const key of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(key)) geo.deleteAttribute(key);
@@ -73,7 +94,7 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
   geometry.computeBoundingBox();
   const box = geometry.boundingBox!;
   const size = box.getSize(new THREE.Vector3());
-  const k = fit.height ? fit.height / size.y : fit.width ? fit.width / Math.max(size.x, size.z) : 1;
+  const k = fit.height ? fit.height / size.y : fit.length ? fit.length / size.z : fit.width ? fit.width / Math.max(size.x, size.z) : 1;
   // Centred over the origin, resting on y = 0.
   geometry.translate(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
   geometry.scale(k, k, k);

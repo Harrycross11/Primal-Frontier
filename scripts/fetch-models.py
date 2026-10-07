@@ -12,6 +12,7 @@ SKETCHFAB_TOKEN, unless a proxy already adds it.
     python3 scripts/fetch-models.py tyre log   # just these
 """
 
+import io
 import json
 import os
 import struct
@@ -57,6 +58,62 @@ SCANS = {
 CHARACTERS = {
     'survivor': 'f56ffc64d18c40cf95d17559542ca44c',
 }
+
+# Game-ready Sketchfab models for held weapons and tools: kept as modelled, with their textures
+# shrunk to at most 1024 px (needs Pillow). Named after the item they replace.
+PROPS = {
+    'gun-assaultRifle': 'dc58144409534abbb60970638d171f9f',
+    'gun-boltRifle': '92ede39f23bd40c7982c727dfd7c4be0',
+    'gun-l96': '34611493b4104bdba2ce6beabfeb4465',
+    'gun-revolver': 'a44fb0c205114af4bd58ed79aa1d2f57',
+    'gun-pumpShotgun': '26e37df4c38c4e8a9da8adeb4b66bff6',
+    'gun-mp5': '60ec470e41ff47368c792dd6caa74529',
+    'gun-semiPistol': '6fd5b49b34fe4af796e930401cff15f6',
+    'gun-thompson': 'bbeb0c969a084525940c27bbaccb666c',
+    'gun-doubleBarrel': '04741a40f2224cffafc343b0236d5bbe',
+    'gun-m249': 'b1e60faa37de4461822103fe38e5c9ce',
+    'gun-lr300': 'ac375d2498bd4a59a23a878312b6ac43',
+    'gun-semiRifle': 'ada722d492344cba8633be150eea7e85',
+    'tool-salvagedAxe': '30c5a2054fd9469796c0771dc52a0fa0',
+    'tool-salvagedPickaxe': '83e334fc83ed4bb19592154e60e529c5',
+}
+
+
+def slim_textures(glb: bytes, size: int = 1024) -> bytes:
+    """Re-encodes a .glb's embedded images at most `size` px wide: JPEG, or PNG where there is alpha."""
+    from PIL import Image
+
+    length = struct.unpack_from('<I', glb, 12)[0]
+    doc = json.loads(glb[20:20 + length])
+    binary = glb[20 + length + 8:]
+    images = {img['bufferView']: img for img in doc.get('images', []) if 'bufferView' in img}
+    out = bytearray()
+    for i, view in enumerate(doc['bufferViews']):
+        data = binary[view.get('byteOffset', 0):view.get('byteOffset', 0) + view['byteLength']]
+        if i in images:
+            im = Image.open(io.BytesIO(data))
+            im.thumbnail((size, size), Image.LANCZOS)
+            alpha = im.mode in ('RGBA', 'LA', 'P') and im.convert('RGBA').getextrema()[3][0] < 255
+            buf = io.BytesIO()
+            if alpha:
+                im.convert('RGBA').save(buf, 'PNG', optimize=True)
+                images[i]['mimeType'] = 'image/png'
+            else:
+                im.convert('RGB').save(buf, 'JPEG', quality=88)
+                images[i]['mimeType'] = 'image/jpeg'
+            data = buf.getvalue()
+        while len(out) % 4:
+            out.append(0)
+        view['byteOffset'] = len(out)
+        view['byteLength'] = len(data)
+        out += data
+    while len(out) % 4:
+        out.append(0)
+    doc['buffers'] = [{'byteLength': len(out)}]
+    text = json.dumps(doc, separators=(',', ':')).encode()
+    text += b' ' * (-len(text) % 4)
+    total = 12 + 8 + len(text) + 8 + len(out)
+    return struct.pack('<III', 0x46546C67, 2, total) + struct.pack('<II', len(text), 0x4E4F534A) + text + struct.pack('<II', len(out), 0x004E4942) + bytes(out)
 
 
 def sketchfab_credit(name: str, uid: str, note: str) -> str:
@@ -129,6 +186,14 @@ def main():
                 check=True, capture_output=True, text=True,
             )
             print('saved', name, result.stdout.strip())
+    for name, uid in PROPS.items():
+        scans.append(sketchfab_credit(name, uid, 'textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
+            f.write(slim_textures(get(link['glb']['url'])))
+        print('saved', name)
     for name, uid in CHARACTERS.items():
         scans.append(sketchfab_credit(name, uid, 'animated by the game'))
         if only and name not in only:
@@ -141,7 +206,7 @@ def main():
         f.write(
             '# Models\n\nPhoto-scanned models from Poly Haven, all CC0 (public domain), simplified for the game.\n\n'
             + '\n'.join(credits)
-            + '\n\nModels from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, and rigged characters.\n\n'
+            + '\n\nModels from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.\n\n'
             + '\n'.join(scans)
             + '\n'
         )

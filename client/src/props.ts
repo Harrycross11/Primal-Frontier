@@ -332,6 +332,16 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
 export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
   if (!item) return null;
   const g = new THREE.Group();
+  // A scanned tool, if it loaded, stands with the end of its handle just below the hand.
+  const scan = model(`tool-${item}`);
+  if (scan) {
+    const tool = new THREE.Mesh(scan.geometry, scan.material);
+    tool.position.y = -0.12;
+    tool.castShadow = true;
+    tool.userData.shared = true;
+    g.add(tool);
+    return g;
+  }
   const handle = (len: number, m: THREE.Material) => mesh(new THREE.CylinderGeometry(0.016, 0.019, len, 8), m, 0, len / 2 - 0.12, 0);
   const wood = plain(0x6b5136, 0.85);
   /** Rope or tape wound round the shaft, as rings stacked along y. */

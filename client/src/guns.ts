@@ -2,11 +2,15 @@
 // barrel, stock, magazine, sights, finish) and both its 3D model and its inventory icon are
 // built from that description, so the two always match.
 //
+// Where a photo-scanned model of the gun has loaded (see models.ts), it is used instead, placed
+// in the same model space by where its pistol grip and bore are.
+//
 // Model space: the grip is at the origin, the barrel points along +z, up is +y. Metres.
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { ItemId } from '../../shared/items.ts';
+import { model } from './models.ts';
 import { gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 type Finish = 'black' | 'rust' | 'scrap' | 'steel';
@@ -101,8 +105,42 @@ function profile(points: [number, number][], width: number): THREE.BufferGeometr
 /** A cylinder lying along z. */
 const tube = (r: number, len: number, seg = 10) => new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2);
 
+/**
+ * Scanned guns: where the hand grips (top of the pistol grip, or the wrist of the stock),
+ * measured from the back and from the bottom of the model as fractions of its length and
+ * height, and how high the bore is, as a fraction of the height.
+ */
+const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number }>> = {
+  assaultRifle: { grip: [0.325, 0.5], bore: 0.8 },
+  boltRifle: { grip: [0.275, 0.5], bore: 0.7 },
+  doubleBarrel: { grip: [0.37, 0.56], bore: 0.93 },
+  l96: { grip: [0.275, 0.4], bore: 0.66 },
+  lr300: { grip: [0.39, 0.48], bore: 0.74 },
+  m249: { grip: [0.31, 0.53], bore: 0.78 },
+  mp5: { grip: [0.435, 0.57], bore: 0.79 },
+  pumpShotgun: { grip: [0.31, 0.55], bore: 0.93 },
+  revolver: { grip: [0.21, 0.58], bore: 0.9 },
+  semiPistol: { grip: [0.31, 0.78], bore: 0.93 },
+  semiRifle: { grip: [0.27, 0.6], bore: 0.85 },
+  thompson: { grip: [0.42, 0.53], bore: 0.83 },
+};
+
+/** The scanned model's grip and muzzle in its own geometry, if it loaded. */
+function scanned(item: ItemId) {
+  const s = SCANNED[item];
+  const m = s && model(`gun-${item}`);
+  if (!m) return null;
+  const box = m.geometry.boundingBox!;
+  const size = box.getSize(new THREE.Vector3());
+  const grip = new THREE.Vector3(0, box.min.y + s.grip[1] * size.y, box.min.z + s.grip[0] * size.z);
+  const muzzle = new THREE.Vector3(0, box.min.y + s.bore * size.y, box.max.z).sub(grip);
+  return { model: m, grip, muzzle };
+}
+
 /** Where the front of the receiver is, for muzzle flashes: the barrel tip in model space. */
 export function muzzleOffset(item: ItemId): THREE.Vector3 {
+  const scan = scanned(item);
+  if (scan) return scan.muzzle.clone();
   const look = GUN_LOOKS[item];
   if (!look) return new THREE.Vector3(0, 0.05, 0.6);
   const [len, h] = look.body;
@@ -114,6 +152,16 @@ export function buildGun(item: ItemId): THREE.Group | null {
   const look = GUN_LOOKS[item];
   if (!look) return null;
   const g = new THREE.Group();
+  const scan = scanned(item);
+  if (scan) {
+    const mesh = new THREE.Mesh(scan.model.geometry, scan.model.material);
+    mesh.position.copy(scan.grip).negate();
+    mesh.castShadow = true;
+    // Shared with every other copy of this gun; not to be disposed with one of them.
+    mesh.userData.shared = true;
+    g.add(mesh);
+    return g;
+  }
   const metal = finishMat(look.finish);
   const [len, h, w] = look.body;
   // The grip is at z = 0. Pistols hold the receiver forward of it; rifles reach further back.

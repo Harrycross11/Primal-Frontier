@@ -67,7 +67,7 @@ export function itemIconUrl(item: ItemId): string | null {
   s.renderer.render(s.scene, s.camera);
   const url = s.renderer.domElement.toDataURL('image/png');
   s.scene.remove(model);
-  model.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+  model.traverse((o) => !o.userData.shared && (o as THREE.Mesh).geometry?.dispose());
   urls.set(item, url);
   return url;
 }
