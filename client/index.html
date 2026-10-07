@@ -29,7 +29,30 @@
       #play { margin-top: 14px; width: 100%; padding: 14px; font-size: 20px; font-weight: 800; border: 0;
         border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; box-shadow: 0 4px 0 #9a4614; }
       #play:disabled { opacity: .6; cursor: wait; }
+      #loading { margin-top: 12px; font-size: 13px; opacity: .8; }
+      #loading[hidden] { display: none; }
+      #loading .bar { height: 6px; margin-top: 6px; border-radius: 3px; background: rgba(0,0,0,.35); overflow: hidden; }
+      #loading-fill { width: 0; height: 100%; background: var(--accent); transition: width .2s; }
       #join-error { min-height: 22px; margin-top: 12px; color: #ffb199; }
+      #join { overflow-y: auto; }
+      #look { margin-top: 14px; text-align: left; border: 2px solid #8a7356; border-radius: 12px; background: rgba(0,0,0,.25); }
+      #look summary { cursor: pointer; padding: 10px 14px; font-weight: 700; color: #ffd28a; }
+      #look[open] { width: min(640px, calc(100vw - 32px)); position: relative; left: 50%; transform: translateX(-50%); }
+      .look-body { display: flex; gap: 12px; padding: 0 12px 12px; align-items: center; }
+      #look-preview { width: 200px; height: 300px; flex: none; border-radius: 10px; background: radial-gradient(ellipse at 50% 40%, #7a6a56, #3a3128); }
+      .look-body > div { flex: 1; min-width: 0; }
+      .look-row { display: grid; grid-template-columns: 78px 32px 1fr 32px; align-items: center; gap: 4px; margin: 3px 0; font-size: 14px; }
+      .look-label { opacity: .75; }
+      .look-value { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .look-row button, .look-buttons button { height: 32px; border: 0; border-radius: 8px; background: rgba(255,255,255,.12); color: var(--ink); font-size: 18px; cursor: pointer; }
+      .look-row button:hover, .look-buttons button:hover { background: rgba(255,255,255,.22); }
+      .look-buttons { display: flex; gap: 8px; margin-top: 8px; }
+      .look-buttons button { flex: 1; font-size: 14px; }
+      @media (max-width: 520px) {
+        .look-body { flex-direction: column; }
+        #look-preview { width: 100%; height: 240px; }
+        .look-body > div { width: 100%; }
+      }
       .controls { margin-top: 18px; font-size: 13px; opacity: .7; line-height: 1.6; }
 
       #hud[hidden] { display: none; }
@@ -223,7 +246,18 @@
         <h1 class="title">PRIMAL<br />FRONTIER</h1>
         <p class="tagline">The world ended. Scavenge, build, survive.</p>
         <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
+        <details id="look">
+          <summary>Customise your survivor</summary>
+          <div class="look-body">
+            <canvas id="look-preview"></canvas>
+            <div>
+              <div id="look-rows"></div>
+              <div class="look-buttons"><button type="button" id="look-random">Random</button><button type="button" id="look-reset">As scanned</button></div>
+            </div>
+          </div>
+        </details>
         <button id="play">Enter the wasteland</button>
+        <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
         <div id="join-error"></div>
         <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
           Left click hit, build or shoot · Right click aim · R reload · 1–6 belt · Tab inventory and crafting · E open</div>

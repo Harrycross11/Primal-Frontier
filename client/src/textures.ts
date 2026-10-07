@@ -71,7 +71,7 @@ function photo(name: string, opts: PhotoOptions = {}): Surface {
   const key = opts.key ?? name;
   const hit = cache.get(key);
   if (hit) return hit;
-  const url = (kind: string) => `/textures/${name}_${kind}.jpg`;
+  const url = (kind: string) => `/textures/${name}_${kind}.webp`;
   let map: THREE.Texture;
   if (opts.edit) {
     // Drawn into a canvas of the photo's final size up front, so the texture never changes size.

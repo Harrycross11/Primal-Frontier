@@ -34,6 +34,10 @@ export type ItemId =
   | 'stoneSpear'
   | 'machete'
   | 'salvagedSword'
+  | 'combatKnife'
+  | 'nailBat'
+  | 'fireAxe'
+  | 'sledgehammer'
   // Bows and guns
   | 'huntingBow'
   | 'crossbow'
@@ -52,6 +56,22 @@ export type ItemId =
   | 'boltRifle'
   | 'l96'
   | 'm249'
+  | 'm1911'
+  | 'deagle'
+  | 'compoundBow'
+  | 'ump45'
+  | 'vector'
+  | 'p90'
+  | 'spas12'
+  | 'saiga12'
+  | 'm4'
+  | 'hk416'
+  | 'aug'
+  | 'scarH'
+  | 'm14'
+  | 'svd'
+  | 'm82'
+  | 'm60'
   // Ammo
   | 'arrow'
   | 'handmadeShell'
@@ -238,6 +258,10 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   stoneSpear: melee('Stone Spear', 'A wooden spear with a stone tip. Hits harder.', 40, 0.9, 3, 160),
   machete: melee('Machete', 'Quick, light blade beaten from scrap metal.', 35, 0.55, 2.4, 200),
   salvagedSword: melee('Salvaged Sword', 'A heavy blade cut from a car leaf spring.', 50, 0.85, 2.6, 250),
+  combatKnife: melee('Combat Knife', 'A military fighting knife. Very fast, short reach.', 32, 0.4, 1.9, 300),
+  nailBat: melee('Nail Bat', 'A baseball bat driven through with nails.', 45, 0.75, 2.5, 220),
+  fireAxe: melee('Fire Axe', 'A heavy steel axe built to break doors.', 60, 1, 2.6, 350),
+  sledgehammer: melee('Sledgehammer', 'Slow and crushing. Nothing hits harder up close.', 75, 1.3, 2.5, 400),
 
   huntingBow: gun('Hunting Bow', 'Quiet and cheap. Fires wooden arrows.', {
     class: 'bow', damage: 50, delay: 0.9, range: 60, ammo: 'arrow', mag: 1, reload: 0.6, spread: 0.012, recoil: 0.01, durability: 150,
@@ -289,6 +313,54 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   }),
   m249: gun('M249', 'A belt-fed machine gun with a hundred-round box.', {
     damage: 45, delay: 0.12, range: 160, auto: true, ammo: 'rifleAmmo', mag: 100, reload: 7, spread: 0.025, recoil: 0.02, durability: 2000,
+  }),
+  m1911: gun('M1911', 'A heavy .45 service pistol. Seven hard-hitting rounds.', {
+    damage: 45, delay: 0.18, range: 70, ammo: 'pistolAmmo', mag: 7, reload: 2, spread: 0.011, recoil: 0.03, durability: 500,
+  }),
+  deagle: gun('Desert Eagle', 'A hand cannon. Huge damage and huge kick.', {
+    damage: 65, delay: 0.35, range: 90, ammo: 'pistolAmmo', mag: 7, reload: 2.4, spread: 0.01, recoil: 0.06, durability: 500,
+  }),
+  compoundBow: gun('Compound Bow', 'Pulleys make it the hardest-hitting bow there is.', {
+    class: 'bow', damage: 85, delay: 1.1, range: 100, ammo: 'arrow', mag: 1, reload: 0.8, spread: 0.005, recoil: 0.01, durability: 300,
+  }),
+  ump45: gun('UMP-45', 'A slower SMG that hits harder per round.', {
+    damage: 40, delay: 0.11, range: 80, auto: true, ammo: 'pistolAmmo', mag: 25, reload: 3.6, spread: 0.016, recoil: 0.016, durability: 800,
+  }),
+  vector: gun('Kriss Vector', 'The fastest-firing gun there is. Almost no climb.', {
+    damage: 32, delay: 0.06, range: 70, auto: true, ammo: 'pistolAmmo', mag: 30, reload: 3.2, spread: 0.018, recoil: 0.01, durability: 900,
+  }),
+  p90: gun('P90', 'Fifty rounds in a top-mounted magazine.', {
+    damage: 33, delay: 0.075, range: 85, auto: true, ammo: 'pistolAmmo', mag: 50, reload: 4.2, spread: 0.015, recoil: 0.012, durability: 1000,
+  }),
+  spas12: gun('SPAS-12', 'A combat shotgun with tighter spread and eight shells.', {
+    damage: 15, delay: 0.7, range: 40, ammo: 'shotgunShell', mag: 8, reload: 5, spread: 0.04, pellets: 12, recoil: 0.07, durability: 700,
+  }),
+  saiga12: gun('Saiga-12', 'A semi-automatic shotgun with a box magazine.', {
+    damage: 13, delay: 0.3, range: 35, ammo: 'shotgunShell', mag: 10, reload: 3.5, spread: 0.05, pellets: 12, recoil: 0.08, durability: 800,
+  }),
+  m4: gun('M4A1 Carbine', 'A light, steady assault rifle.', {
+    damage: 42, delay: 0.1, range: 180, auto: true, ammo: 'rifleAmmo', mag: 30, reload: 3.6, spread: 0.011, recoil: 0.016, durability: 1200,
+  }),
+  hk416: gun('HK416', 'The best all-round rifle. Accurate and reliable.', {
+    damage: 45, delay: 0.11, range: 190, auto: true, ammo: 'rifleAmmo', mag: 30, reload: 3.8, spread: 0.01, recoil: 0.017, durability: 1500,
+  }),
+  aug: gun('Steyr AUG', 'A compact bullpup rifle with a long barrel.', {
+    damage: 44, delay: 0.115, range: 200, auto: true, ammo: 'rifleAmmo', mag: 30, reload: 4, spread: 0.009, recoil: 0.018, durability: 1300,
+  }),
+  scarH: gun('SCAR-H', 'A heavy battle rifle. Twenty big rounds, strong kick.', {
+    damage: 58, delay: 0.15, range: 220, auto: true, ammo: 'rifleAmmo', mag: 20, reload: 4, spread: 0.012, recoil: 0.034, durability: 1500,
+  }),
+  m14: gun('M14', 'A battle-worn marksman rifle. Fast, precise single shots.', {
+    damage: 62, delay: 0.25, range: 260, ammo: 'rifleAmmo', mag: 20, reload: 4, spread: 0.003, recoil: 0.04, durability: 1000,
+  }),
+  svd: gun('SVD Dragunov', 'A scoped semi-automatic sniper rifle.', {
+    damage: 75, delay: 0.5, range: 350, ammo: 'rifleAmmo', mag: 10, reload: 4.5, spread: 0.002, recoil: 0.05, durability: 800,
+  }),
+  m82: gun('Barrett M82', 'A .50 calibre anti-materiel rifle. The biggest gun in the wasteland.', {
+    damage: 140, delay: 1.2, range: 500, ammo: 'rifleAmmo', mag: 10, reload: 6, spread: 0.001, recoil: 0.1, durability: 600,
+  }),
+  m60: gun('M60', 'A heavy belt-fed machine gun. Slow fire, brutal rounds.', {
+    damage: 55, delay: 0.11, range: 170, auto: true, ammo: 'rifleAmmo', mag: 100, reload: 8, spread: 0.028, recoil: 0.026, durability: 2500,
   }),
 
   arrow: { name: 'Wooden Arrow', kind: 'ammo', stack: 64, description: 'For the hunting bow and crossbow.' },
@@ -472,6 +544,26 @@ export const RECIPES: Recipe[] = [
   { item: 'boltRifle', count: 1, cost: { metal: 300, hqm: 40, wood: 100 }, time: 25, workbench: 3, category: 'Weapons' },
   { item: 'l96', count: 1, cost: { metal: 500, hqm: 75, scrap: 200 }, time: 30, workbench: 3, category: 'Weapons' },
   { item: 'm249', count: 1, cost: { metal: 500, hqm: 80, scrap: 250 }, time: 30, workbench: 3, category: 'Weapons' },
+  { item: 'combatKnife', count: 1, cost: { metal: 50, cloth: 10 }, time: 5, workbench: 1, category: 'Weapons' },
+  { item: 'nailBat', count: 1, cost: { wood: 150, metal: 20 }, time: 5, workbench: 1, category: 'Weapons' },
+  { item: 'fireAxe', count: 1, cost: { metal: 120, hqm: 5, wood: 50 }, time: 10, workbench: 2, category: 'Weapons' },
+  { item: 'sledgehammer', count: 1, cost: { metal: 200, hqm: 10, wood: 80 }, time: 12, workbench: 2, category: 'Weapons' },
+  { item: 'm1911', count: 1, cost: { metal: 175, hqm: 8, scrap: 50 }, time: 12, workbench: 2, category: 'Weapons' },
+  { item: 'compoundBow', count: 1, cost: { wood: 150, metal: 100, hqm: 5, cloth: 30 }, time: 12, workbench: 2, category: 'Weapons' },
+  { item: 'ump45', count: 1, cost: { metal: 250, hqm: 20, scrap: 90 }, time: 18, workbench: 2, category: 'Weapons' },
+  { item: 'spas12', count: 1, cost: { metal: 300, hqm: 30, scrap: 100 }, time: 20, workbench: 3, category: 'Weapons' },
+  { item: 'deagle', count: 1, cost: { metal: 250, hqm: 30, scrap: 100 }, time: 20, workbench: 3, category: 'Weapons' },
+  { item: 'vector', count: 1, cost: { metal: 300, hqm: 35, scrap: 120 }, time: 22, workbench: 3, category: 'Weapons' },
+  { item: 'p90', count: 1, cost: { metal: 300, hqm: 40, scrap: 130 }, time: 22, workbench: 3, category: 'Weapons' },
+  { item: 'saiga12', count: 1, cost: { metal: 350, hqm: 45, scrap: 140 }, time: 24, workbench: 3, category: 'Weapons' },
+  { item: 'm4', count: 1, cost: { metal: 350, hqm: 50, scrap: 150 }, time: 25, workbench: 3, category: 'Weapons' },
+  { item: 'aug', count: 1, cost: { metal: 375, hqm: 55, scrap: 160 }, time: 26, workbench: 3, category: 'Weapons' },
+  { item: 'hk416', count: 1, cost: { metal: 400, hqm: 60, scrap: 170 }, time: 27, workbench: 3, category: 'Weapons' },
+  { item: 'scarH', count: 1, cost: { metal: 450, hqm: 70, scrap: 180 }, time: 28, workbench: 3, category: 'Weapons' },
+  { item: 'm14', count: 1, cost: { metal: 450, hqm: 70, scrap: 200 }, time: 28, workbench: 3, category: 'Weapons' },
+  { item: 'svd', count: 1, cost: { metal: 500, hqm: 80, wood: 150 }, time: 30, workbench: 3, category: 'Weapons' },
+  { item: 'm60', count: 1, cost: { metal: 650, hqm: 100, scrap: 300 }, time: 35, workbench: 3, category: 'Weapons' },
+  { item: 'm82', count: 1, cost: { metal: 800, hqm: 150, scrap: 400 }, time: 40, workbench: 3, category: 'Weapons' },
 
   { item: 'arrow', count: 2, cost: { wood: 25, stone: 10 }, time: 1, category: 'Ammo' },
   { item: 'handmadeShell', count: 2, cost: { stone: 5, gunpowder: 5 }, time: 1, category: 'Ammo' },

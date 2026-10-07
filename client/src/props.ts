@@ -328,10 +328,35 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
   return g;
 }
 
+/**
+ * How far up a scanned tool's handle the hand closes, in metres from its end: near the guard on
+ * blades, around the balance point on spears, and round the middle of a rock.
+ */
+const TOOL_GRIP: Partial<Record<ItemId, number | 'middle'>> = {
+  rock: 'middle',
+  machete: 0.09,
+  salvagedSword: 0.2,
+  woodenSpear: 0.85,
+  stoneSpear: 0.85,
+  combatKnife: 0.06,
+  nailBat: 0.1,
+};
+
 /** What a survivor holds in their right hand, modelled pointing along +y from the grip. */
 export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
   if (!item) return null;
   const g = new THREE.Group();
+  // A scanned tool, if it loaded, stands with the end of its handle just below the hand.
+  const scan = model(`tool-${item}`);
+  if (scan) {
+    const tool = new THREE.Mesh(scan.geometry, scan.material);
+    const grip = TOOL_GRIP[item] ?? 0.12;
+    tool.position.y = -(grip === 'middle' ? scan.geometry.boundingBox!.max.y / 2 : grip);
+    tool.castShadow = true;
+    tool.userData.shared = true;
+    g.add(tool);
+    return g;
+  }
   const handle = (len: number, m: THREE.Material) => mesh(new THREE.CylinderGeometry(0.016, 0.019, len, 8), m, 0, len / 2 - 0.12, 0);
   const wood = plain(0x6b5136, 0.85);
   /** Rope or tape wound round the shaft, as rings stacked along y. */

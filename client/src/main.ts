@@ -23,8 +23,9 @@ import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../.
 import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
-import { Graphics } from './graphics.ts';
+import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { LookPicker } from './lookPicker.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
@@ -48,7 +49,7 @@ const RESOURCE_NAMES = {
 } as const;
 const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
 const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
-const SCOPED: ItemId[] = ['boltRifle', 'l96'];
+const SCOPED: ItemId[] = ['boltRifle', 'l96', 'svd', 'm82'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
 /** What each resource sounds like and sheds when hit. */
@@ -75,8 +76,20 @@ interface Remote {
 
 const hud = new Hud();
 
+/** A private random id kept in this browser, so the server gives back your survivor next time. */
+function survivorToken(): string | undefined {
+  try {
+    let token = localStorage.getItem('pf-token');
+    if (!token) localStorage.setItem('pf-token', (token = crypto.randomUUID()));
+    return token;
+  } catch {
+    return undefined;
+  }
+}
+
 // Start loading the scanned models straight away; joining waits for them.
-const modelsReady = loadModels();
+const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
+const picker = new LookPicker(modelsReady);
 
 hud.onPlay(async (name) => {
   const net = new Net();
@@ -86,7 +99,7 @@ hud.onPlay(async (name) => {
     hud.showJoinError((e as Error).message);
     return;
   }
-  net.send({ t: 'join', name });
+  net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);
@@ -97,6 +110,7 @@ hud.onPlay(async (name) => {
     return;
   }
   await modelsReady;
+  picker.dispose();
   hud.hideJoin();
   startGame(net, welcome);
 });
@@ -115,7 +129,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const effects = new Effects(world.scene);
   effects.listener = camera;
   effects.startAmbience();
-  const me = new Avatar(welcome.you.color);
+  const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
   const controller = new Controller(world, () => resources, canvas);
@@ -138,7 +152,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const remotes = new Map<number, Remote>();
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
-    const avatar = new Avatar(p.color, p.name);
+    const avatar = new Avatar(p.color, p.name, p.look);
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
     world.scene.add(avatar.root);
@@ -228,7 +242,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           const surface = RESOURCE_SURFACE[node.kind];
           if (node.kind === 'waterBarrel') effects.consumeSound('drink', at);
           else {
-            effects.gatherSound(surface, at, m.amount === 0);
+            const tool = m.by === welcome.id ? held() : (remotes.get(m.by)?.avatar.heldItem ?? null);
+            effects.gatherSound(surface, at, m.amount === 0, tool);
             effects.chipsAt(at, surface, node.y, m.amount === 0 ? 16 : 7, m.amount === 0 ? 1.5 : 1);
           }
           if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
@@ -424,7 +439,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
     if (e.code === 'KeyO') {
-      gfx.setQuality(gfx.quality === 'high' ? 'low' : 'high');
+      gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
     }
   });
@@ -543,7 +558,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     lastAttack = now;
     net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
     me.swing();
-    effects.swingSound(w.damage > 40);
+    effects.swingSound(w.damage > 40, item);
   }
 
   const raycaster = new THREE.Raycaster();
@@ -641,7 +656,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
       net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
       me.swing();
-      effects.swingSound();
+      effects.swingSound(false, held());
     } else if (aimDeployable) {
       if (!deployableInRange(aimDeployable, BUILD_RANGE)) return hud.notice('Too far away');
       net.send({ t: 'hitDeployable', id: aimDeployable.id });

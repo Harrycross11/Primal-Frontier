@@ -14,6 +14,7 @@ import {
 } from '../shared/constants.ts';
 import type { CraftJob, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
+import { cleanLook } from '../shared/look.ts';
 import {
   HIT_DAMAGE,
   MAX_HP,
@@ -123,6 +124,41 @@ interface Player extends Omit<PlayerState, 'held' | 'wear'> {
   sentHp: number;
 }
 
+/** What is kept of a survivor while they are offline, so they come back as they left. */
+interface Sleeper {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  hp: number;
+  dead: boolean;
+  slots: Slots;
+  wear: Slots;
+  vitals: Vitals;
+}
+
+/** Everything needed to bring a world back after the server restarts. Times are kept as ms left. */
+export interface WorldSave {
+  version: 1;
+  seed: number;
+  /** When this world began (ms since 1970), for the wipe. */
+  startedAt: number;
+  nextId: number;
+  nextDeployableId: number;
+  pieces: Piece[];
+  deployables: Deployable[];
+  /** Units left in each resource node, by id. */
+  resources: number[];
+  respawns: { id: number; in: number }[];
+  furnaces: [number, FurnaceTimers][];
+  /** Seconds left on each loot bag. */
+  bags: [number, number][];
+  /** Every survivor, online or not, by the private token their browser keeps. */
+  survivors: [string, Sleeper][];
+}
+
 /** Furnace burn and smelt timers, kept off the shared deployable state. */
 interface FurnaceTimers {
   burn: number;
@@ -143,6 +179,11 @@ export class Game {
   readonly pieces = new Map<string, Piece>();
   readonly deployables = new Map<number, Deployable>();
   readonly players = new Map<number, Player>();
+  /** When this world began, for the wipe. */
+  startedAt = 0;
+  /** Survivors who are offline, by their token, and the token of each one online. */
+  private sleepers = new Map<string, Sleeper>();
+  private tokens = new Map<number, string>();
   private nextId = 1;
   private nextDeployableId = 1;
   private respawns: { id: number; at: number }[] = [];
@@ -171,9 +212,19 @@ export class Game {
   }
 
   /** Adds a player at a random spawn point. Returns null when the server is full. */
-  join(name: string, now: number): { id: number; out: Outgoing[] } | null {
+  /**
+   * Adds a player. A `token` their browser kept from before brings back the survivor it was:
+   * where they were, what they carried and wore, and how hurt, hungry and thirsty they were.
+   * Returns null when the server is full.
+   */
+  join(name: string, now: number, look: unknown = null, token: unknown = null): { id: number; out: Outgoing[] } | null {
     if (this.players.size >= MAX_PLAYERS) return null;
-    const id = this.nextId++;
+    // A second tab with the same token plays as somebody new rather than the same survivor twice.
+    const key = cleanToken(token) && ![...this.tokens.values()].includes(cleanToken(token)!) ? cleanToken(token) : null;
+    const back = key ? this.sleepers.get(key) : undefined;
+    if (key) this.sleepers.delete(key);
+    const id = back?.id ?? this.nextId++;
+    if (key) this.tokens.set(id, key);
     const [x, z] = this.spawnPoint();
     const usedColors = new Set([...this.players.values()].map((p) => p.color));
     const color = COLORS.find((c) => !usedColors.has(c)) ?? COLORS[id % COLORS.length];
@@ -186,6 +237,7 @@ export class Game {
       id,
       name: cleanName(name) || `Survivor ${id}`,
       color,
+      look: cleanLook(look),
       x,
       y: terrainHeight(this.seed, x, z),
       z,
@@ -208,6 +260,10 @@ export class Game {
       lastMoveAt: now,
       lastGatherAt: 0,
     };
+    if (back && !back.dead && back.hp > 0) {
+      Object.assign(player, { x: back.x, y: back.y, z: back.z, yaw: back.yaw, hp: back.hp, sentHp: back.hp, slots: back.slots, wear: back.wear, vitals: back.vitals });
+      if (!cleanName(name)) player.name = back.name;
+    }
     this.players.set(id, player);
     const pub = publicState(player);
     return {
@@ -224,7 +280,7 @@ export class Game {
             resources: this.resources,
             pieces: [...this.pieces.values()],
             deployables: [...this.deployables.values()],
-            slots: clone(slots),
+            slots: clone(player.slots),
             wear: clone(player.wear),
             hp: player.hp,
             vitals: { ...player.vitals },
@@ -240,6 +296,11 @@ export class Game {
     const p = this.players.get(id);
     if (!p) return [];
     this.players.delete(id);
+    const key = this.tokens.get(id);
+    if (key) {
+      this.tokens.delete(id);
+      this.sleepers.set(key, sleeper(p));
+    }
     return [
       { to: 'all', msg: { t: 'left', id } },
       { to: 'all', msg: { t: 'notice', text: `${p.name} left` } },
@@ -793,6 +854,47 @@ export class Game {
     return p && !p.dead ? p : undefined;
   }
 
+  /** Everything needed to bring this world back, as of `now`. */
+  save(now: number): WorldSave {
+    const survivors = new Map(this.sleepers);
+    for (const [id, key] of this.tokens) {
+      const p = this.players.get(id);
+      if (p) survivors.set(key, sleeper(p));
+    }
+    return clone({
+      version: 1,
+      seed: this.seed,
+      startedAt: this.startedAt,
+      nextId: this.nextId,
+      nextDeployableId: this.nextDeployableId,
+      pieces: [...this.pieces.values()],
+      deployables: [...this.deployables.values()],
+      resources: this.resources.map((r) => r.amount),
+      respawns: this.respawns.map((r) => ({ id: r.id, in: Math.max(0, r.at - now) })),
+      furnaces: [...this.furnaces],
+      bags: [...this.bagExpiry],
+      survivors: [...survivors],
+    });
+  }
+
+  /** A world brought back from a save, with its clock running from `now`. */
+  static restore(save: WorldSave, now: number, startKit: number | Partial<Record<ItemId, number>> = 0): Game {
+    const game = new Game(save.seed, startKit);
+    game.startedAt = save.startedAt;
+    game.nextId = save.nextId;
+    game.nextDeployableId = save.nextDeployableId;
+    for (const piece of save.pieces) game.pieces.set(pieceKey(piece), piece);
+    for (const d of save.deployables) game.deployables.set(d.id, d);
+    save.resources.forEach((amount, i) => {
+      if (game.resources[i]) game.resources[i].amount = amount;
+    });
+    game.respawns = save.respawns.map((r) => ({ id: r.id, at: now + r.in }));
+    game.furnaces = new Map(save.furnaces);
+    game.bagExpiry = new Map(save.bags);
+    game.sleepers = new Map(save.survivors);
+    return game;
+  }
+
   /** Called every server tick: respawns nodes, runs crafting and furnaces, sends positions. */
   tick(now: number): Outgoing[] {
     const dt = this.lastTick < 0 ? 0 : Math.min((now - this.lastTick) / 1000, 1);
@@ -955,6 +1057,7 @@ function publicState(p: Player): PlayerState {
     held: p.dead ? null : (p.slots[p.active]?.item ?? null),
     dead: p.dead,
     wear: p.wear.map((s) => s?.item ?? null),
+    look: p.look,
   };
 }
 
@@ -1004,6 +1107,15 @@ function isBeltSlot(slot: unknown): slot is number {
 
 function validIndex(slots: Slots, i: unknown): i is number {
   return Number.isInteger(i) && (i as number) >= 0 && (i as number) < slots.length;
+}
+
+/** A browser's private token: long and random, so nobody can guess another player's. */
+function cleanToken(token: unknown): string | null {
+  return typeof token === 'string' && /^[\w-]{16,64}$/.test(token) ? token : null;
+}
+
+function sleeper(p: Player): Sleeper {
+  return clone({ id: p.id, name: p.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, dead: p.dead, slots: p.slots, wear: p.wear, vitals: p.vitals });
 }
 
 function cleanName(name: unknown): string {

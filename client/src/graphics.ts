@@ -1,5 +1,6 @@
 // Renderer, sky, image-based lighting and post-processing.
 // "High" quality adds ambient occlusion, bloom, sun shafts, soft shadows and a film grade;
+// "Medium" keeps all of that but the ambient occlusion, at one pixel per screen pixel;
 // "Low" renders directly.
 
 import * as THREE from 'three';
@@ -11,7 +12,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
-export type Quality = 'high' | 'low';
+export type Quality = 'high' | 'medium' | 'low';
+export const QUALITIES: Quality[] = ['high', 'medium', 'low'];
 
 /** Low, hazy sun: late afternoon on a dead planet. */
 export const SUN_DIRECTION = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 16), THREE.MathUtils.degToRad(215));
@@ -274,13 +276,23 @@ export class Graphics {
     } catch {
       /* storage unavailable */
     }
-    this.quality = saved === 'low' ? 'low' : 'high';
+    this.quality = 'high';
+    this.setQuality(QUALITIES.includes(saved as Quality) ? (saved as Quality) : 'high');
 
     addEventListener('resize', () => this.resize());
   }
 
   setQuality(q: Quality) {
     this.quality = q;
+    // Ambient occlusion is the costliest pass, and high-density screens draw up to three times
+    // the pixels; the lower settings drop both.
+    this.gtao.enabled = q === 'high';
+    const ratio = q === 'high' ? Math.min(devicePixelRatio, 1.75) : Math.min(devicePixelRatio, 1);
+    if (ratio !== this.renderer.getPixelRatio()) {
+      this.renderer.setPixelRatio(ratio);
+      this.composer.setPixelRatio(ratio);
+      this.resize();
+    }
     try {
       localStorage.setItem('pf-quality', q);
     } catch {
@@ -302,7 +314,7 @@ export class Graphics {
   render() {
     this.time.value += this.clock.getDelta();
     this.sky.position.copy(this.camera.position);
-    if (this.quality === 'high') {
+    if (this.quality !== 'low') {
       // Shafts only while the sun is in front of the camera, fading in as it comes on screen.
       this.camera.getWorldDirection(this.forward);
       const facing = this.forward.dot(SUN_DIRECTION);
