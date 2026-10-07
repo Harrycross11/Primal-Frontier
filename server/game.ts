@@ -14,6 +14,7 @@ import {
 } from '../shared/constants.ts';
 import type { CraftJob, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
+import { cleanLook } from '../shared/look.ts';
 import {
   HIT_DAMAGE,
   MAX_HP,
@@ -171,7 +172,7 @@ export class Game {
   }
 
   /** Adds a player at a random spawn point. Returns null when the server is full. */
-  join(name: string, now: number): { id: number; out: Outgoing[] } | null {
+  join(name: string, now: number, look: unknown = null): { id: number; out: Outgoing[] } | null {
     if (this.players.size >= MAX_PLAYERS) return null;
     const id = this.nextId++;
     const [x, z] = this.spawnPoint();
@@ -186,6 +187,7 @@ export class Game {
       id,
       name: cleanName(name) || `Survivor ${id}`,
       color,
+      look: cleanLook(look),
       x,
       y: terrainHeight(this.seed, x, z),
       z,
@@ -955,6 +957,7 @@ function publicState(p: Player): PlayerState {
     held: p.dead ? null : (p.slots[p.active]?.item ?? null),
     dead: p.dead,
     wear: p.wear.map((s) => s?.item ?? null),
+    look: p.look,
   };
 }
 

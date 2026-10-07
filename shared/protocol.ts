@@ -5,6 +5,7 @@ import type { Piece, PieceKind, WallEdit } from './building.ts';
 import type { Vec3 } from './combat.ts';
 import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
+import type { Look } from './look.ts';
 import type { SurvivalCause, Vitals } from './survival.ts';
 import type { Material, ResourceNode } from './world.ts';
 
@@ -23,6 +24,8 @@ export interface PlayerState {
   dead: boolean;
   /** Armour worn on the head, chest and legs, so others see it. */
   wear: (ItemId | null)[];
+  /** Skin, hair, clothing and gear they picked before joining. */
+  look: Look;
 }
 
 /** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
@@ -39,7 +42,7 @@ export interface CraftJob {
 }
 
 export type ClientMessage =
-  | { t: 'join'; name: string }
+  | { t: 'join'; name: string; look?: Look }
   | { t: 'move'; x: number; y: number; z: number; yaw: number; moving: boolean; slot: number }
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }

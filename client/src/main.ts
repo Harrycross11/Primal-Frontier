@@ -25,6 +25,7 @@ import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Graphics } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { LookPicker } from './lookPicker.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
@@ -77,6 +78,7 @@ const hud = new Hud();
 
 // Start loading the scanned models straight away; joining waits for them.
 const modelsReady = loadModels();
+const picker = new LookPicker(modelsReady);
 
 hud.onPlay(async (name) => {
   const net = new Net();
@@ -86,7 +88,7 @@ hud.onPlay(async (name) => {
     hud.showJoinError((e as Error).message);
     return;
   }
-  net.send({ t: 'join', name });
+  net.send({ t: 'join', name, look: picker.look });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);
@@ -97,6 +99,7 @@ hud.onPlay(async (name) => {
     return;
   }
   await modelsReady;
+  picker.dispose();
   hud.hideJoin();
   startGame(net, welcome);
 });
@@ -115,7 +118,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const effects = new Effects(world.scene);
   effects.listener = camera;
   effects.startAmbience();
-  const me = new Avatar(welcome.you.color);
+  const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
   const controller = new Controller(world, () => resources, canvas);
@@ -138,7 +141,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const remotes = new Map<number, Remote>();
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
-    const avatar = new Avatar(p.color, p.name);
+    const avatar = new Avatar(p.color, p.name, p.look);
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
     world.scene.add(avatar.root);

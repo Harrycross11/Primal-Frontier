@@ -83,7 +83,7 @@ wss.on('connection', (ws) => {
     const now = Date.now();
     if (id === null) {
       if (msg.t !== 'join') return;
-      const joined = game.join(msg.name, now);
+      const joined = game.join(msg.name, now, msg.look);
       if (!joined) {
         send(ws, { t: 'full' });
         ws.close();

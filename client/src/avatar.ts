@@ -6,11 +6,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
+import { type Look, defaultLook, lookColor } from '../../shared/look.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
 import { character } from './models.ts';
 import { PISTOLS, gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
 import { ScanBody } from './scanBody.ts';
+import { headGear, tintScan } from './survivorLook.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
@@ -119,7 +121,7 @@ export class Avatar {
   onStep: ((sprint: boolean) => void) | null = null;
   private stepSign = 0;
 
-  constructor(color: number, name?: string) {
+  constructor(color: number, name?: string, look: Look = defaultLook()) {
     // Each survivor gets a different but always muted outfit, picked from their colour.
     const pick = (list: number[], salt: number) => list[Math.abs(Math.imul((color >> salt) ^ color, 2654435761)) % list.length];
     const jacketColor = pick(JACKETS, 3);
@@ -128,7 +130,8 @@ export class Avatar {
     hood.side = THREE.DoubleSide;
     const darkLeather = leather(0x5a4634);
     const brownLeather = leather(0x6a5038);
-    const canvas = cloth(0x6a6150);
+    const packColor = lookColor(look, 'pack');
+    const canvas = cloth(packColor ?? 0x6a6150);
     const bedroll = cloth(0x5b6450);
     const metal = plain(0x55524a, 0.45, 0.7);
     const rubber = plain(0x2a2927, 0.8);
@@ -223,14 +226,16 @@ export class Avatar {
     scarf.rotation.x = Math.PI / 2 - 0.15;
     attach('torso', box(0.07, 0.18, 0.025, 0.01), accent, 0.05, 1.37, 0.1).rotation.set(-0.3, 0, 0.12);
 
-    // Backpack with a rolled bedroll and a canteen.
+    // Backpack with a rolled bedroll and a canteen, unless they chose to go without.
     tight = false;
+    const packStart = this.bones.torso.children.length;
     attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
     attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
     attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
     attach('torso', new THREE.CylinderGeometry(0.075, 0.075, 0.42, 16), bedroll, 0, 1.51, -0.2).rotation.z = Math.PI / 2;
     for (const x of [-0.12, 0.12]) attach('torso', new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 1.51, -0.2).rotation.z = Math.PI / 2;
     attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
+    if (packColor === null) for (const o of this.bones.torso.children.slice(packStart)) o.removeFromParent();
 
     // Armband in the player's colour, around the left upper arm.
     const band = (this.band = attach('shoulderL', new THREE.CylinderGeometry(0.066, 0.064, 0.05, 16), accent, ...HAND(-1)));
@@ -278,6 +283,15 @@ export class Avatar {
       // The modelled body draws nothing but keeps its bones, which carry the gear.
       geometry.setDrawRange(0, 0);
       for (const o of fitted) o.visible = false;
+      tintScan(scan, look);
+      // Their own pick of hat, mask and goggles, made for the scanned head, in place of the
+      // modelled body's hood and mask.
+      this.gear = { hood: [], face: [] };
+      for (const { mesh, kind } of headGear(look, (c) => cloth(c), accent)) {
+        mesh.position.sub(world.get('head')!);
+        this.bones.head.add(mesh);
+        this.gear[kind].push(mesh);
+      }
       this.scan = new ScanBody(this.root, scan, this.bones, world);
       this.scan.update();
     }
@@ -329,7 +343,7 @@ export class Avatar {
     }
     if (!changed) return;
     const hidden = new Set(this.worn.flatMap((item) => (item ? (ARMOUR_HIDES[item] ?? []) : [])));
-    for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind) && !this.scan;
+    for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind);
   }
 
   /** World position of the gun's muzzle, for flashes and tracers. */
