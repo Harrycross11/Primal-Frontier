@@ -336,8 +336,8 @@ const TOOL_GRIP: Partial<Record<ItemId, number | 'middle'>> = {
   rock: 'middle',
   machete: 0.09,
   salvagedSword: 0.2,
-  woodenSpear: 0.7,
-  stoneSpear: 0.7,
+  woodenSpear: 0.85,
+  stoneSpear: 0.85,
 };
 
 /** What a survivor holds in their right hand, modelled pointing along +y from the grip. */

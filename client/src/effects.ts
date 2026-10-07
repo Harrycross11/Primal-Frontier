@@ -52,6 +52,11 @@ export class Effects {
   private flashTex = radialTexture('rgba(255,236,170,1)', 'rgba(255,140,40,0.6)', 'rgba(255,120,30,0)');
   private dustTex = radialTexture('rgba(150,135,110,0.75)', 'rgba(120,110,95,0.35)', 'rgba(120,110,95,0)');
   private audio: { ctx: AudioContext; noise: AudioBuffer; out: AudioNode; reverb: ConvolverNode } | null = null;
+  /** Recorded shots, swings and strikes from client/public/sounds, by name, once decoded. */
+  private samples = new Map<string, AudioBuffer>();
+  private loading: Promise<unknown> | null = null;
+  private gotContext!: (ctx: AudioContext) => void;
+  private ready = new Promise<AudioContext>((resolve) => (this.gotContext = resolve));
   private chips: Chip[] = [];
   private chipMats = new Map<number, THREE.MeshStandardMaterial>();
   private wind: GainNode | null = null;
@@ -60,6 +65,7 @@ export class Effects {
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.flashLight);
+    this.loadSamples();
   }
 
   /** Bits of wood, stone or metal knocked off whatever was hit, falling with gravity. */
@@ -92,7 +98,7 @@ export class Effects {
   }
 
   /** A tool or fist striking a tree, boulder, wreck or hemp plant (`depleted` when it is used up). */
-  gatherSound(surface: Surface, at: THREE.Vector3 | null, depleted = false) {
+  gatherSound(surface: Surface, at: THREE.Vector3 | null, depleted = false, tool: ItemId | null = null) {
     const a = this.context();
     if (!a) return;
     const { near, pan, distance } = this.placed(at);
@@ -102,6 +108,15 @@ export class Effects {
     const bus = this.voiceBus(pan, 0.06 + Math.min(0.3, distance / 80));
     const v = near * (0.85 + Math.random() * 0.3);
     const tune = 0.93 + Math.random() * 0.14;
+    // The recorded strike of that very tool on wood or on rock and metal.
+    const sounds = tool ? MELEE_SOUNDS[tool] : undefined;
+    const strike = sounds && (surface === 'wood' ? sounds.wood : surface === 'stone' || surface === 'ore' || surface === 'scrap' ? sounds.stone : null);
+    if (strike && this.play(strike[0], pan, 0.06 + Math.min(0.3, distance / 80), v * 0.9, strike[1] * tune)) {
+      if (surface === 'wood' && depleted) this.creakAndFall(bus, now + 0.08, v);
+      if (surface === 'ore') this.ping(bus, now, [1870 * tune, 2790 * tune, 4120 * tune], 0.05 * v, 0.18);
+      if (surface !== 'wood') this.gravel(bus, now + 0.03, (depleted ? 0.4 : 0.15) * v, depleted ? 14 : 5);
+      return;
+    }
     if (surface === 'wood') {
       // An axe biting into dry wood: a hollow knock with a woody resonance.
       this.thud(bus, now, 170 * tune, 0.5 * v);
@@ -174,10 +189,16 @@ export class Effects {
     else this.ping(bus, now + 0.02, [180, 520, 1010, 1640], 0.11 * near, 1);
   }
 
-  /** The whoosh of a swing through the air. */
-  swingSound(heavy = false) {
+  /** The whoosh of a swing through the air: that tool's own, or a plain one for fists. */
+  swingSound(heavy = false, tool: ItemId | null = null, at: THREE.Vector3 | null = null) {
     const a = this.context();
     if (!a) return;
+    const swing = tool ? MELEE_SOUNDS[tool]?.swing : undefined;
+    if (swing) {
+      const { near, pan } = this.placed(at);
+      if (near >= 0.04) this.play(swing[0], pan, 0.02, near * 0.8, swing[1] * (0.95 + Math.random() * 0.1));
+      return;
+    }
     const { ctx, noise } = a;
     const now = ctx.currentTime + 0.005;
     const src = ctx.createBufferSource();
@@ -498,7 +519,14 @@ export class Effects {
     const near = Math.min(1, 8 / Math.max(8, distance));
     if (near < 0.015) return;
     // Guns are the loudest thing in the wasteland: driven hard so a shot cracks over everything else.
-    const bus = this.voiceBus(pan, 0.22 + Math.min(0.6, distance / 120), w.class === 'bow' ? 1.4 : 2.6);
+    const echo = 0.22 + Math.min(0.6, distance / 120);
+    // A recording of the real thing, duller and quieter with distance as the air soaks up the highs.
+    if (this.play(`shot-${item}`, pan, echo, near * (w.class === 'bow' ? 0.8 : 1), 1, 16000 / (1 + distance / 35))) {
+      const v = GUN_VOICES[item];
+      if (v?.action === 'bolt' && distance < 25) this.play(`bolt-${item}`, pan, 0.05, Math.min(1, 6 / Math.max(6, distance)) * 0.6, 1, 18000, v.actionAt);
+      return;
+    }
+    const bus = this.voiceBus(pan, echo, w.class === 'bow' ? 1.4 : 2.6);
     if (w.class === 'bow') {
       this.twang(bus, now, near, item === 'crossbow');
       return;
@@ -584,6 +612,50 @@ export class Effects {
     this.click(bus, now + seconds * 0.64, 1200, 0.3);
     this.click(bus, now + seconds * 0.85, 2600, 0.4);
     this.click(bus, now + seconds * 0.85 + 0.09, 3200, 0.45);
+  }
+
+  /**
+   * Plays a recorded sound, if it has loaded: panned, through a filter that takes off the highs
+   * (distance), with some sent to the echo. `rate` speeds it up (higher, shorter) or slows it.
+   * Returns false when the recording is not ready, so the caller can make the sound itself.
+   */
+  private play(name: string, pan: number, echo: number, level: number, rate = 1, bright = 18000, delay = 0): boolean {
+    const buffer = this.samples.get(name);
+    if (!buffer || !this.audio) return false;
+    const { ctx, out, reverb } = this.audio;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = rate;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = Math.max(300, Math.min(20000, bright));
+    const gain = ctx.createGain();
+    gain.gain.value = level;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = Math.max(-1, Math.min(1, pan));
+    src.connect(filter).connect(gain).connect(panner).connect(out);
+    const send = ctx.createGain();
+    send.gain.value = echo;
+    panner.connect(send).connect(reverb);
+    src.start(ctx.currentTime + 0.005 + delay);
+    return true;
+  }
+
+  /** Fetches the recordings now and decodes them once there is an audio context to decode into. */
+  private loadSamples() {
+    if (this.loading) return;
+    this.loading = fetch('/sounds/index.json')
+      .then((r) => r.json() as Promise<string[]>)
+      .then((names) =>
+        Promise.all(
+          names.map(async (name) => {
+            const bytes = await (await fetch(`/sounds/${name}.mp3`)).arrayBuffer();
+            const ctx = await this.ready;
+            this.samples.set(name, await ctx.decodeAudioData(bytes));
+          }),
+        ),
+      )
+      .catch(() => undefined);
   }
 
   /** A voice's path out: through a little saturation, panned, with some sent to the echo. */
@@ -699,6 +771,7 @@ export class Effects {
         reverb.buffer = echoImpulse(ctx);
         reverb.connect(out);
         this.audio = { ctx, noise, out, reverb };
+        this.gotContext(ctx);
       } catch {
         return null;
       }
@@ -707,6 +780,22 @@ export class Effects {
     return this.audio;
   }
 }
+
+/**
+ * Each melee tool's recorded swing and strikes (on wood, and on rock or metal), as a recording in
+ * client/public/sounds and how fast to play it: a heavy pick slower and deeper, a light blade quicker.
+ */
+const MELEE_SOUNDS: Partial<Record<ItemId, { swing: [string, number]; wood: [string, number]; stone: [string, number] }>> = {
+  rock: { swing: ['swing-light', 1.15], wood: ['hit-chop2', 0.7], stone: ['hit-rock', 1] },
+  stoneHatchet: { swing: ['swing-axe', 1], wood: ['hit-chop', 1], stone: ['hit-stone', 1] },
+  stonePickaxe: { swing: ['swing-heavy', 0.95], wood: ['hit-chop2', 0.9], stone: ['hit-stone', 0.85] },
+  salvagedAxe: { swing: ['swing-axe2', 1], wood: ['hit-axe', 1], stone: ['hit-pick', 1.15] },
+  salvagedPickaxe: { swing: ['swing-heavy2', 1], wood: ['hit-axe', 0.85], stone: ['hit-pick', 1] },
+  machete: { swing: ['swing-blade', 1.1], wood: ['hit-blade', 1.1], stone: ['hit-clang', 1.15] },
+  salvagedSword: { swing: ['swing-sword', 1], wood: ['hit-blade', 0.9], stone: ['hit-clang', 0.95] },
+  woodenSpear: { swing: ['swing-thrust', 1], wood: ['hit-stab', 1], stone: ['hit-stone', 1.25] },
+  stoneSpear: { swing: ['swing-thrust2', 1], wood: ['hit-stab', 0.9], stone: ['hit-stone', 1.1] },
+};
 
 /** How each gun sounds: the level of each layer, the pitch of its punch, how long it rings and how its action works. */
 interface GunVoice {

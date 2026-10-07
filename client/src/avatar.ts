@@ -89,6 +89,10 @@ export class Avatar {
   /** The photo-scanned body, when it loaded; it replaces the modelled one. */
   private scan: ScanBody | null = null;
   private held: ItemId | null | undefined = undefined;
+  /** What they have in their hands. */
+  get heldItem(): ItemId | null {
+    return this.held ?? null;
+  }
   /** How the arms hold what is in the hands. */
   private band: THREE.Mesh | null = null;
   private bandRest: [THREE.Vector3, THREE.Quaternion] | null = null;
@@ -561,8 +565,8 @@ export class Avatar {
 
     // Holding a gun or bow up to aim: right arm forward, left hand supporting it.
     this.hand.rotation.set(Math.PI / 2 - 0.2, 0, 0);
-    // A spear is carried upright at the side, point up and a little forward, clear of the legs.
-    if (this.held === 'woodenSpear' || this.held === 'stoneSpear') this.pointWeapon(1.4);
+    // A spear is carried low at the side near its balance point, point forward and tipped a little up.
+    if (this.held === 'woodenSpear' || this.held === 'stoneSpear') this.pointWeapon(0.45);
     if (this.pose !== 'normal') {
       const kick = this.recoilTimer > 0 ? Math.sin((this.recoilTimer / 0.12) * Math.PI) * 0.12 : 0;
       this.recoilTimer = Math.max(0, this.recoilTimer - dt);

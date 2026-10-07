@@ -228,7 +228,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           const surface = RESOURCE_SURFACE[node.kind];
           if (node.kind === 'waterBarrel') effects.consumeSound('drink', at);
           else {
-            effects.gatherSound(surface, at, m.amount === 0);
+            const tool = m.by === welcome.id ? held() : (remotes.get(m.by)?.avatar.heldItem ?? null);
+            effects.gatherSound(surface, at, m.amount === 0, tool);
             effects.chipsAt(at, surface, node.y, m.amount === 0 ? 16 : 7, m.amount === 0 ? 1.5 : 1);
           }
           if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
@@ -543,7 +544,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     lastAttack = now;
     net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
     me.swing();
-    effects.swingSound(w.damage > 40);
+    effects.swingSound(w.damage > 40, item);
   }
 
   const raycaster = new THREE.Raycaster();
@@ -641,7 +642,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
       net.send({ t: 'gather', id: aimResource.id, slot: ui.active });
       me.swing();
-      effects.swingSound();
+      effects.swingSound(false, held());
     } else if (aimDeployable) {
       if (!deployableInRange(aimDeployable, BUILD_RANGE)) return hud.notice('Too far away');
       net.send({ t: 'hitDeployable', id: aimDeployable.id });
