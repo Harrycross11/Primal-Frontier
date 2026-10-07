@@ -8,6 +8,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
 import { character } from './models.ts';
+import { gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
 import { ScanBody } from './scanBody.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
@@ -88,6 +89,8 @@ export class Avatar {
   private bandRest: [THREE.Vector3, THREE.Quaternion] | null = null;
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
   private muzzle: THREE.Object3D | null = null;
+  /** Where the hands go on the gun or bow in hand, in its model space, and where its butt is. */
+  private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; butt?: THREE.Vector3 } | null = null;
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
@@ -289,6 +292,8 @@ export class Avatar {
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;
     this.pose = !w || w.class === 'melee' ? 'normal' : item === 'huntingBow' ? 'bow' : item && ['revolver', 'semiPistol', 'eoka'].includes(item) ? 'pistol' : 'rifle';
+    // A bow is gripped at its middle, and the other hand rests on the string.
+    this.hands = this.pose === 'normal' || !item ? null : this.pose === 'bow' ? { palm: new THREE.Vector3(0, 0.02, -0.14), hold: new THREE.Vector3(0, 0.02, 0.08) } : gunHands(item);
   }
 
   /** Dresses the survivor in the armour worn on their head, chest and legs. */
@@ -367,39 +372,101 @@ export class Avatar {
     // The right hand closes round whatever it holds, which sits in the middle of the palm.
     scan.curl('elbowR', this.held && !this.dead ? 1 : 0.3);
     this.grip.position.copy(this.bones.elbowR.worldToLocal(scan.palm('elbowR')));
-    // A rifle's pistol grip runs down through the fist, so its top sits above the palm.
-    this.hand.position.set(0, this.pose === 'rifle' ? -0.045 : 0, 0).applyQuaternion(this.hand.quaternion);
-    // The left hand steadies a long gun under the front of the receiver, cups a pistol under the
-    // gripping hand, and draws a bow's string.
-    const weapon = this.dead || this.pose === 'normal' ? undefined : this.hand.children[0]?.children[0];
-    if (weapon) {
-      this.root.updateMatrixWorld(true);
-      // Rifles: as far along the handguard as the arm reaches. Crossbows have no barrel, so along the stock.
-      const m = this.muzzle?.position ?? new THREE.Vector3(0, 0.06, 0.6);
-      const near = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.1, m.z * 0.1) : this.pose === 'pistol' ? new THREE.Vector3(0, -0.07, -0.01) : new THREE.Vector3(0, 0.02, -0.14);
-      const far = this.pose === 'rifle' ? new THREE.Vector3(0, m.y * 0.45, m.z * 0.45) : near.clone();
-      const up = new THREE.Vector3(0, 1, 0).transformDirection(weapon.matrixWorld);
-      const side = Math.sign(this.boneAt.get('shoulderL')!.x);
-      // The left elbow hangs down and out to the side.
-      const pole = this.root.localToWorld(new THREE.Vector3(side * 0.9, 0.4, 0.1));
-      scan.reach('elbowL', weapon.localToWorld(near), weapon.localToWorld(far), pole, up);
-      scan.curl('elbowL', 1);
-      // The armband rides on the scanned upper arm, which has left the game's arm behind.
-      if (this.band) {
-        const [shoulder, elbow] = scan.arm('elbowL');
-        const parent = this.band.parent!;
-        this.band.position.copy(parent.worldToLocal(shoulder.clone().lerp(elbow, 0.27)));
-        const along = elbow.sub(shoulder).normalize();
-        const world = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
-        this.band.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(world));
-      }
-    } else {
+    this.hand.position.set(0, 0, 0);
+    const weapon = this.dead || !this.hands ? undefined : this.hand.children[0]?.children[0];
+    if (weapon) this.holdWeapon(scan, weapon, this.hands!);
+    else {
       scan.curl('elbowL', this.dead ? 0.15 : 0.3);
       if (this.band && this.bandRest) {
         this.band.position.copy(this.bandRest[0]);
         this.band.quaternion.copy(this.bandRest[1]);
       }
     }
+  }
+
+  /**
+   * Holds a gun or bow the way a person does. The weapon goes where it belongs on the body (a long
+   * gun's butt in the shoulder, a pistol out in front of the chest, a bow at arm's length), then
+   * both arms reach for the places on it that a hand grips.
+   */
+  private holdWeapon(scan: ScanBody, weapon: THREE.Object3D, hands: NonNullable<Avatar['hands']>) {
+    this.root.updateMatrixWorld(true);
+    const rootQ = this.root.getWorldQuaternion(new THREE.Quaternion());
+    const side = Math.sign(this.boneAt.get('shoulderL')!.x);
+    // Towards the survivor's left, straight ahead, and up.
+    const left = new THREE.Vector3(side, 0, 0).applyQuaternion(rootQ);
+    const ahead = new THREE.Vector3(0, 0, 1).applyQuaternion(rootQ);
+    const up = new THREE.Vector3(0, 1, 0);
+    const [shoulderR] = scan.arm('elbowR');
+    const [shoulderL] = scan.arm('elbowL');
+    const turn = weapon.getWorldQuaternion(new THREE.Quaternion());
+    let point: THREE.Vector3;
+    let at: THREE.Vector3;
+    if (this.pose === 'rifle') {
+      // The butt sits in the pocket of the right shoulder, just inside the joint.
+      point = this.butt(weapon, hands);
+      at = shoulderR.clone().addScaledVector(left, 0.07).addScaledVector(ahead, 0.05).addScaledVector(up, 0.03);
+    } else if (this.pose === 'pistol') {
+      // Arms out, the grip in front of the chest and a little below the eyes.
+      point = hands.palm;
+      at = shoulderR.clone().lerp(shoulderL, 0.5).addScaledVector(ahead, 0.42).addScaledVector(up, 0.06);
+    } else {
+      // A bow is held out at arm's length in the left hand.
+      point = hands.hold!;
+      at = shoulderL.clone().addScaledVector(ahead, 0.5).addScaledVector(left, -0.06);
+    }
+    this.hand.position.copy(this.hand.parent!.worldToLocal(at.sub(point.clone().applyQuaternion(turn))));
+    this.hand.updateMatrixWorld(true);
+
+    const on = (p: THREE.Vector3) => weapon.localToWorld(p.clone());
+    const gunUp = new THREE.Vector3(0, 1, 0).applyQuaternion(turn);
+    const gunAhead = new THREE.Vector3(0, 0, 1).applyQuaternion(turn);
+    const right = left.clone().negate();
+    // Elbows hang below the shoulders and a little out to the side.
+    const poleR = this.root.localToWorld(new THREE.Vector3(-side * 0.9, 0.8, -0.1));
+    const poleL = this.root.localToWorld(new THREE.Vector3(side * 0.9, 0.8, -0.1));
+    if (this.pose === 'bow') {
+      // Left fist round the bow's grip, right fingers on the string.
+      scan.reach('elbowL', on(hands.hold!), on(hands.hold!), poleL, right, right);
+      scan.reach('elbowR', on(hands.palm), on(hands.palm), poleR, left);
+    } else {
+      // The shooting hand wraps the grip from the right; the other hand lies palm up under the
+      // handguard, or cups the shooting hand on a pistol.
+      // Fingers wrap forward and down round the grip, and across under the handguard.
+      // The fist closes round the front of the grip, so the palm sits a little ahead of its middle.
+      const grip = on(hands.palm).addScaledVector(gunAhead, this.pose === 'rifle' ? 0.045 : 0.02);
+      scan.reach('elbowR', grip, grip, poleR, left, gunAhead.clone().addScaledVector(gunUp, -0.3));
+      const hold = hands.hold ?? hands.palm.clone().add(new THREE.Vector3(0, -0.05, 0));
+      if (hands.hold) scan.reach('elbowL', on(hold), on(hold), poleL, gunUp, right);
+      else scan.reach('elbowL', on(hold), on(hold), poleL, gunUp.clone().add(right).normalize(), gunAhead.clone().add(right));
+    }
+    scan.curl('elbowR', 1);
+    scan.curl('elbowL', 1);
+    // The armband rides on the scanned upper arm, which has left the game's arm behind.
+    if (this.band) {
+      const [shoulder, elbow] = scan.arm('elbowL');
+      const parent = this.band.parent!;
+      this.band.position.copy(parent.worldToLocal(shoulder.clone().lerp(elbow, 0.27)));
+      const along = elbow.sub(shoulder).normalize();
+      const world = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
+      this.band.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(world));
+    }
+  }
+
+  /** The middle of a long gun's butt plate, in its model space: the back end, halfway up the stock. */
+  private butt(weapon: THREE.Object3D, hands: NonNullable<Avatar['hands']>): THREE.Vector3 {
+    if (hands.butt) return hands.butt;
+    weapon.updateMatrixWorld(true);
+    const into = weapon.matrixWorld.clone().invert();
+    const box = new THREE.Box3();
+    weapon.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(into.clone().multiply(mesh.matrixWorld)));
+    });
+    const muzzleY = this.muzzle?.position.y ?? 0.05;
+    return (hands.butt = new THREE.Vector3(0, (hands.palm.y + muzzleY) / 2 + 0.02, box.min.z));
   }
 
   /** Poses the game skeleton for this frame. */
@@ -473,6 +540,8 @@ export class Avatar {
 
     // Holding a gun or bow up to aim: right arm forward, left hand supporting it.
     this.hand.rotation.set(Math.PI / 2 - 0.2, 0, 0);
+    // A spear is carried upright at the side, point up and a little forward, clear of the legs.
+    if (this.held === 'woodenSpear' || this.held === 'stoneSpear') this.pointWeapon(1.4);
     if (this.pose !== 'normal') {
       const kick = this.recoilTimer > 0 ? Math.sin((this.recoilTimer / 0.12) * Math.PI) * 0.12 : 0;
       this.recoilTimer = Math.max(0, this.recoilTimer - dt);
@@ -495,7 +564,7 @@ export class Avatar {
       }
       if (reloading) b.shoulderL.rotation.x += Math.sin(this.time * 14) * 0.15;
       // Bladed to the target for a long gun, which brings the left shoulder forward to the handguard.
-      const twist = this.pose === 'rifle' ? -Math.sign(this.boneAt.get('shoulderL')!.x) * 0.8 : 0.1;
+      const twist = this.pose === 'rifle' ? -Math.sign(this.boneAt.get('shoulderL')!.x) * 0.55 : 0.1;
       b.torso.rotation.y += twist;
       b.head.rotation.y -= twist;
       this.pointWeapon(pitch + kick * 0.5 - lower * 0.8);

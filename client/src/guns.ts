@@ -106,23 +106,25 @@ function profile(points: [number, number][], width: number): THREE.BufferGeometr
 const tube = (r: number, len: number, seg = 10) => new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2);
 
 /**
- * Scanned guns: where the hand grips (top of the pistol grip, or the wrist of the stock),
- * measured from the back and from the bottom of the model as fractions of its length and
- * height, and how high the bore is, as a fraction of the height.
+ * Scanned guns, as fractions of the model's length (from the back) and height (from the bottom),
+ * read off side views of the models. `grip` is the top of the pistol grip or the wrist of the
+ * stock, which sits at the hand's origin; `bore` is how high the barrel is. `palm` is the middle
+ * of the grip, where the shooting hand closes; `hold` is the underside of the handguard, pump or
+ * fore-end, where the other hand goes.
  */
-const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number }>> = {
-  assaultRifle: { grip: [0.325, 0.5], bore: 0.8 },
-  boltRifle: { grip: [0.275, 0.5], bore: 0.7 },
-  doubleBarrel: { grip: [0.37, 0.56], bore: 0.93 },
-  l96: { grip: [0.275, 0.4], bore: 0.66 },
-  lr300: { grip: [0.39, 0.48], bore: 0.74 },
-  m249: { grip: [0.31, 0.53], bore: 0.78 },
-  mp5: { grip: [0.435, 0.57], bore: 0.79 },
-  pumpShotgun: { grip: [0.31, 0.55], bore: 0.93 },
-  revolver: { grip: [0.21, 0.58], bore: 0.9 },
-  semiPistol: { grip: [0.31, 0.78], bore: 0.93 },
-  semiRifle: { grip: [0.27, 0.6], bore: 0.85 },
-  thompson: { grip: [0.42, 0.53], bore: 0.83 },
+const SCANNED: Partial<Record<ItemId, { grip: [number, number]; bore: number; palm: [number, number]; hold?: [number, number] }>> = {
+  assaultRifle: { grip: [0.325, 0.5], bore: 0.8, palm: [0.315, 0.45], hold: [0.68, 0.693] },
+  boltRifle: { grip: [0.275, 0.5], bore: 0.7, palm: [0.26, 0.519], hold: [0.5, 0.462] },
+  doubleBarrel: { grip: [0.37, 0.56], bore: 0.93, palm: [0.33, 0.72], hold: [0.52, 0.7] },
+  l96: { grip: [0.275, 0.4], bore: 0.66, palm: [0.27, 0.404], hold: [0.45, 0.448] },
+  lr300: { grip: [0.39, 0.48], bore: 0.74, palm: [0.37, 0.383], hold: [0.65, 0.61] },
+  m249: { grip: [0.31, 0.53], bore: 0.78, palm: [0.3, 0.51], hold: [0.62, 0.593] },
+  mp5: { grip: [0.435, 0.57], bore: 0.79, palm: [0.42, 0.414], hold: [0.72, 0.634] },
+  pumpShotgun: { grip: [0.31, 0.55], bore: 0.93, palm: [0.29, 0.72], hold: [0.63, 0.614] },
+  revolver: { grip: [0.21, 0.58], bore: 0.9, palm: [0.14, 0.362] },
+  semiPistol: { grip: [0.31, 0.78], bore: 0.93, palm: [0.2, 0.375] },
+  semiRifle: { grip: [0.27, 0.6], bore: 0.85, palm: [0.25, 0.57], hold: [0.55, 0.561] },
+  thompson: { grip: [0.42, 0.53], bore: 0.83, palm: [0.41, 0.49], hold: [0.7, 0.678] },
 };
 
 /** The scanned model's grip and muzzle in its own geometry, if it loaded. */
@@ -133,8 +135,9 @@ function scanned(item: ItemId) {
   const box = m.geometry.boundingBox!;
   const size = box.getSize(new THREE.Vector3());
   const grip = new THREE.Vector3(0, box.min.y + s.grip[1] * size.y, box.min.z + s.grip[0] * size.z);
+  const at = ([z, y]: [number, number]) => new THREE.Vector3(0, box.min.y + y * size.y, box.min.z + z * size.z).sub(grip);
   const muzzle = new THREE.Vector3(0, box.min.y + s.bore * size.y, box.max.z).sub(grip);
-  return { model: m, grip, muzzle };
+  return { model: m, grip, muzzle, palm: at(s.palm), hold: s.hold ? at(s.hold) : null };
 }
 
 /** Where the front of the receiver is, for muzzle flashes: the barrel tip in model space. */
@@ -146,6 +149,20 @@ export function muzzleOffset(item: ItemId): THREE.Vector3 {
   const [len, h] = look.body;
   const front = look.pistol ? len * 0.75 : len * 0.55;
   return new THREE.Vector3(0, h * 0.75, front + look.barrel);
+}
+
+/**
+ * Where the hands go on a gun, in its model space: the shooting palm on the pistol grip, and the
+ * other hand under the handguard (null for pistols, held two-handed round the grip).
+ */
+export function gunHands(item: ItemId): { palm: THREE.Vector3; hold: THREE.Vector3 | null } {
+  const scan = scanned(item);
+  if (scan) return { palm: scan.palm, hold: scan.hold };
+  const look = GUN_LOOKS[item];
+  const m = muzzleOffset(item);
+  // Code-built guns: the grip hangs below the receiver; the handguard is a little over a third of
+  // the way to the muzzle.
+  return { palm: new THREE.Vector3(0, -0.045, 0), hold: look?.pistol ? null : new THREE.Vector3(0, m.y * 0.2, m.z * 0.4) };
 }
 
 export function buildGun(item: ItemId): THREE.Group | null {
