@@ -1242,7 +1242,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (smokeIn <= 0) {
       smokeIn = 0.16;
       for (const d of world.deployables.values()) {
-        const landed = d.kind === 'supplyDrop' && d.fall && dayNight.now > d.fall.land && dayNight.now < d.fall.land + 90_000;
+        const now = world.serverNow();
+        const landed = d.kind === 'supplyDrop' && d.fall && now > d.fall.land && now < d.fall.land + 90_000;
         if (d.kind === 'supplySignal' || landed) effects.redSmoke(new THREE.Vector3(d.x, d.y + (landed ? 1.4 : 0.2), d.z));
       }
     }

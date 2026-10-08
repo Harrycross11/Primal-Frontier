@@ -699,19 +699,22 @@ export class World {
           this.decorColliders.push({ min: [Math.min(a[0], b[0]), y - 0.5, Math.min(a[1], b[1])], max: [Math.max(a[0], b[0]), y + h, Math.max(a[1], b[1])] });
         }
       }
-      // Broken concrete, tyres and barrels lying about.
-      const junk = [...variants('rubble-chunks'), ...(model('tyre') ? [model('tyre')!] : [])];
-      for (let n = 0; n < 26 && junk.length; n++) {
+      // Loose stones, a few old tyres and barrels lying about.
+      const stones = variants('stones');
+      const tyre = model('tyre');
+      const barrel = model('barrel');
+      for (let n = 0; n < 22; n++) {
         const a = rand() * Math.PI * 2;
         const r = 4 + rand() * 18;
-        const piece = junk[Math.floor(rand() * junk.length)];
+        const piece = n < 3 ? tyre : n < 5 ? barrel : stones[Math.floor(rand() * stones.length)];
+        if (!piece) continue;
         const m = new THREE.Mesh(piece.geometry, piece.material);
         const px = site.x + Math.cos(a) * r;
         const pz = site.z + Math.sin(a) * r;
         if (this.decorColliders.some((c) => px > c.min[0] - 0.5 && px < c.max[0] + 0.5 && pz > c.min[2] - 0.5 && pz < c.max[2] + 0.5)) continue;
         m.position.set(px, site.y - 0.04, pz);
         m.rotation.y = rand() * Math.PI * 2;
-        m.scale.setScalar(piece === model('tyre') ? 1 : 0.6 + rand() * 1.2);
+        m.scale.setScalar(piece === tyre || piece === barrel ? 1 : 1 + rand() * 1.5);
         m.castShadow = true;
         m.receiveShadow = true;
         this.scene.add(m);
