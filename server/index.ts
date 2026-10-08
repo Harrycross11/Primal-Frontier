@@ -101,13 +101,15 @@ const saved = await store?.load().catch((e) => {
   return null;
 });
 let game: Game;
-if (saved && !wipeDue(saved.startedAt, Date.now())) {
+// A save from before the map last changed would put bases in the wrong places: wipe instead.
+const sameMap = saved?.version === 2;
+if (saved && sameMap && !wipeDue(saved.startedAt, Date.now())) {
   game = Game.restore(saved, Date.now(), startKit);
   console.log(`world restored from ${store!.name}, started ${new Date(saved.startedAt).toISOString()}`);
 } else {
   game = new Game(SEED, startKit);
   game.startedAt = Date.now();
-  if (saved) console.log('the world was due a wipe: starting a fresh one');
+  if (saved) console.log(sameMap ? 'the world was due a wipe: starting a fresh one' : 'the map has changed: starting a fresh world');
 }
 // START_AT='x,z' spawns everyone at one spot, for screenshots.
 if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];

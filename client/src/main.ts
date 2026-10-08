@@ -20,7 +20,7 @@ import { ASHHOUND } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
-import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../../shared/world.ts';
+import { MATERIALS, RESOURCE_INFO, generateDecor, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
@@ -34,6 +34,7 @@ import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
 import { buildDeployable } from './props.ts';
+import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
 
@@ -132,6 +133,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   effects.listener = camera;
   effects.startAmbience();
   const creatures = new Creatures(world.scene, effects);
+  const map = new WorldMap(welcome.seed, generateDecor(welcome.seed));
+  const mapMarks = () => ({
+    x: controller.position.x,
+    z: controller.position.z,
+    yaw: controller.yaw,
+    hounds: [...creatures.views.values()].filter((v) => v.state.owner === welcome.you.id && v.state.anim !== 'dead').map((v) => v.root.position),
+  });
   creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
@@ -435,7 +443,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return ui.open ? closeScreen() : openScreen(null);
     }
     if (e.code === 'Escape' && ui.open) return closeScreen();
+    if (e.code === 'Escape' && map.open) return map.close();
     if (ui.open || dead) return;
+    if (e.code === 'KeyM') map.toggle(mapMarks());
     const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
     if (n >= 0) selectSlot(n);
     if (e.code === 'KeyR' && held() === 'buildingPlan') material = MATERIALS[(MATERIALS.indexOf(material) + 1) % MATERIALS.length];
@@ -933,7 +943,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let time = 0;
   gfx.renderer.setAnimationLoop((now) => {
     timer.update(now);
-    const dt = Math.min(timer.getDelta(), 0.05);
+    // The first frame's timestamp can come from before the timer started; never step backwards.
+    const dt = Math.max(0, Math.min(timer.getDelta(), 0.05));
     time += dt;
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
@@ -1002,6 +1013,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
 
     world.update(dt, controller.position, time);
+    map.update(dt, mapMarks());
     gfx.render();
   });
 }

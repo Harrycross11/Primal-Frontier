@@ -1,9 +1,11 @@
 // The 3D world: lit terrain, scenery, resources, player-built pieces and floating ash.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD_SIZE } from '../../shared/constants.ts';
 import { MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
+import { BIOME_IDS, biomeWeights } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
@@ -12,7 +14,7 @@ import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign,
 import { radZones } from '../../shared/survival.ts';
 import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
-import { buildScenery } from './scenery.ts';
+import { buildScenery, type Patch } from './scenery.ts';
 import {
   barkSurface,
   concreteSurface,
@@ -31,6 +33,12 @@ import {
   woodWallSurface,
   worldBox,
 } from './textures.ts';
+
+/** Size of the map's squares, metres, and how far off they still show. */
+const CELL = 50;
+const VIEW = 240;
+const GRASS_CELL = 24;
+const GRASS_VIEW = 95;
 
 export class World {
   readonly scene = new THREE.Scene();
@@ -52,6 +60,13 @@ export class World {
   private pops = new Map<string, { t: number; kind: 'rise' | 'shake' }>();
   private windTime = { value: 0 };
   private ash: THREE.Points;
+  /** Everything placed on the map, grouped into squares that are hidden when far off. */
+  private cells = new Map<string, THREE.Group>();
+  private grassCells: THREE.InstancedMesh[] = [];
+  private patches: Patch[] = [];
+  private cullIn = 0;
+  /** Ready-made trees to copy, so a forest shares a handful of shapes. */
+  private treeShapes = new Map<string, THREE.Group[]>();
   private materials: Record<string, THREE.MeshStandardMaterial>;
 
   constructor(readonly seed: number) {
@@ -104,39 +119,62 @@ export class World {
     this.buildRadSigns();
     const decor = generateDecor(seed);
     for (const d of decor) this.addDecor(d);
-    buildScenery(this.scene, seed, decor);
+    this.patches = buildScenery(this.scene, seed, decor);
     this.ash = this.buildAsh();
   }
 
   private buildTerrain(): THREE.Mesh {
-    const segments = 220;
+    const segments = 420;
     const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, segments, segments);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const uv = geo.attributes.uv;
     const colors = new Float32Array(pos.count * 3);
+    /** How much of the sand texture each spot shows, and how much snow lies on it. */
+    const lands = new Float32Array(pos.count * 2);
     const ash = new THREE.Color(0xa49a8a);
     const scorched = new THREE.Color(0x4a443e);
     const glass = new THREE.Color(0x76806e);
     const pale = new THREE.Color(0xb8ae9c);
+    // Each land's ground, as a colour for the scanned earth: the forest floor dark and mossy,
+    // the mesa rust red, the flats bleached salt. The peaks get snow in the shader instead.
+    const tints = [ash, new THREE.Color(0x8e8c68), new THREE.Color(0xc07a52), new THREE.Color(0xe6dcc4), new THREE.Color(0xb4b2ae)];
+    const sandOf = [0, 0.15, 0.35, 0.85, 0];
+    const snowOf = [0, 0, 0, 0, 1];
     const list = craters(this.seed);
     const c = new THREE.Color();
+    const w = [0, 0, 0, 0, 0];
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       pos.setY(i, terrainHeight(this.seed, x, z));
       uv.setXY(i, x / 6, z / 6);
-      c.copy(ash);
+      biomeWeights(this.seed, x, z, w);
+      c.setRGB(0, 0, 0);
+      let sand = 0;
+      let snow = 0;
+      for (let b = 0; b < BIOME_IDS.length; b++) {
+        if (w[b] <= 0) continue;
+        c.r += tints[b].r * w[b];
+        c.g += tints[b].g * w[b];
+        c.b += tints[b].b * w[b];
+        sand += sandOf[b] * w[b];
+        snow += snowOf[b] * w[b];
+      }
       for (const cr of list) {
         const d = Math.hypot(x - cr.x, z - cr.z) / cr.radius;
         if (d < 1) c.lerp(glass, (1 - d) * 0.7);
         else if (d < 1.6) c.lerp(scorched, (1 - (d - 1) / 0.6) * 0.75);
+        // The blast melted the snow round each crater.
+        if (d < 1.8) snow *= Math.min(1, Math.max(0, d - 1.2) / 0.6);
       }
       const n = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 3) * Math.cos(z * 0.09 + x * 0.03);
       c.lerp(n > 0 ? pale : scorched, Math.abs(n) * 0.25);
       // The photo texture carries the ground's own colour, so the tints are relative to plain ash.
       colors.set([c.r / ash.r, c.g / ash.g, c.b / ash.b], i * 3);
+      lands.set([sand, snow], i * 2);
     }
+    geo.setAttribute('land', new THREE.BufferAttribute(lands, 2));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
     const ground = groundSurface();
@@ -161,14 +199,15 @@ export class World {
       // World position and normal, so steep crater walls can take the texture from the side
       // instead of stretching it down the slope.
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
-        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);');
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nattribute vec2 land;\nvarying vec2 vLand;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);\nvLand = land;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nvarying vec2 vLand;')
         .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D sandMap;\nuniform sampler2D sandNormal;\nuniform sampler2D macroMap;')
         .replace(
           '#include <map_fragment>',
           `float sandy = 0.0;
+          float snowy = 0.0;
           #ifdef USE_MAP
             vec4 macro = texture2D(macroMap, vMapUv * 0.045);
             vec4 macro2 = texture2D(macroMap, vMapUv * 0.013 + vec2(0.3, 0.6));
@@ -177,7 +216,7 @@ export class World {
             vec4 grit = texture2D(sandMap, vMapUv * 1.6);
             // The scanned dirt is redder than this ashen land; pull it toward grey.
             grit.rgb = mix(vec3(dot(grit.rgb, vec3(0.3, 0.55, 0.15))), grit.rgb, 0.55);
-            sandy = smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4);
+            sandy = max(smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4), vLand.x * smoothstep(0.2, 0.5, macro.r + vLand.x * 0.4));
             vec4 ground = mix(crackA, crackB, 0.4);
             vec4 sampledDiffuseColor = mix(ground, grit, sandy);
             // Steep slopes: the earth projected from the two sides, blended by facing.
@@ -187,9 +226,15 @@ export class World {
               vec2 s = vec2(0.42);
               vec4 side = texture2D(map, vGroundPos.xy * s) * abs(gn.z) + texture2D(map, vGroundPos.zy * s + 0.5) * abs(gn.x);
               side /= abs(gn.z) + abs(gn.x) + 1e-4;
+              // Bands of rock down cliff faces, like layers in the stone.
+              side.rgb *= 0.86 + 0.14 * sin(vGroundPos.y * 2.3 + sin(vGroundPos.x * 0.21 + vGroundPos.z * 0.17) * 2.0);
               sampledDiffuseColor = mix(sampledDiffuseColor, side, steep);
             }
             sampledDiffuseColor.rgb *= mix(0.8, 1.15, macro2.g) * mix(0.92, 1.06, macro.r);
+            // Snow on the peaks: drifts on the flat, the rock showing through on steep ground.
+            snowy = vLand.y * smoothstep(0.35, 0.55, vLand.y + macro.g * 0.5 - steep * 0.9);
+            vec3 snowColor = vec3(1.08, 1.12, 1.2) * mix(0.82, 1.04, crackB.r) * mix(0.9, 1.04, macro.r);
+            sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, snowColor, snowy);
             diffuseColor *= sampledDiffuseColor;
           #endif`,
         )
@@ -198,7 +243,7 @@ export class World {
           `#ifdef USE_NORMALMAP_TANGENTSPACE
             vec3 mapN = mix(texture2D(normalMap, vNormalMapUv).xyz, texture2D(sandNormal, vNormalMapUv * 1.6).xyz, sandy) * 2.0 - 1.0;
             // The top-down detail would smear down steep walls, so flatten it there.
-            mapN.xy *= normalScale * (1.0 - smoothstep(0.82, 0.6, normalize(vGroundNormal).y) * 0.8);
+            mapN.xy *= normalScale * (1.0 - smoothstep(0.82, 0.6, normalize(vGroundNormal).y) * 0.8) * (1.0 - snowy * 0.75);
             normal = normalize(tbn * mapN);
           #else
             #include <normal_fragment_maps>
@@ -277,42 +322,99 @@ export class World {
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
-    const count = 16000;
-    const card = new Float32Array(count);
-    cross.setAttribute('card', new THREE.InstancedBufferAttribute(card, 1));
-    const mesh = new THREE.InstancedMesh(cross, mat, count);
-    const tint = new THREE.Color();
+    // Laid out in squares, each its own mesh, so only the grass round the player is drawn.
+    // How thick it grows in each land, and its colour: green-grey in the forest, burnt on the
+    // mesa, a few dead tufts on the flats, buried under the snow on the peaks.
+    const density = [1, 1.7, 0.35, 0.08, 0];
+    const greens = [new THREE.Color(1, 1, 1), new THREE.Color(0.78, 0.92, 0.62), new THREE.Color(1.15, 0.85, 0.62), new THREE.Color(1.1, 1.05, 0.9), new THREE.Color(1, 1, 1)];
     const rand = mulberry32(this.seed ^ 0xabcdef);
+    const tint = new THREE.Color();
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
-    let placed = 0;
-    for (let n = 0; n < count * 3 && placed < count; n++) {
-      // Grass survives in clumps, away from blast sites.
-      const x = (rand() - 0.5) * WORLD_SIZE * 0.85;
-      const z = (rand() - 0.5) * WORLD_SIZE * 0.85;
-      const patch = Math.sin(x * 0.08) * Math.cos(z * 0.06) + Math.sin((x + z) * 0.05);
-      // Thick in the patches, thinning out around them, with the odd lone tuft elsewhere.
-      if (patch < 0.3 && rand() > Math.max(0.04, (patch + 0.2) * 1.4)) continue;
-      const y = terrainHeight(this.seed, x, z);
-      if (y < 1) continue;
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
-      const k = 0.55 + rand() * 0.9;
-      s.set(k * (0.9 + rand() * 0.3), k * (0.75 + rand() * 0.5), k);
-      p.set(x, y - 0.02, z);
-      // Each tuft a little drier or greener, lighter or darker than its neighbours.
-      const dry = rand();
-      tint.setRGB(1.0 + dry * 0.15, 0.9 + dry * 0.06, 0.68 + dry * 0.06).multiplyScalar(0.85 + rand() * 0.3);
-      mesh.setColorAt(placed, tint);
-      card[placed] = Math.floor(rand() * 4);
-      mesh.setMatrixAt(placed++, m.compose(p, q, s));
+    const w = [0, 0, 0, 0, 0];
+    const half = WORLD_SIZE * 0.45;
+    const perCell = Math.round(0.95 * GRASS_CELL * GRASS_CELL);
+    for (let cx = -half; cx < half; cx += GRASS_CELL) {
+      for (let cz = -half; cz < half; cz += GRASS_CELL) {
+        const card = new Float32Array(perCell);
+        const geo = cross.clone();
+        geo.setAttribute('card', new THREE.InstancedBufferAttribute(card, 1));
+        const mesh = new THREE.InstancedMesh(geo, mat, perCell);
+        let placed = 0;
+        for (let n = 0; n < perCell * 3 && placed < perCell; n++) {
+          const x = cx + rand() * GRASS_CELL;
+          const z = cz + rand() * GRASS_CELL;
+          biomeWeights(this.seed, x, z, w);
+          let thick = 0;
+          for (let b = 0; b < 5; b++) thick += w[b] * density[b];
+          if (rand() > thick / 1.7) continue;
+          // Thick in the patches, thinning out around them, with the odd lone tuft elsewhere.
+          // The forest floor is more evenly covered.
+          const patch = Math.sin(x * 0.08) * Math.cos(z * 0.06) + Math.sin((x + z) * 0.05) + w[1] * 0.9;
+          if (patch < 0.3 && rand() > Math.max(0.04, (patch + 0.2) * 1.4)) continue;
+          const y = terrainHeight(this.seed, x, z);
+          if (y < 1 || steepAt(this.seed, x, z, y)) continue;
+          q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
+          const k = (0.55 + rand() * 0.9) * (1 + w[1] * 0.25);
+          s.set(k * (0.9 + rand() * 0.3), k * (0.75 + rand() * 0.5), k);
+          p.set(x, y - 0.02, z);
+          // Each tuft a little drier or greener, lighter or darker than its neighbours.
+          const dry = rand();
+          tint.setRGB(1.0 + dry * 0.15, 0.9 + dry * 0.06, 0.68 + dry * 0.06).multiplyScalar(0.85 + rand() * 0.3);
+          let gr = 0;
+          let gg = 0;
+          let gb = 0;
+          for (let b = 0; b < 5; b++) {
+            gr += greens[b].r * w[b];
+            gg += greens[b].g * w[b];
+            gb += greens[b].b * w[b];
+          }
+          tint.r *= gr;
+          tint.g *= gg;
+          tint.b *= gb;
+          mesh.setColorAt(placed, tint);
+          card[placed] = Math.floor(rand() * 4);
+          mesh.setMatrixAt(placed++, m.compose(p, q, s));
+        }
+        if (placed === 0) {
+          geo.dispose();
+          continue;
+        }
+        mesh.count = placed;
+        mesh.receiveShadow = true;
+        // The occlusion pass would shade each card as a solid square.
+        mesh.userData.noAO = true;
+        mesh.userData.centre = new THREE.Vector3(cx + GRASS_CELL / 2, 0, cz + GRASS_CELL / 2);
+        mesh.computeBoundingSphere();
+        this.scene.add(mesh);
+        this.grassCells.push(mesh);
+      }
     }
-    mesh.count = placed;
-    mesh.receiveShadow = true;
-    // The occlusion pass would shade each card as a solid square.
-    mesh.userData.noAO = true;
-    this.scene.add(mesh);
+  }
+
+  /** The square of the map a spot is in, made on first use. */
+  private cellAt(x: number, z: number): THREE.Group {
+    const i = Math.floor(x / CELL);
+    const j = Math.floor(z / CELL);
+    const key = `${i},${j}`;
+    let cell = this.cells.get(key);
+    if (!cell) {
+      cell = new THREE.Group();
+      cell.userData.centre = new THREE.Vector3((i + 0.5) * CELL, 0, (j + 0.5) * CELL);
+      this.cells.set(key, cell);
+      this.scene.add(cell);
+    }
+    return cell;
+  }
+
+  /** Hides the squares too far off to see through the haze, and the grass beyond a short way. */
+  private cull(focus: THREE.Vector3) {
+    const flat = (v: THREE.Vector3) => Math.hypot(v.x - focus.x, v.z - focus.z);
+    for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < VIEW + CELL * 0.71;
+    for (const g of this.grassCells) g.visible = flat(g.userData.centre) < GRASS_VIEW + GRASS_CELL * 0.71;
+    for (const p of this.patches) p.mesh.visible = flat(p.centre) < p.view;
   }
 
   private buildAsh(): THREE.Points {
@@ -513,9 +615,9 @@ export class World {
       const rand = mulberry32(node.id * 7 + 3);
       const g =
         node.kind === 'tree'
-          ? this.livingTree(rand)
+          ? this.treeShape('tree', node.id)
           : node.kind === 'deadTree'
-            ? this.deadTree(rand)
+            ? this.treeShape('deadTree', node.id)
             : node.kind === 'scrap'
               ? this.wreck(rand)
               : node.kind === 'hemp'
@@ -538,7 +640,7 @@ export class World {
           o.receiveShadow = true;
         }
       });
-      this.scene.add(g);
+      this.cellAt(node.x, node.z).add(g);
       this.resourceMeshes.set(node.id, g);
       this.pickables.push(g);
       this.setResourceAmount(node.id, node.amount);
@@ -555,6 +657,23 @@ export class World {
     const was = g.visible;
     g.visible = amount > 0;
     if (was && g.visible) this.bounce.set(id, 0.25);
+  }
+
+  /**
+   * A copy of one of a dozen ready-made trees. Each is merged down to a mesh per material, as a
+   * forest of trees built limb by limb would take thousands of draw calls.
+   */
+  private treeShape(kind: 'tree' | 'deadTree', id: number): THREE.Group {
+    let shapes = this.treeShapes.get(kind);
+    if (!shapes) {
+      shapes = [];
+      for (let n = 0; n < 12; n++) {
+        const rand = mulberry32(n * 7 + 3 + (kind === 'tree' ? 0 : 500));
+        shapes.push(mergeByMaterial(kind === 'tree' ? this.livingTree(rand) : this.deadTree(rand)));
+      }
+      this.treeShapes.set(kind, shapes);
+    }
+    return shapes[id % shapes.length].clone();
   }
 
   /**
@@ -835,6 +954,11 @@ export class World {
     this.windTime.value = time;
     this.sun.position.copy(focus).addScaledVector(SUN_DIRECTION, 80);
     this.sun.target.position.copy(focus);
+    this.cullIn -= dt;
+    if (this.cullIn <= 0) {
+      this.cullIn = 0.3;
+      this.cull(focus);
+    }
 
     const pos = this.ash.geometry.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
@@ -900,6 +1024,36 @@ export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Gr
 }
 
 /** Joins plane geometries (position, normal, uv only) into one. */
+/** True where the ground is too steep for grass and loose things to lie (cliffs, crater walls). */
+function steepAt(seed: number, x: number, z: number, y: number): boolean {
+  return Math.hypot(terrainHeight(seed, x + 0.8, z) - y, terrainHeight(seed, x, z + 0.8) - y) > 0.8;
+}
+
+/** One mesh per material in place of a whole tree of them (keeping each part's noAO flag). */
+function mergeByMaterial(root: THREE.Object3D): THREE.Group {
+  root.updateMatrixWorld(true);
+  const parts = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; noAO: boolean }>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mat = mesh.material as THREE.Material;
+    const geo = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(mesh.matrixWorld);
+    for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
+    const entry = parts.get(mat) ?? { geos: [], noAO: !!mesh.userData.noAO };
+    entry.geos.push(geo);
+    parts.set(mat, entry);
+  });
+  const g = new THREE.Group();
+  for (const [mat, { geos, noAO }] of parts) {
+    const merged = mergeGeometries(geos);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.userData.noAO = noAO;
+    g.add(mesh);
+  }
+  return g;
+}
+
 function mergeCards(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const count = parts.reduce((n, p) => n + p.attributes.position.count, 0);
   const pos = new Float32Array(count * 3);

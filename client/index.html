@@ -233,6 +233,18 @@
       #help[hidden] { display: none; }
       kbd { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 4px; background: rgba(255,255,255,.15);
         text-align: center; font-family: inherit; font-weight: 700; }
+      #land-name { font-weight: 800; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; opacity: .85; margin-bottom: 2px; }
+      #land-banner { position: fixed; left: 50%; top: 12%; transform: translate(-50%, -8px); text-align: center; opacity: 0;
+        transition: opacity .6s, transform .6s; pointer-events: none; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+      #land-banner.show { opacity: 1; transform: translate(-50%, 0); }
+      #banner-name { font-size: 34px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+      #banner-perk { font-size: 15px; font-weight: 600; opacity: .9; margin-top: 4px; }
+      #map { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0,0,0,.45); }
+      #map[hidden] { display: none; }
+      #map .card { padding: 12px; background: var(--panel); border-radius: 12px; }
+      #map-canvas { display: block; width: min(78vh, 86vw); height: min(78vh, 86vw); border-radius: 6px; image-rendering: auto; }
+      .map-key { margin-top: 8px; font-size: 12px; text-align: center; }
+      .map-key .pet { color: #c0502e; }
       #disconnected { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7);
         font-size: 20px; font-weight: 700; }
       #disconnected[hidden] { display: none; }
@@ -270,7 +282,9 @@
       <div id="crosshair"></div>
       <div id="hitmarker"></div>
       <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
-      <div id="top-left"><div id="player-count"></div><div id="player-list"></div></div>
+      <div id="top-left"><div id="land-name"></div><div id="player-count"></div><div id="player-list"></div></div>
+      <div id="land-banner"><div id="banner-name"></div><div id="banner-perk"></div></div>
+      <div id="map" hidden><div class="card"><canvas id="map-canvas"></canvas><div class="map-key"><span class="you">▲</span> you · <span class="pet">●</span> your hounds · ☢ radiation · ■ ruins · <kbd>M</kbd> close</div></div></div>
       <div id="resources"></div>
       <div id="kill-feed"></div>
       <div id="pickups"></div>
@@ -292,7 +306,7 @@
       <div id="help">
         <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
-        <kbd>1</kbd>–<kbd>6</kbd> belt · <kbd>Tab</kbd> inventory and crafting<br />
+        <kbd>1</kbd>–<kbd>6</kbd> belt · <kbd>Tab</kbd> inventory and crafting · <kbd>M</kbd> map<br />
         Left click: hit, gather, build, shoot · <kbd>E</kbd> open, pick<br />
         Guns: right click aim · <kbd>R</kbd> reload<br />
         Plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit

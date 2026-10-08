@@ -12,7 +12,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 
 ## What works now
 
-- A 160 m barren wasteland generated from a seed: ash plains, blast craters, dead trees, burnt-out cars, ruined concrete houses, leaning power poles, boulders and one small pocket of living trees.
+- A 400 m map generated from a seed, in five lands that blend into each other. Everyone wakes in **the Ashlands** in the middle (wrecks full of scrap, ruined houses, the safest ground). Round it lie **Deadwood Forest** (the only living trees, plus hemp, mushrooms and most of the Ashhound packs), **Rust Mesa** (red rock tables with three times the metal ore and plenty of stone), **Sulfur Flats** (a bleached old lake bed with three times the sulfur, but scorching, so you get thirsty 1.7 times as fast) and **Frostpeaks** (snowy ridges with high quality metal ore all over, but freezing, so you get hungry 1.7 times as fast). Six blast craters are scattered through the wild lands. A banner names each land as you walk in, and **M** opens a map of them.
 - Graphics: photo-scanned ground, rock, bark, rusted metal, concrete, planks and cloth (CC0 textures from Poly Haven, credited in `client/public/textures/CREDITS.md`), a photographed cloudy sky that also lights the scene, height fog that pools in low ground and glows toward the sun, light shafts, soft 4K shadows, materials with roughness detail, dense dry grass that sways in the wind, drifting ash, ambient occlusion, bloom and a filmic grade with grain.
 - Items look like the real thing: inventory icons are rendered from 3D models (logs, ore, ingots, cartridges, every tool and gun). Walls are built from weathered boards in a timber frame, coursed stone blocks with lintels, or rusty corrugated steel on steel posts. Guns have shaped stocks, curved magazines, sights and rails; tools have lashed flint heads, saw blades and taped grips. Press **O** to switch to low graphics on slower computers.
 - Up to 8 players per server, each a gritty hooded survivor with goggles, a respirator, a loaded backpack and whatever tool is on their belt, in muted clothing with a faded colour on their scarf and armband so players stay easy to tell apart. Walking, sprinting and chopping each have their own animation.
@@ -25,8 +25,8 @@ This repository is the **browser prototype**, built step by step. Milestones don
 - Sound: every gun has its own synthesised shot, layered from a supersonic crack, a low punch and the blast's body, with an echo that takes over at range and stereo panning. Bolt rifles cycle their bolt, the pump shotgun racks, reloads click, and hits thud, ping off helmets and clank on your own armour.
 - Everything else has a sound too: axes biting wood, picks on stone and ore, clanging scrap, trees creaking and crashing down, building pieces knocking into place and breaking apart, swings, footsteps that change on wood, stone and metal floors, landings, finished crafts, inventory moves and a low wind across the wasteland. Guns are mixed loudest, so a firefight cuts through everything.
 - Feedback: chips of wood, stone and metal fly off whatever you hit, new pieces settle into place and shake when hit, items you pick up show as "+6 Wood" in the corner, a red arc shows which way a hit came from, and a kill feed lists every kill with the weapon and headshots. The crafting screen lists each ingredient against what you carry and has a Max button.
-- Survival: food and water drain over time (faster on the move) and hurt you when they run out; keep both above half and you slowly heal. Drink from blue rain barrels (E), pick mushrooms (E), and find cans of beans and bottled water in the glove boxes of wrecks you scrap. The three blast craters are still radioactive: yellow signs mark the edges, a Geiger counter clicks faster the hotter it gets, and radiation poisoning builds up and starts to hurt. Burlap keeps some of it out, anti-radiation pills (charcoal and mushrooms) flush it, and the craters hold the richest high quality metal ore.
-- Wildlife: three packs of Ashhounds, ash-grey mutated hyenas (a scanned, animated model), roam round their dens. Come close and the pack hunts you down, snarling and biting at your legs; sprint and you can just outrun them. Kill one for raw meat and cook it in the furnace. Hold out cooked meat to a wild hound (left click when it is close) three times and it is yours: it wears a red rag collar and your name, follows you and goes for anyone who fights you. Feed it more meat to heal it. Each survivor can keep two, and tame hounds are saved with the world.
+- Survival: food and water drain over time (faster on the move) and hurt you when they run out; keep both above half and you slowly heal. Drink from blue rain barrels (E), pick mushrooms (E), and find cans of beans and bottled water in the glove boxes of wrecks you scrap. The six blast craters are still radioactive: yellow signs mark the edges, a Geiger counter clicks faster the hotter it gets, and radiation poisoning builds up and starts to hurt. Burlap keeps some of it out, anti-radiation pills (charcoal and mushrooms) flush it, and the craters hold the richest high quality metal ore.
+- Wildlife: five packs of Ashhounds (three in Deadwood), ash-grey mutated hyenas (a scanned, animated model), roam round their dens. Come close and the pack hunts you down, snarling and biting at your legs; sprint and you can just outrun them. Kill one for raw meat and cook it in the furnace. Hold out cooked meat to a wild hound (left click when it is close) three times and it is yours: it wears a red rag collar and your name, follows you and goes for anyone who fights you. Feed it more meat to heal it. Each survivor can keep two, and tame hounds are saved with the world.
 - Combat: 100 health, bandages and syringes to heal. Dying drops everything in a loot bag anyone can open, and you respawn with a rock. The server traces every shot, so walls and the ground stop bullets.
 - Fortnite-style building on a 3 m grid with the building plan in hand: walls, floors and stairs in wood, stone or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
@@ -48,6 +48,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 | Building plan: wall, floor or stairs | Right click |
 | Building plan: wood, stone or scrap | R |
 | Edit the wall you look at (window, door, half wall, solid) | G |
+| Map | M |
 | Graphics high or low | O |
 | Hide help | H |
 
@@ -83,4 +84,8 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Riding a tame Ashhound, and commands for it (stay, follow, attack)
+1. Day and night, and weather to match each land (snow on the peaks, dust storms on the flats, rain in the forest)
+2. Bases you can protect and raid: a tool cupboard, doors with code locks, sleeping bags to respawn at, and explosives
+3. Places worth looting: a ruined landmark in each land with crates, and air drops
+4. More creatures, one for each land, and riding the bigger ones
+5. More building pieces: roofs, ramps, foundations and doorways

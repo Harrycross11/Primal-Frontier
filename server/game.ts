@@ -82,6 +82,7 @@ import {
   type Vec3,
 } from '../shared/combat.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
+import { CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
 import { ASHHOUND, PACK_SIZE, clearOfRuins, packDens, rayCreature, yawTowards } from '../shared/creatures.ts';
 import { blocked, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
 import {
@@ -144,7 +145,7 @@ interface Sleeper {
 
 /** Everything needed to bring a world back after the server restarts. Times are kept as ms left. */
 export interface WorldSave {
-  version: 1;
+  version: 2;
   seed: number;
   /** When this world began (ms since 1970), for the wipe. */
   startedAt: number;
@@ -744,7 +745,7 @@ export class Game {
   private tickSurvival(p: Player, dt: number): Outgoing[] {
     if (p.dead || dt <= 0) return [];
     const level = radiationAt(this.seed, p.x, p.z);
-    const { hp, cause } = tickVitals(p.vitals, dt, p.moving, level, radProtection(p), p.hp, MAX_HEALTH);
+    const { hp, cause } = tickVitals(p.vitals, dt, p.moving, level, radProtection(p), p.hp, MAX_HEALTH, climateAt(this.seed, p.x, p.z));
     p.hp = Math.max(0, Math.min(MAX_HEALTH, p.hp + hp));
     const out: Outgoing[] = [];
     const vitals = this.vitalsMsg(p);
@@ -889,13 +890,15 @@ export class Game {
     return out;
   }
 
-  /** A random spot to wake up, away from the radiation zones. */
+  /** A random spot to wake up in the Ashlands, away from the radiation zones. */
   private spawnPoint(): [number, number] {
     if (this.spawnAt) return [...this.spawnAt];
     let spot: [number, number] = [0, 0];
-    for (let tries = 0; tries < 20; tries++) {
-      spot = [(this.rand() - 0.5) * HALF_WORLD, (this.rand() - 0.5) * HALF_WORLD];
-      if (radiationAt(this.seed, spot[0], spot[1]) === 0) break;
+    for (let tries = 0; tries < 30; tries++) {
+      const a = this.rand() * Math.PI * 2;
+      const r = Math.sqrt(this.rand()) * CORE_RADIUS * 0.8;
+      spot = [Math.cos(a) * r, Math.sin(a) * r];
+      if (radiationAt(this.seed, spot[0], spot[1]) === 0 && biomeAt(this.seed, spot[0], spot[1]) === 'ashlands') break;
     }
     return spot;
   }
@@ -914,7 +917,7 @@ export class Game {
       if (p) survivors.set(key, sleeper(p));
     }
     return clone({
-      version: 1,
+      version: 2,
       seed: this.seed,
       startedAt: this.startedAt,
       nextId: this.nextId,

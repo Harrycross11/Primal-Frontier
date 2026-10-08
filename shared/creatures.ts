@@ -3,6 +3,7 @@
 
 import { HALF_WORLD } from './constants.ts';
 import { rayBox, type Vec3 } from './combat.ts';
+import { CORE_RADIUS, biomeAt } from './biomes.ts';
 import { mulberry32 } from './terrain.ts';
 import { generateDecor } from './world.ts';
 
@@ -57,20 +58,25 @@ export const ASHHOUND = {
 } as const;
 
 /** Packs on the map and how many hounds in each. */
-export const PACKS = 3;
+export const PACKS = 5;
 export const PACK_SIZE = 3;
+/** The packs that den in Deadwood; the rest roam the other wild lands. */
+const FOREST_PACKS = 3;
 
-/** Where each pack makes its den: spread over the map, away from the middle and the ruins. */
+/** Where each pack makes its den: out in the wild lands, away from the middle and the ruins. */
 export function packDens(seed: number): [number, number][] {
   const rand = mulberry32(seed ^ 0x68e31da4);
   const dens: [number, number][] = [];
   for (let n = 0; n < PACKS; n++) {
     let den: [number, number] = [0, 0];
-    for (let tries = 0; tries < 30; tries++) {
-      const angle = (n / PACKS) * Math.PI * 2 + rand() * 1.2;
-      const r = HALF_WORLD * (0.45 + rand() * 0.35);
+    for (let tries = 0; tries < 80; tries++) {
+      const angle = rand() * Math.PI * 2;
+      const r = CORE_RADIUS + 25 + rand() * (HALF_WORLD * 0.8 - CORE_RADIUS - 25);
       den = [Math.cos(angle) * r, Math.sin(angle) * r];
-      if (clearOfRuins(seed, den[0], den[1], 18)) break;
+      const land = biomeAt(seed, den[0], den[1]);
+      const right = n < FOREST_PACKS ? land === 'deadwood' : land !== 'ashlands' && land !== 'deadwood';
+      const apart = dens.every(([x, z]) => Math.hypot(x - den[0], z - den[1]) > 70);
+      if (right && apart && clearOfRuins(seed, den[0], den[1], 18)) break;
     }
     dens.push(den);
   }
