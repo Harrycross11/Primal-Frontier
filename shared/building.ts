@@ -1,4 +1,5 @@
-// Fortnite-style building: walls, floors and stairs snapped to a grid of 3 m tiles.
+// Fortnite-style building: foundations, walls, floors, stairs, ramps and roofs snapped to a
+// grid of 3 m tiles.
 // Walls can be edited into windows, doors and half walls. Shared by client and server so
 // both agree on where pieces sit, what they cost and what space they take up.
 
@@ -13,7 +14,17 @@ export const STOREY = 3;
 /** Thickness of walls and floors. */
 export const THICK = 0.2;
 
-export type PieceKind = 'wall' | 'floor' | 'stairs';
+export type PieceKind = 'wall' | 'floor' | 'stairs' | 'foundation' | 'ramp' | 'roof';
+export const PIECE_KINDS: PieceKind[] = ['foundation', 'wall', 'floor', 'stairs', 'ramp', 'roof'];
+/** How deep a foundation reaches into the ground below its top, so it sits level on a slope. */
+export const FOUNDATION_DEPTH = 3;
+/** How high a roof rises from its edges to its peak. */
+export const ROOF_RISE = 1.5;
+
+/** Stairs and ramps: pieces you walk up, rising across their tile towards `dir`. */
+export function isSlope(p: Pick<Piece, 'kind'>): boolean {
+  return p.kind === 'stairs' || p.kind === 'ramp';
+}
 export type WallEdit = 'solid' | 'window' | 'door' | 'half';
 export const WALL_EDITS: WallEdit[] = ['solid', 'window', 'door', 'half'];
 
@@ -33,8 +44,9 @@ export const DOORWAY = { from: TILE / 2 - 0.65, to: TILE / 2 + 0.65, height: 2.3
 
 /**
  * A placed piece. (i, k) is the tile, y is the bottom height in whole metres.
- * dir: for walls 0 = runs along x on the tile's -z edge, 1 = runs along z on the tile's -x edge;
- * for stairs, the direction they rise towards: 0 = +z, 1 = +x, 2 = -z, 3 = -x.
+ * A foundation's y is its top. dir: for walls 0 = runs along x on the tile's -z edge, 1 = runs
+ * along z on the tile's -x edge; for stairs and ramps, the direction they rise towards: 0 = +z,
+ * 1 = +x, 2 = -z, 3 = -x.
  */
 export interface Piece {
   kind: PieceKind;
@@ -57,7 +69,7 @@ export const MAX_HP: Record<Material, number> = { wood: 150, stone: 250, scrap: 
 export const HIT_DAMAGE = 50;
 
 export function pieceKey(p: Pick<Piece, 'kind' | 'i' | 'y' | 'k' | 'dir'>): string {
-  const dir = p.kind === 'floor' ? 0 : p.dir;
+  const dir = p.kind === 'wall' || isSlope(p) ? p.dir : 0;
   return `${p.kind}:${p.i},${p.y},${p.k},${dir}`;
 }
 
@@ -111,13 +123,24 @@ export function pieceBoxes(p: Piece, withDoor = true): Box[] {
   const z0 = p.k * TILE;
   const t = THICK / 2;
   if (p.kind === 'floor') return [box(x0, p.y - THICK, z0, x0 + TILE, p.y, z0 + TILE)];
+  if (p.kind === 'foundation') return [box(x0, p.y - FOUNDATION_DEPTH, z0, x0 + TILE, p.y, z0 + TILE)];
+  if (p.kind === 'roof') {
+    // A low pyramid over the tile, as a stack of ever smaller slabs.
+    const layers = 4;
+    const out: Box[] = [];
+    for (let n = 0; n < layers; n++) {
+      const inset = (n / layers) * (TILE / 2) * 0.9;
+      out.push(box(x0 + inset, p.y + (n / layers) * ROOF_RISE, z0 + inset, x0 + TILE - inset, p.y + ((n + 1) / layers) * ROOF_RISE, z0 + TILE - inset));
+    }
+    return out;
+  }
   if (p.kind === 'wall') {
     const parts = wallParts(p.edit).map(([a0, h0, a1, h1]) => alongWall(p, a0, h0, a1, h1, t));
     if (withDoor && p.edit === 'door' && p.door && !p.door.open) parts.push(doorBox(p));
     return parts;
   }
-  // Stairs: steps rising across the tile.
-  const steps = 6;
+  // Stairs (and ramps, which are walked like them): steps rising across the tile.
+  const steps = p.kind === 'ramp' ? 12 : 6;
   const out: Box[] = [];
   for (let s = 0; s < steps; s++) {
     const a0 = (s / steps) * TILE;
@@ -151,7 +174,7 @@ export function pieceBounds(p: Piece): Box {
   return { min, max };
 }
 
-/** Height of a stairs surface at (x, z), or null when (x, z) is outside the stairs. */
+/** Height of a stairs or ramp surface at (x, z), or null when (x, z) is outside it. */
 export function stairsHeight(p: Piece, x: number, z: number): number | null {
   const x0 = p.i * TILE;
   const z0 = p.k * TILE;
@@ -169,12 +192,12 @@ export function boxesTouch(a: Box, b: Box, pad = 0.05): boolean {
 
 export function validPieceShape(p: Piece): boolean {
   const ints = [p.i, p.y, p.k, p.dir].every(Number.isInteger);
-  const dirOk = p.kind === 'wall' ? p.dir === 0 || p.dir === 1 : p.kind === 'stairs' ? p.dir >= 0 && p.dir < 4 : true;
+  const dirOk = p.kind === 'wall' ? p.dir === 0 || p.dir === 1 : isSlope(p) ? p.dir >= 0 && p.dir < 4 : true;
   const limit = HALF_WORLD * 0.85;
   return (
     ints &&
     dirOk &&
-    ['wall', 'floor', 'stairs'].includes(p.kind) &&
+    PIECE_KINDS.includes(p.kind) &&
     ['wood', 'stone', 'scrap'].includes(p.material) &&
     WALL_EDITS.includes(p.edit) &&
     Math.abs(p.i * TILE) < limit &&
@@ -197,11 +220,22 @@ export function pieceSupported(seed: number, p: Piece, others: Iterable<Piece>):
   }
   const lowest = Math.min(...samples);
   const highest = Math.max(...samples);
+  if (p.kind === 'foundation') {
+    // Its top a little above the ground all round: never hanging in the air, never buried.
+    const corners = [0, 1].flatMap((fx) => [0, 1].map((fz) => terrainHeight(seed, b.min[0] + TILE * fx, b.min[2] + TILE * fz)));
+    return p.y >= Math.max(...corners) - 0.5 && p.y <= Math.min(...corners) + FOUNDATION_DEPTH - 0.5;
+  }
   if (b.max[1] < highest - 0.1 && p.kind !== 'floor') return false; // fully buried
   if (p.kind === 'floor' && p.y < lowest - 0.5) return false;
   if (b.min[1] <= highest + 0.6) return true;
   for (const o of others) if (boxesTouch(b, pieceBounds(o))) return true;
   return false;
+}
+
+/** Where a foundation's top goes on a tile: a whole metre or so clear of its highest corner. */
+export function foundationTop(seed: number, i: number, k: number): number {
+  const corners = [0, 1].flatMap((fx) => [0, 1].map((fz) => terrainHeight(seed, (i + fx) * TILE, (k + fz) * TILE)));
+  return Math.ceil(Math.max(...corners) + 0.3);
 }
 
 /** Ground height to build from at a point: whole metres, so neighbouring pieces line up. */

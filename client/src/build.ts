@@ -1,6 +1,6 @@
 // Works out where a building piece would go from where the player is looking, Fortnite style:
-// walls snap to the tile edge you face, floors and stairs to the tile you aim at, and aiming
-// at an existing piece builds onto it.
+// walls snap to the tile edge you face, other pieces to the tile you aim at, and aiming at an
+// existing piece builds onto it. Foundations sit level on the ground; roofs go on top of walls.
 
 import * as THREE from 'three';
 import { BUILD_RANGE } from '../../shared/constants.ts';
@@ -8,6 +8,8 @@ import {
   STOREY,
   TILE,
   buildBaseY,
+  foundationTop,
+  isSlope,
   pieceBounds,
   pieceKey,
   type Box,
@@ -74,9 +76,11 @@ export function proposePiece(
       k = Math.round(point.z / TILE);
       dir = 0;
     }
-  } else if (kind === 'stairs') {
+  } else if (kind === 'stairs' || kind === 'ramp') {
     dir = facing;
   }
+  // A foundation on open ground levels itself over the tile, whatever the slope.
+  if (kind === 'foundation' && aim?.piece?.kind !== 'foundation') baseY = foundationTop(world.seed, i, k);
 
   const make = (ii: number, yy: number, kk: number): Piece => ({
     kind,
@@ -94,8 +98,8 @@ export function proposePiece(
     [0, -1],
     [-1, 0],
   ];
-  // Aiming at stairs with stairs selected continues the flight upwards.
-  if (kind === 'stairs' && aim?.piece?.kind === 'stairs') {
+  // Aiming at stairs with stairs selected (or a ramp with a ramp) continues the flight upwards.
+  if (isSlope({ kind }) && aim?.piece?.kind === kind) {
     dir = aim.piece.dir;
     const [di, dk] = STEPS[dir];
     i = aim.piece.i + di;
@@ -106,7 +110,8 @@ export function proposePiece(
   // Aiming at a spot that is already built: extend the build instead.
   if (world.pieces.has(pieceKey(piece))) {
     if (kind === 'wall') piece = make(i, baseY + STOREY, k);
-    else if (kind === 'floor') piece = make(alongX ? i + sign : i, baseY, alongX ? k : k + sign);
+    else if (kind === 'floor' || kind === 'foundation') piece = make(alongX ? i + sign : i, baseY, alongX ? k : k + sign);
+    else if (kind === 'roof') return null;
     else piece = make(i + STEPS[dir][0], baseY + STOREY, k + STEPS[dir][1]);
     if (world.pieces.has(pieceKey(piece))) return null;
   }
@@ -115,8 +120,13 @@ export function proposePiece(
 
 /** Which height to build at when aiming at an existing piece. */
 function baseFromPiece(kind: PieceKind, target: Piece, hit: THREE.Vector3): number {
+  // A roof caps whatever it is aimed at: the top of a wall, or a storey above anything else.
+  if (kind === 'roof') return target.kind === 'roof' ? target.y : target.y + STOREY;
+  // Everything builds on top of a foundation, and foundations extend at the same height.
+  if (target.kind === 'foundation') return target.y;
+  if (target.kind === 'roof') return target.y;
   if (target.kind === 'floor') return target.y;
-  if (target.kind === 'stairs') return kind === 'stairs' ? target.y + STOREY : target.y;
+  if (isSlope(target)) return kind === target.kind ? target.y + STOREY : target.y;
   // A wall: floors go on top when you aim at its upper half, everything else beside it.
   const upper = hit.y > target.y + STOREY / 2;
   if (kind === 'floor') return upper ? target.y + STOREY : target.y;

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD_SIZE } from '../../shared/constants.ts';
-import { DOORWAY, MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
+import { DOORWAY, MAX_HP, ROOF_RISE, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { BIOME_IDS, biomeWeights } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
@@ -1187,6 +1187,30 @@ export class World {
 /** Turns a piece's collision boxes into meshes, so what you see is exactly what you bump into. */
 export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Group {
   const g = new THREE.Group();
+  g.userData.pieceKey = pieceKey(piece);
+  const cx = (piece.i + 0.5) * TILE;
+  const cz = (piece.k + 0.5) * TILE;
+  if (piece.kind === 'ramp') {
+    // One smooth slab from the low edge to the high one (you walk it like stairs).
+    const run = Math.hypot(TILE, STOREY);
+    const slab = new THREE.Mesh(worldBox(TILE, THICK, run), material);
+    slab.position.set(cx, piece.y + STOREY / 2 - THICK / 2, cz);
+    slab.rotation.order = 'YXZ';
+    slab.rotation.y = (piece.dir * Math.PI) / 2;
+    slab.rotation.x = Math.atan2(STOREY, TILE);
+    g.add(slab);
+    return g;
+  }
+  if (piece.kind === 'roof') {
+    // A low four-sided pyramid with a little overhang.
+    const geo = new THREE.ConeGeometry((TILE / 2) * Math.SQRT2 * 1.06, ROOF_RISE, 4, 1, false, Math.PI / 4);
+    const uv = geo.attributes.uv as THREE.BufferAttribute;
+    for (let n = 0; n < uv.count; n++) uv.setXY(n, uv.getX(n) * 2.4, uv.getY(n) * 1.4);
+    const roof = new THREE.Mesh(geo, material);
+    roof.position.set(cx, piece.y + ROOF_RISE / 2, cz);
+    g.add(roof);
+    return g;
+  }
   for (const b of pieceBoxes(piece, false)) {
     const w = b.max[0] - b.min[0];
     const h = b.max[1] - b.min[1];
@@ -1195,7 +1219,6 @@ export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Gr
     mesh.position.set((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
     g.add(mesh);
   }
-  g.userData.pieceKey = pieceKey(piece);
   return g;
 }
 

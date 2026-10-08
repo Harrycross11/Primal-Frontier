@@ -21,6 +21,7 @@ import {
   DOOR_KINDS,
   HIT_DAMAGE,
   MAX_HP,
+  isSlope,
   PIECE_COST,
   WALL_EDITS,
   boxesTouch,
@@ -563,7 +564,7 @@ export class Game {
     const p = this.alive(id);
     if (!p) return [];
     if (p.slots[p.active]?.item !== 'buildingPlan') return [notice(id, 'Hold a building plan to build')];
-    const piece: Piece = { kind, i, y, k, dir: kind === 'floor' ? 0 : dir, material, edit: 'solid', hp: MAX_HP[material] };
+    const piece: Piece = { kind, i, y, k, dir: kind === 'wall' || isSlope({ kind }) ? dir : 0, material, edit: 'solid', hp: MAX_HP[material] };
     if (!validPieceShape(piece)) return [];
     const key = pieceKey(piece);
     if (this.pieces.has(key)) return [];
@@ -2043,12 +2044,12 @@ export class Game {
     return level;
   }
 
-  /** On the ground (allowing small bumps), or on top of a floor piece. */
+  /** On the ground (allowing small bumps), or on top of a floor or foundation. */
   private deploySupported(x: number, y: number, z: number): boolean {
     const ground = terrainHeight(this.seed, x, z);
     if (y >= ground - 0.3 && y <= ground + 0.4) return true;
     for (const piece of this.pieces.values()) {
-      if (piece.kind !== 'floor') continue;
+      if (piece.kind !== 'floor' && piece.kind !== 'foundation') continue;
       const [b] = pieceBoxes(piece);
       if (x >= b.min[0] && x <= b.max[0] && z >= b.min[2] && z <= b.max[2] && Math.abs(y - b.max[1]) < 0.15) return true;
     }

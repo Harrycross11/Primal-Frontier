@@ -11,7 +11,7 @@ import {
   PLAYER_SPEED,
   PLAYER_SPRINT,
 } from '../../shared/constants.ts';
-import { pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
+import { isSlope, pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
 import { deployableBox } from '../../shared/deployables.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, type ResourceNode } from '../../shared/world.ts';
@@ -156,7 +156,7 @@ export class Controller {
       b.max[0] > p.x - 4 && b.min[0] < p.x + 4 && b.max[2] > p.z - 4 && b.min[2] < p.z + 4;
     const out = this.world.decorColliders.filter(near);
     for (const piece of this.world.pieces.values()) {
-      if (piece.kind === 'stairs') continue; // stairs are ramps, handled in groundHeight
+      if (isSlope(piece)) continue; // stairs and ramps are slopes, handled in groundHeight
       for (const b of pieceBoxes(piece)) if (near(b)) out.push(b);
     }
     for (const d of this.world.deployables.values()) {
@@ -189,7 +189,7 @@ export class Controller {
       }
     }
     for (const piece of this.world.pieces.values()) {
-      if (piece.kind !== 'stairs') continue;
+      if (!isSlope(piece)) continue;
       const h = stairsHeight(piece, x, z);
       if (h !== null && h <= y + STEP + 0.2) ground = Math.max(ground, h);
     }

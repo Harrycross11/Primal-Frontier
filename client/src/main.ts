@@ -16,6 +16,7 @@ import {
   type DoorKind,
   type Piece,
   type PieceKind,
+  PIECE_KINDS,
 } from '../../shared/building.ts';
 import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
@@ -57,8 +58,7 @@ const RESOURCE_NAMES = {
   mushroom: 'Mushrooms',
   waterBarrel: 'Rain barrel',
 } as const;
-const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
-const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
+const PIECE_NAMES: Record<PieceKind, string> = { foundation: 'Foundation', wall: 'Wall', floor: 'Floor', stairs: 'Stairs', ramp: 'Ramp', roof: 'Roof' };
 const SCOPED: ItemId[] = ['boltRifle', 'l96', 'svd', 'm82'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
@@ -737,7 +737,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (h.face) aimNormal = h.face.normal.clone().transformDirection(h.object.matrixWorld);
       // Somewhere a workbench, furnace or box could stand: open ground or the top of a floor.
       if (h.object.name === 'terrain') aimSurface = { point: h.point.clone(), y: terrainHeight(world.seed, h.point.x, h.point.z) };
-      else if (piece?.kind === 'floor' && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
+      else if ((piece?.kind === 'floor' || piece?.kind === 'foundation') && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
       break;
     }
     // A survivor in front of whatever else the crosshair is on.
@@ -1085,7 +1085,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const show = held() === 'buildingPlan';
     buildInfo.hidden = !show;
     if (!show) return;
-    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)<br/><small>Right click: wall, floor, stairs · R: wood, stone, scrap</small>`;
+    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)<br/><small>Right click: foundation, wall, floor, stairs, ramp, roof · R: wood, stone, scrap</small>`;
     if (buildInfo.innerHTML !== html) buildInfo.innerHTML = html;
   }
 

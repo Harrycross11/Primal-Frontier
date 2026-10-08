@@ -37,7 +37,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
   - **Frost Bear** (Frostpeaks): hunts anyone who comes close, hits very hard, and fights for whoever tames it.
   - Taming: craft a **Feed Sack** (10 cloth, 2 mushrooms) and walk (don't run) up to a mule, elk, buffalo or camel, then hold it out (left click) until it is yours; bears take cooked meat like hounds do. A tame animal wears a saddle and your name and follows you. Look at it and press **E** to climb on: WASD to ride, **Shift** to gallop, **E** to get off. Each survivor can keep two animals to ride, besides their hounds, and they are saved with the world. Every animal gives raw meat when it dies.
 - Combat: 100 health, bandages and syringes to heal. Dying drops everything in a loot bag anyone can open, and you respawn with a rock. The server traces every shot, so walls and the ground stop bullets.
-- Fortnite-style building on a 3 m grid with the building plan in hand: walls, floors and stairs in wood, stone or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
+- Fortnite-style building on a 3 m grid with the building plan in hand: foundations, walls, floors, stairs, ramps and roofs in wood, stone or scrap (10 each). Foundations sit level on uneven ground so a base starts flat; ramps are a smooth slope a storey high; roofs are pitched caps that go on top of walls. Walls can be edited into a window, a doorway (hang a door in it) or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
 - Bases you can protect and raid, Rust-style:
   - **Tool cupboard** (300 wood): set it down inside your base. Nobody else can build, set things down or edit walls within 18 m, and their hits barely scratch your wooden walls and do nothing to stone or scrap. Press **E** on it to let a friend build too, and **G** to clear everyone else. Without one, anyone can knock your walls down by hand.
   - **Doors**: press **G** on a wall to make a doorway, then hang a wooden door (150 wood) or a sheet metal door (150 metal, workbench 1) in it. **E** opens and closes them.
@@ -49,7 +49,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
   - **Crates** at every landmark: wooden crates hold the basics (scrap, metal, ammo, bandages, early guns and armour), military crates better guns, ammo, syringes and armour. Each land's crates add what it is known for. Press **E** to open one; once emptied it fills up again 8 minutes later.
   - **Air drops**: a cargo plane flies over every 20 to 30 minutes while anyone is playing and drops a crate of the best gear, which floats down on a parachute and puffs red smoke when it lands. It shows on the map, and everyone gets told which land it is over.
   - **Supply signals**, found in military crates: throw one and its red smoke calls the plane to drop right there.
-- Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
+- Movement handles everything you build: walk up stairs and ramps, stand on floors and foundations, walk through doors.
 - The server checks every action (reach, cost, cooldowns, movement speed), so players can't cheat by editing the client.
 
 ## Controls
@@ -65,7 +65,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 | Reload | R (with a gun) |
 | Open a furnace or box, pick hemp or mushrooms, drink from a rain barrel | E |
 | Eat, drink or take pills in your hands | Left click |
-| Building plan: wall, floor or stairs | Right click |
+| Building plan: foundation, wall, floor, stairs, ramp or roof | Right click |
 | Building plan: wood, stone or scrap | R |
 | Edit the wall you look at (window, door, half wall, solid) | G |
 | Map | M |
@@ -104,4 +104,4 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. More building pieces: roofs, ramps, foundations and doorways
+The first roadmap is done. Ideas for after it: more lands and creatures, vehicles, clans, and moving to Unity if the prototype proves fun.

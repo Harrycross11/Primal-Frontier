@@ -25,7 +25,9 @@ import {
   MAX_HP,
   PIECE_COST,
   STOREY,
+  FOUNDATION_DEPTH,
   buildBaseY,
+  foundationTop,
   pieceKey,
   stairsHeight,
 } from '../shared/building.ts';
@@ -149,6 +151,34 @@ test('placing a piece costs materials and must connect to the ground or another 
   assert.equal(game.pieces.size, 3);
   game.place(id, 'wall', 0, y, 1, 0, 'wood');
   assert.equal(game.pieces.size, 3, 'same spot twice is ignored');
+});
+
+test('foundations sit level on the ground and carry walls, floors, ramps and roofs', () => {
+  const { game, id } = setup();
+  standAt(game, id, 1.5, 7.5);
+  holdPlan(game, id);
+  give(game, id, 'wood', 1000);
+  const top = foundationTop(SEED, 0, 1);
+
+  game.place(id, 'foundation', 0, top + FOUNDATION_DEPTH + 2, 1, 0, 'wood');
+  assert.equal(game.pieces.size, 0, 'a foundation in the air is rejected');
+  game.place(id, 'foundation', 0, top, 1, 0, 'wood');
+  assert.equal(game.pieces.size, 1, 'a foundation on the ground is accepted');
+
+  // Its top is a floor: walls and a ramp go on it.
+  game.place(id, 'wall', 0, top, 1, 0, 'wood');
+  game.place(id, 'ramp', 0, top, 1, 1, 'wood');
+  assert.equal(game.pieces.size, 3);
+  const ramp = game.pieces.get(pieceKey({ kind: 'ramp', i: 0, y: top, k: 1, dir: 1 }))!;
+  assert.ok(ramp, 'the ramp keeps its facing');
+  const mid = stairsHeight(ramp, 1.5, 4.5)!;
+  assert.ok(mid > top && mid < top + STOREY, 'a ramp climbs a storey');
+
+  // A roof caps the wall; a roof with nothing under it is rejected.
+  game.place(id, 'roof', 0, top + STOREY, 1, 0, 'wood');
+  assert.ok(game.pieces.has(pieceKey({ kind: 'roof', i: 0, y: top + STOREY, k: 1, dir: 0 })));
+  game.place(id, 'roof', 5, top + STOREY * 3, 5, 0, 'wood');
+  assert.equal(game.pieces.has(pieceKey({ kind: 'roof', i: 5, y: top + STOREY * 3, k: 5, dir: 0 })), false);
 });
 
 test('walls can be edited into windows, doors and half walls', () => {
