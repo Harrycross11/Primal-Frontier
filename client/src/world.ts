@@ -43,6 +43,8 @@ const GRASS_VIEW = 95;
 export class World {
   readonly scene = new THREE.Scene();
   readonly sun: THREE.DirectionalLight;
+  readonly hemi: THREE.HemisphereLight;
+  readonly fires: THREE.PointLight[] = [];
   readonly terrain: THREE.Mesh;
   readonly resourceMeshes = new Map<number, THREE.Group>();
   readonly pieces = new Map<string, Piece>();
@@ -74,7 +76,15 @@ export class World {
 
     // Shade is lit by the sky, so it runs cool and blue against the warm sun, with a little
     // warm light bounced up off the ground.
-    this.scene.add(new THREE.HemisphereLight(0xa9bad0, 0x4a3e32, 0.6));
+    this.hemi = new THREE.HemisphereLight(0xa9bad0, 0x4a3e32, 0.6);
+    this.scene.add(this.hemi);
+    // Firelight from torches and furnaces at night. A fixed set, so lighting one never makes
+    // every material recompile; the brightest nearby fires get them.
+    for (let n = 0; n < 4; n++) {
+      const light = new THREE.PointLight(0xff9a48, 0, 16, 1.6);
+      this.fires.push(light);
+      this.scene.add(light);
+    }
     this.sun = new THREE.DirectionalLight(0xffe0b8, 2.8);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);

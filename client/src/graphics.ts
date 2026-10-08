@@ -16,6 +16,7 @@ export type Quality = 'high' | 'medium' | 'low';
 export const QUALITIES: Quality[] = ['high', 'medium', 'low'];
 
 /** Low, hazy sun: late afternoon on a dead planet. */
+/** Where the sun is: moved through the day by the day-night cycle (daynight.ts). */
 export const SUN_DIRECTION = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 16), THREE.MathUtils.degToRad(215));
 export const HAZE = new THREE.Color(0xbcb09c);
 const ZENITH = new THREE.Color(0x56708e);
@@ -33,6 +34,13 @@ const PHOTO_EXPOSURE = 0.3;
 interface PhotoSky {
   map: { value: THREE.Texture | null };
   mix: { value: number };
+  /** Turn and stretch putting the photo's sun on ours; they follow the sun round. */
+  turn: { value: number };
+  sun: { value: THREE.Vector2 };
+  /** 0 at night to 1 by day, and how stormy it is, 0 to 1, with the storm's colour. */
+  daylight: { value: number };
+  storm: { value: number };
+  stormColor: { value: THREE.Color };
 }
 
 /**
@@ -53,14 +61,18 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
       time,
       photoMap: photo.map,
       photoMix: photo.mix,
-      photoTurn: { value: (PHOTO_SUN_U - 0.5) * Math.PI * 2 - Math.atan2(SUN_DIRECTION.z, SUN_DIRECTION.x) },
-      photoSun: { value: new THREE.Vector2(Math.asin(SUN_DIRECTION.y), PHOTO_SUN_ELEVATION) },
+      photoTurn: photo.turn,
+      photoSun: photo.sun,
       photoExposure: { value: PHOTO_EXPOSURE },
+      daylight: photo.daylight,
+      storm: photo.storm,
+      stormColor: photo.stormColor,
     },
     vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`,
     fragmentShader: `
       uniform vec3 horizon; uniform vec3 zenith; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; varying vec3 vDir;
       uniform sampler2D photoMap; uniform float photoMix; uniform float photoTurn; uniform vec2 photoSun; uniform float photoExposure;
+      uniform float daylight; uniform float storm; uniform vec3 stormColor;
       const float PI = 3.141592653589793;
       // The photographed sky in direction d, its elevations bent so the photo's sun (photoSun.y)
       // lands at ours (photoSun.x) while the horizon and zenith stay put.
@@ -117,7 +129,19 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
           photo = mix(horizon, photo, smoothstep(-0.02, 0.14, d.y));
           col = mix(col, photo, photoMix);
         }
-        col += sunColor * smoothstep(0.9993, 0.9997, s) * 12.0;
+        // Storm cloud closing over the sky, darkest overhead.
+        col = mix(col, stormColor * mix(1.0, 0.7, h), storm * 0.9);
+        col += sunColor * smoothstep(0.9993, 0.9997, s) * 12.0 * (1.0 - storm);
+        // Night: a deep blue-black sky, glowing a little at the horizon, and stars where it is clear.
+        vec3 night = mix(vec3(0.035, 0.045, 0.07), vec3(0.008, 0.011, 0.022), pow(h, 0.6));
+        if (d.y > 0.0) {
+          vec3 cell = floor(d * 380.0);
+          float star = hash(cell.xy + cell.z * 17.0);
+          float twinkle = 0.7 + 0.3 * sin(time * 2.0 + star * 50.0);
+          night += vec3(0.9, 0.92, 1.0) * smoothstep(0.9975, 1.0, star) * twinkle * smoothstep(0.0, 0.2, d.y) * (1.0 - storm) * 1.4;
+        }
+        night = mix(night, stormColor * 0.12, storm * 0.8);
+        col = mix(night, col, daylight);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -196,7 +220,13 @@ export class Graphics {
   private shafts: ShaderPass;
   private grade: ShaderPass;
   private sky: THREE.Mesh;
+  private photo: PhotoSky;
   private time = { value: 0 };
+  /** How bright the scene's light is (see setSky), so the shafts fade with the sun. */
+  private sunlight = 1;
+  private bake: () => void;
+  /** The sky the environment light was last baked from: daylight and storm. */
+  private baked = [1, 0];
   private clock = new THREE.Clock();
   quality: Quality;
 
@@ -217,7 +247,16 @@ export class Graphics {
 
     // Sky dome plus an environment map baked from it, so surfaces pick up the sky's colour.
     // The dome is drawn in code until the photographed sky loads, then shows the photo.
-    const photo: PhotoSky = { map: { value: null }, mix: { value: 0 } };
+    const photo: PhotoSky = {
+      map: { value: null },
+      mix: { value: 0 },
+      turn: { value: 0 },
+      sun: { value: new THREE.Vector2(0.28, PHOTO_SUN_ELEVATION) },
+      daylight: { value: 1 },
+      storm: { value: 0 },
+      stormColor: { value: new THREE.Color(0x6e7074) },
+    };
+    this.photo = photo;
     this.sky = skyDome(1000, this.time, photo);
     scene.add(this.sky);
     const envScene = new THREE.Scene();
@@ -233,6 +272,7 @@ export class Graphics {
       pmrem.dispose();
     };
     bakeEnvironment();
+    this.bake = bakeEnvironment;
     scene.environmentIntensity = 0.55;
     new HDRLoader().load(SKY_URL, (tex) => {
       tex.wrapS = THREE.RepeatWrapping;
@@ -308,6 +348,26 @@ export class Graphics {
     this.bloom.resolution.set(innerWidth / 2, innerHeight / 2);
   }
 
+  /**
+   * Follows the sun round the sky (SUN_DIRECTION, which the day-night cycle moves), dims it to
+   * night with `daylight` (0 to 1), and closes in storm cloud of the given colour.
+   */
+  setSky(daylight: number, storm: number, stormColor: THREE.Color) {
+    const p = this.photo;
+    p.turn.value = (PHOTO_SUN_U - 0.5) * Math.PI * 2 - Math.atan2(SUN_DIRECTION.z, SUN_DIRECTION.x);
+    // Below a few degrees the photo's warp would fold over, so its sun stops at the horizon.
+    p.sun.value.x = Math.max(Math.asin(SUN_DIRECTION.y), 0.05);
+    p.daylight.value = daylight;
+    p.storm.value = storm;
+    p.stormColor.value.copy(stormColor);
+    this.sunlight = daylight * (1 - storm * 0.85) * THREE.MathUtils.smoothstep(SUN_DIRECTION.y, -0.02, 0.06);
+    // Surfaces pick up the sky's light, so bake it again once the sky has changed enough.
+    if (Math.abs(daylight - this.baked[0]) > 0.08 || Math.abs(storm - this.baked[1]) > 0.1) {
+      this.baked = [daylight, storm];
+      this.bake();
+    }
+  }
+
   private sunScreen = new THREE.Vector3();
   private forward = new THREE.Vector3();
 
@@ -321,7 +381,7 @@ export class Graphics {
       this.sunScreen.copy(this.camera.position).addScaledVector(SUN_DIRECTION, 500).project(this.camera);
       const u = this.shafts.uniforms;
       u.sunUv.value.set(this.sunScreen.x * 0.5 + 0.5, this.sunScreen.y * 0.5 + 0.5);
-      u.strength.value = THREE.MathUtils.smoothstep(facing, 0.2, 0.7) * 1.4;
+      u.strength.value = THREE.MathUtils.smoothstep(facing, 0.2, 0.7) * 1.4 * this.sunlight;
       u.aspect.value = this.camera.aspect;
       this.shafts.enabled = u.strength.value > 0;
       this.grade.uniforms.time.value = this.time.value;

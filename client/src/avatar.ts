@@ -103,6 +103,8 @@ export class Avatar {
   private bandRest: [THREE.Vector3, THREE.Quaternion] | null = null;
   private pose: 'normal' | 'rifle' | 'pistol' | 'bow' = 'normal';
   private muzzle: THREE.Object3D | null = null;
+  /** A burning torch's flame, if they hold one. */
+  private flame: THREE.Object3D | null = null;
   /** Where the hands go on the gun or bow in hand, in its model space, and where its butt is. */
   private hands: { palm: THREE.Vector3; hold: THREE.Vector3 | null; fore?: boolean; butt?: THREE.Vector3; top?: number } | null = null;
   private recoilTimer = 0;
@@ -316,6 +318,7 @@ export class Avatar {
     const model = buildHeldItem(item);
     if (model) this.hand.add(model);
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
+    this.flame = (model?.userData.flame as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;
     this.pose = !w || w.class === 'melee' ? 'normal' : w.class === 'bow' && item !== 'crossbow' ? 'bow' : item && PISTOLS.includes(item) ? 'pistol' : 'rifle';
     // A bow is gripped at its middle, and the other hand rests on the string.
@@ -344,6 +347,12 @@ export class Avatar {
     if (!changed) return;
     const hidden = new Set(this.worn.flatMap((item) => (item ? (ARMOUR_HIDES[item] ?? []) : [])));
     for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind);
+  }
+
+  /** World position of the torch flame they hold, or null without one. */
+  flamePosition(out = new THREE.Vector3()): THREE.Vector3 | null {
+    if (!this.flame || this.dead) return null;
+    return this.flame.getWorldPosition(out).setY(out.y + 0.12);
   }
 
   /** World position of the gun's muzzle, for flashes and tracers. */
@@ -392,6 +401,12 @@ export class Avatar {
 
   update(dt: number, moving: boolean) {
     this.animate(dt, moving);
+    if (this.flame) {
+      // The torch flame licks and gutters.
+      const f = 1 + Math.sin(this.time * 17) * 0.12 + Math.sin(this.time * 29.3) * 0.08;
+      this.flame.scale.set(1 / Math.sqrt(f), f, 1 / Math.sqrt(f));
+      this.flame.rotation.y = this.time * 3;
+    }
     if (!this.scan) return;
     const scan = this.scan;
     scan.update();

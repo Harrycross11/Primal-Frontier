@@ -33,6 +33,7 @@ export type ItemId =
   | 'woodenSpear'
   | 'stoneSpear'
   | 'machete'
+  | 'torch'
   | 'salvagedSword'
   | 'combatKnife'
   | 'nailBat'
@@ -258,6 +259,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
 
   woodenSpear: melee('Wooden Spear', 'A sharpened stick with a long reach.', 30, 0.9, 3, 120),
   stoneSpear: melee('Stone Spear', 'A wooden spear with a stone tip. Hits harder.', 40, 0.9, 3, 160),
+  torch: melee('Torch', 'A stick wrapped in burning cloth. Lights your way at night, and burns whoever you hit.', 12, 0.7, 2.1, 500),
   machete: melee('Machete', 'Quick, light blade beaten from scrap metal.', 35, 0.55, 2.4, 200),
   salvagedSword: melee('Salvaged Sword', 'A heavy blade cut from a car leaf spring.', 50, 0.85, 2.6, 250),
   combatKnife: melee('Combat Knife', 'A military fighting knife. Very fast, short reach.', 32, 0.4, 1.9, 300),
@@ -537,6 +539,7 @@ export const RECIPES: Recipe[] = [
   { item: 'stoneSpear', count: 1, cost: { woodenSpear: 1, stone: 20 }, time: 3, category: 'Weapons' },
   { item: 'huntingBow', count: 1, cost: { wood: 200, cloth: 50 }, time: 6, category: 'Weapons' },
   { item: 'eoka', count: 1, cost: { wood: 75, metal: 30 }, time: 5, category: 'Weapons' },
+  { item: 'torch', count: 1, cost: { wood: 30, cloth: 10 }, time: 2, category: 'Tools' },
   { item: 'machete', count: 1, cost: { metal: 40, wood: 20 }, time: 5, workbench: 1, category: 'Weapons' },
   { item: 'salvagedSword', count: 1, cost: { metal: 60, scrap: 20, wood: 20 }, time: 6, workbench: 1, category: 'Weapons' },
   { item: 'crossbow', count: 1, cost: { wood: 200, metal: 75, cloth: 20 }, time: 8, workbench: 1, category: 'Weapons' },

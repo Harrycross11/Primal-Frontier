@@ -25,6 +25,7 @@ import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Creatures } from './creatures.ts';
+import { DayNight, type Fire } from './daynight.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
 import { LookPicker } from './lookPicker.ts';
@@ -128,6 +129,24 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   world.addResources(resources);
   for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
   for (const d of welcome.deployables) world.setDeployable(d.id, d);
+
+  const dayNight = new DayNight(world, gfx, welcome.seed, welcome.now);
+  const clock = document.getElementById('clock')!;
+  let clockIn = 0;
+  /** Everything burning that could light the dark: torches in hand and lit furnaces. */
+  const fires = (): Fire[] => {
+    const out: Fire[] = [];
+    const own = dead ? null : me.flamePosition();
+    if (own) out.push({ at: own, strength: 1 });
+    for (const r of remotes.values()) {
+      const at = r.avatar.flamePosition();
+      if (at) out.push({ at, strength: 1 });
+    }
+    for (const d of world.deployables.values()) {
+      if (d.kind === 'furnace' && d.on) out.push({ at: new THREE.Vector3(d.x, d.y + 0.9, d.z), strength: 0.7 });
+    }
+    return out;
+  };
 
   const effects = new Effects(world.scene);
   effects.listener = camera;
@@ -933,6 +952,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       }
       return best;
     },
+    /** Sets the time of day (0 is sunrise, 0.75 sunset) and holds the weather, for screenshots. */
+    sky: (phase: number | null, weather?: { rain: number; dust: number; snow: number } | null) => {
+      if (phase !== null) dayNight.setPhase(phase);
+      if (weather !== undefined) dayNight.forced = weather;
+    },
     storey: STOREY,
     iconUrl: (item: ItemId) => itemIconUrl(item),
   };
@@ -1013,6 +1037,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
 
     world.update(dt, controller.position, time);
+    dayNight.update(dt, controller.position, camera, fires());
+    if (performance.now() > clockIn) {
+      clockIn = performance.now() + 1000;
+      clock.textContent = dayNight.label();
+      const w = dayNight.storm;
+      effects.setWeather(w.rain, w.dust, w.snow);
+    }
     map.update(dt, mapMarks());
     gfx.render();
   });

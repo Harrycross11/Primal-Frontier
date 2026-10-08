@@ -13,6 +13,8 @@ This repository is the **browser prototype**, built step by step. Milestones don
 ## What works now
 
 - A 400 m map generated from a seed, in five lands that blend into each other. Everyone wakes in **the Ashlands** in the middle (wrecks full of scrap, ruined houses, the safest ground). Round it lie **Deadwood Forest** (the only living trees, plus hemp, mushrooms and most of the Ashhound packs), **Rust Mesa** (red rock tables with three times the metal ore and plenty of stone), **Sulfur Flats** (a bleached old lake bed with three times the sulfur, but scorching, so you get thirsty 1.7 times as fast) and **Frostpeaks** (snowy ridges with high quality metal ore all over, but freezing, so you get hungry 1.7 times as fast). Six blast craters are scattered through the wild lands. A banner names each land as you walk in, and **M** opens a map of them.
+- Day and night: a full day lasts 40 minutes, with 30 of daylight. The sun rises in the east, burns red at dawn and dusk and sets in the west, then a 10-minute night falls, dark under the stars with only moonlight to see by. Craft a **torch** (30 wood, 10 cloth) to light your way; lit furnaces glow too. Ashhounds can see further in the dark. The clock is in the top corner.
+- Weather to match each land: rain over the Ashlands and Deadwood Forest, dust storms on Rust Mesa and the Sulfur Flats that close the world in to a few metres, and blizzards on the Frostpeaks. Each land's storms come and go on their own, roll in gradually as you cross a border, and bring their own sound. Dust storms make you thirstier and blizzards hungrier.
 - Graphics: photo-scanned ground, rock, bark, rusted metal, concrete, planks and cloth (CC0 textures from Poly Haven, credited in `client/public/textures/CREDITS.md`), a photographed cloudy sky that also lights the scene, height fog that pools in low ground and glows toward the sun, light shafts, soft 4K shadows, materials with roughness detail, dense dry grass that sways in the wind, drifting ash, ambient occlusion, bloom and a filmic grade with grain.
 - Items look like the real thing: inventory icons are rendered from 3D models (logs, ore, ingots, cartridges, every tool and gun). Walls are built from weathered boards in a timber frame, coursed stone blocks with lintels, or rusty corrugated steel on steel posts. Guns have shaped stocks, curved magazines, sights and rails; tools have lashed flint heads, saw blades and taped grips. Press **O** to switch to low graphics on slower computers.
 - Up to 8 players per server, each a gritty hooded survivor with goggles, a respirator, a loaded backpack and whatever tool is on their belt, in muted clothing with a faded colour on their scarf and armband so players stay easy to tell apart. Walking, sprinting and chopping each have their own animation.
@@ -84,8 +86,7 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Day and night, and weather to match each land (snow on the peaks, dust storms on the flats, rain in the forest)
-2. Bases you can protect and raid: a tool cupboard, doors with code locks, sleeping bags to respawn at, and explosives
-3. Places worth looting: a ruined landmark in each land with crates, and air drops
-4. More creatures, one for each land, and riding the bigger ones
-5. More building pieces: roofs, ramps, foundations and doorways
+1. Bases you can protect and raid: a tool cupboard, doors with code locks, sleeping bags to respawn at, and explosives
+2. Places worth looting: a ruined landmark in each land with crates, and air drops
+3. More creatures, one for each land, and riding the bigger ones
+4. More building pieces: roofs, ramps, foundations and doorways

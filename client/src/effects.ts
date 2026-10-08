@@ -60,6 +60,9 @@ export class Effects {
   private chips: Chip[] = [];
   private chipMats = new Map<number, THREE.MeshStandardMaterial>();
   private wind: GainNode | null = null;
+  /** The storm's own sounds: rain hissing on the ground, and a howl that rises with it. */
+  private rainLevel: GainNode | null = null;
+  private stormLevel: GainNode | null = null;
   /** The camera, so world sounds are panned and fade with distance. */
   listener: THREE.Camera | null = null;
 
@@ -331,6 +334,51 @@ export class Effects {
     gust.start();
     swell.start();
     this.wind = level;
+
+    // Rain: the same noise, bright and steady, silent until a storm comes in.
+    const rain = ctx.createBufferSource();
+    rain.buffer = buf;
+    rain.loop = true;
+    rain.playbackRate.value = 1.7;
+    const hiss = ctx.createBiquadFilter();
+    hiss.type = 'highpass';
+    hiss.frequency.value = 1800;
+    const patter = ctx.createBiquadFilter();
+    patter.type = 'peaking';
+    patter.frequency.value = 4200;
+    patter.gain.value = 6;
+    this.rainLevel = ctx.createGain();
+    this.rainLevel.gain.value = 0;
+    rain.connect(hiss).connect(patter).connect(this.rainLevel).connect(ctx.destination);
+    rain.start();
+    // A storm's howl: the wind again, louder and higher, gusting faster.
+    const howl = ctx.createBufferSource();
+    howl.buffer = buf;
+    howl.loop = true;
+    howl.playbackRate.value = 1.3;
+    const howlFilter = ctx.createBiquadFilter();
+    howlFilter.type = 'bandpass';
+    howlFilter.frequency.value = 700;
+    howlFilter.Q.value = 1.4;
+    const whistle = ctx.createOscillator();
+    whistle.frequency.value = 0.19;
+    const whistleDepth = ctx.createGain();
+    whistleDepth.gain.value = 380;
+    whistle.connect(whistleDepth).connect(howlFilter.frequency);
+    this.stormLevel = ctx.createGain();
+    this.stormLevel.gain.value = 0;
+    howl.connect(howlFilter).connect(this.stormLevel).connect(ctx.destination);
+    howl.start();
+    whistle.start();
+  }
+
+  /** Brings the storm's sounds up and down with the weather, each 0 to 1. */
+  setWeather(rain: number, dust: number, snow: number) {
+    const a = this.context();
+    if (!a || !this.rainLevel || !this.stormLevel) return;
+    const now = a.ctx.currentTime;
+    this.rainLevel.gain.setTargetAtTime(rain * 0.16, now, 1.5);
+    this.stormLevel.gain.setTargetAtTime(Math.min(1, dust + snow + rain * 0.4) * 0.09, now, 1.5);
   }
 
   /** Eating (crunchy chews), drinking (gulps) or swallowing pills (a rattle and a gulp). */
@@ -799,6 +847,7 @@ const MELEE_SOUNDS: Partial<Record<ItemId, { swing: [string, number]; wood: [str
   stonePickaxe: { swing: ['swing-heavy', 0.95], wood: ['hit-chop2', 0.9], stone: ['hit-stone', 0.85] },
   salvagedAxe: { swing: ['swing-axe2', 1], wood: ['hit-axe', 1], stone: ['hit-pick', 1.15] },
   salvagedPickaxe: { swing: ['swing-heavy2', 1], wood: ['hit-axe', 0.85], stone: ['hit-pick', 1] },
+  torch: { swing: ['swing-light', 1], wood: ['hit-chop2', 0.9], stone: ['hit-rock', 1.1] },
   machete: { swing: ['swing-blade', 1.1], wood: ['hit-blade', 1.1], stone: ['hit-clang', 1.15] },
   salvagedSword: { swing: ['swing-sword', 1], wood: ['hit-blade', 0.9], stone: ['hit-clang', 0.95] },
   woodenSpear: { swing: ['swing-thrust', 1], wood: ['hit-stab', 1], stone: ['hit-stone', 1.25] },

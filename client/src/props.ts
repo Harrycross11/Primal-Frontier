@@ -435,6 +435,26 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'cookedMeat':
       // Held upright in the palm.
       return buildOtherWeapon(item)?.rotateX(-Math.PI / 2).translateY(-0.03) ?? null;
+    case 'torch': {
+      // A stick with oily rags bound round the top, burning.
+      g.add(handle(0.5, handleMat()));
+      g.add(mesh(new THREE.CylinderGeometry(0.034, 0.026, 0.12, 9), plain(0x2a2018, 1), 0, 0.36, 0));
+      wrap(0.31, 0.41, 0.03, ropeMat());
+      const flame = new THREE.Group();
+      flame.position.y = 0.44;
+      const fire = (r: number, h: number, color: number, opacity: number) => {
+        const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 10, 1, true).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+        m.userData.noAO = true;
+        flame.add(m);
+        return m;
+      };
+      fire(0.045, 0.2, 0xff6a1a, 0.55);
+      fire(0.028, 0.14, 0xffd27a, 0.8);
+      flame.userData.flame = true;
+      g.add(flame);
+      g.userData.flame = flame;
+      return g;
+    }
     case 'buildingPlan': {
       // A rolled blueprint tied with string.
       g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));

@@ -83,6 +83,7 @@ import {
 } from '../shared/combat.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
 import { CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
+import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, PACK_SIZE, clearOfRuins, packDens, rayCreature, yawTowards } from '../shared/creatures.ts';
 import { blocked, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
 import {
@@ -299,6 +300,7 @@ export class Game {
             t: 'welcome',
             id,
             seed: this.seed,
+            now,
             you: pub,
             players: [...this.players.values()].filter((p) => p.id !== id).map(publicState),
             creatures: this.creatures(),
@@ -742,10 +744,13 @@ export class Game {
   }
 
   /** Hunger, thirst and radiation for everyone alive: drains, damage, healing and deaths. */
-  private tickSurvival(p: Player, dt: number): Outgoing[] {
+  private tickSurvival(p: Player, dt: number, now: number): Outgoing[] {
     if (p.dead || dt <= 0) return [];
     const level = radiationAt(this.seed, p.x, p.z);
-    const { hp, cause } = tickVitals(p.vitals, dt, p.moving, level, radProtection(p), p.hp, MAX_HEALTH, climateAt(this.seed, p.x, p.z));
+    const land = climateAt(this.seed, p.x, p.z);
+    const storm = stormClimate(weatherAt(this.seed, p.x, p.z, now));
+    const climate = { hunger: land.hunger * storm.hunger, thirst: land.thirst * storm.thirst };
+    const { hp, cause } = tickVitals(p.vitals, dt, p.moving, level, radProtection(p), p.hp, MAX_HEALTH, climate);
     p.hp = Math.max(0, Math.min(MAX_HEALTH, p.hp + hp));
     const out: Outgoing[] = [];
     const vitals = this.vitalsMsg(p);
@@ -970,7 +975,7 @@ export class Game {
       out.push({ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount } });
       return false;
     });
-    for (const p of this.players.values()) out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt));
+    for (const p of this.players.values()) out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt, now));
     for (const d of this.deployables.values()) if (d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
     for (const [bag, left] of this.bagExpiry) {
       if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
@@ -1221,7 +1226,8 @@ export class Game {
       // The nearest survivor close enough to notice (and not just woken up). Tame hounds are
       // left alone unless they start a fight.
       let best: Prey | null = null;
-      let bestD: number = ASHHOUND.sight;
+      // Packs hunt further afield in the dark.
+      let bestD: number = ASHHOUND.sight * (1 + 0.5 * (1 - daylight(now)));
       for (const p of this.players.values()) {
         if (p.dead || now < p.safeUntil || calm({ kind: 'player', id: p.id })) continue;
         const d = Math.hypot(p.x - h.x, p.z - h.z);

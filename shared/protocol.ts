@@ -75,6 +75,8 @@ export type ServerMessage =
       t: 'welcome';
       id: number;
       seed: number;
+      /** The server's clock (ms since 1970), which sets the time of day and the weather. */
+      now: number;
       you: PlayerState;
       players: PlayerState[];
       creatures: CreatureState[];
