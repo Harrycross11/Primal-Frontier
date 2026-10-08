@@ -46,13 +46,16 @@ export class DayNight {
   ) {
     this.offset = serverNow - Date.now();
     this.rain = rainStreaks();
-    this.snow = flakes(2600, 0.09, 0xf4f6fa, 0.9);
+    this.snow = flakes(3600, 0.14, 0xf4f6fa, 0.95);
     this.dust = flakes(3200, 0.06, 0xc49a68, 0.55);
     world.scene.add(this.rain, this.snow, this.dust);
   }
 
   /** For screenshots and tests: weather held at a fixed level instead of the real forecast. */
   forced: Weather | null = null;
+
+  /** For screenshots: a point in the day to stay at, so a slow machine's capture can't drift into night. */
+  held: number | null = null;
 
   /** For screenshots and tests: jumps the clock to a point in the day, 0 being sunrise. */
   setPhase(phase: number) {
@@ -78,6 +81,7 @@ export class DayNight {
   }
 
   update(dt: number, focus: THREE.Vector3, camera: THREE.Camera, fires: Fire[]) {
+    if (this.held !== null) this.setPhase(this.held);
     const now = this.now;
     // The weather changes over minutes; there's no need to work it out every frame.
     this.weatherIn -= dt;

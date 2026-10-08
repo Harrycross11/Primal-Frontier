@@ -954,7 +954,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     },
     /** Sets the time of day (0 is sunrise, 0.75 sunset) and holds the weather, for screenshots. */
     sky: (phase: number | null, weather?: { rain: number; dust: number; snow: number } | null) => {
-      if (phase !== null) dayNight.setPhase(phase);
+      dayNight.held = phase;
       if (weather !== undefined) dayNight.forced = weather;
     },
     storey: STOREY,
