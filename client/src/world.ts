@@ -8,6 +8,7 @@ import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { BIOME_IDS, biomeWeights } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
+import { landmarks, toWorld } from '../../shared/landmarks.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildDoorLeaf, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
@@ -72,6 +73,8 @@ export class World {
   /** Ready-made trees to copy, so a forest shares a handful of shapes. */
   private treeShapes = new Map<string, THREE.Group[]>();
   private materials: Record<string, THREE.MeshStandardMaterial>;
+  /** The server's clock (ms), for supply drops falling on their own schedule. */
+  serverNow = () => Date.now();
 
   constructor(readonly seed: number) {
     this.scene.fog = new THREE.FogExp2(HAZE, 0.0085);
@@ -131,6 +134,7 @@ export class World {
     this.buildRadSigns();
     const decor = generateDecor(seed);
     for (const d of decor) this.addDecor(d);
+    this.addLandmarks();
     this.patches = buildScenery(this.scene, seed, decor);
     this.ash = this.buildAsh();
   }
@@ -661,6 +665,72 @@ export class World {
     }
   }
 
+  /**
+   * The landmark in each land: its scanned buildings and props laid out on the levelled pad,
+   * with their solid parts to walk into, and junk kicked about between them.
+   */
+  private addLandmarks() {
+    for (const { site, landmark } of landmarks(this.seed)) {
+      const rand = mulberry32(site.land * 9973 + 17);
+      for (const prop of landmark.props) {
+        const [x, z] = toWorld(site, prop.x, prop.z);
+        const turn = prop.turn + site.turn;
+        const scan = model(prop.model);
+        let mesh: THREE.Mesh;
+        if (scan) mesh = new THREE.Mesh(scan.geometry, scan.material);
+        else {
+          // A plain block where the model would be, if it failed to load.
+          const [x0, x1, z0, z1, h] = prop.solid?.[0] ?? [-1, 1, -1, 1, 1];
+          mesh = new THREE.Mesh(worldBox(x1 - x0, h, z1 - z0, 2), this.materials.concrete);
+          mesh.geometry.translate((x0 + x1) / 2, h / 2, (z0 + z1) / 2);
+        }
+        mesh.position.set(x, site.y + (prop.y ?? 0) - 0.02, z);
+        mesh.rotation.y = (turn * Math.PI) / 2;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.scene.add(mesh);
+        if (prop.solid) this.cameraBlockers.push(mesh);
+        for (const [x0, x1, z0, z1, h] of prop.solid ?? []) {
+          // Turn the box's corners with the prop, then the landmark, and take their bounds.
+          const turned = { ...site, x, z, turn };
+          const a = toWorld(turned, x0, z0);
+          const b = toWorld(turned, x1, z1);
+          const y = site.y + (prop.y ?? 0);
+          this.decorColliders.push({ min: [Math.min(a[0], b[0]), y - 0.5, Math.min(a[1], b[1])], max: [Math.max(a[0], b[0]), y + h, Math.max(a[1], b[1])] });
+        }
+      }
+      // Broken concrete, tyres and barrels lying about.
+      const junk = [...variants('rubble-chunks'), ...(model('tyre') ? [model('tyre')!] : [])];
+      for (let n = 0; n < 26 && junk.length; n++) {
+        const a = rand() * Math.PI * 2;
+        const r = 4 + rand() * 18;
+        const piece = junk[Math.floor(rand() * junk.length)];
+        const m = new THREE.Mesh(piece.geometry, piece.material);
+        const px = site.x + Math.cos(a) * r;
+        const pz = site.z + Math.sin(a) * r;
+        if (this.decorColliders.some((c) => px > c.min[0] - 0.5 && px < c.max[0] + 0.5 && pz > c.min[2] - 0.5 && pz < c.max[2] + 0.5)) continue;
+        m.position.set(px, site.y - 0.04, pz);
+        m.rotation.y = rand() * Math.PI * 2;
+        m.scale.setScalar(piece === model('tyre') ? 1 : 0.6 + rand() * 1.2);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        this.scene.add(m);
+      }
+    }
+  }
+
+  /**
+   * A supply drop swinging gently down under its parachute, which folds away once it lands.
+   */
+  private drift(g: THREE.Group, d: Deployable, fall: NonNullable<Deployable['fall']>, time: number) {
+    const k = Math.min(1, Math.max(0, (this.serverNow() - fall.start) / (fall.land - fall.start)));
+    g.position.y = fall.from + (d.y - fall.from) * k;
+    const sway = (1 - k) * 0.07;
+    g.rotation.set(Math.sin(time * 1.1) * sway, d.rot, Math.cos(time * 0.9) * sway);
+    const chute = g.getObjectByName('chute');
+    if (chute) chute.visible = k < 1;
+  }
+
   /** Registers a box-shaped mesh inside a rotated group as an axis-aligned collider. */
   private pushCollider(g: THREE.Group, mesh: THREE.Object3D, w: number, h: number, d: number) {
     g.updateMatrixWorld(true);
@@ -1084,7 +1154,11 @@ export class World {
       this.doorSwing.set(key, next);
       hinge.rotation.y = hinge.userData.base - next * (Math.PI / 2);
     }
-    for (const g of this.deployableMeshes.values()) g.userData.tick?.(time);
+    for (const [id, g] of this.deployableMeshes) {
+      g.userData.tick?.(time);
+      const fall = this.deployables.get(id)?.fall;
+      if (fall) this.drift(g, this.deployables.get(id)!, fall, time);
+    }
 
     for (const [key, pop] of this.pops) {
       const g = this.pieceMeshes.get(key);

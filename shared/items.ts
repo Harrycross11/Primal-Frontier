@@ -39,6 +39,7 @@ export type ItemId =
   | 'satchel'
   | 'explosives'
   | 'c4'
+  | 'supplySignal'
   // Melee weapons
   | 'woodenSpear'
   | 'stoneSpear'
@@ -280,6 +281,12 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   satchel: { name: 'Satchel Charge', kind: 'explosive', stack: 10, description: 'Left click to stick it to a wall or door. Two blow open a wooden wall or door, three a stone one.' },
   explosives: res('Explosives', 'Packed gunpowder and sulfur. Needed for timed explosive charges.'),
   c4: { name: 'Timed Explosive Charge', kind: 'explosive', stack: 10, description: 'C4. Left click to stick it to a wall or door. One takes out any wall or a wooden door.' },
+  supplySignal: {
+    name: 'Supply Signal',
+    kind: 'explosive',
+    stack: 5,
+    description: 'Found in military crates. Throw it and red smoke calls the supply plane, which drops a crate of the best gear right there. Everyone sees the smoke.',
+  },
 
   woodenSpear: melee('Wooden Spear', 'A sharpened stick with a long reach.', 30, 0.9, 3, 120),
   stoneSpear: melee('Stone Spear', 'A wooden spear with a stone tip. Hits harder.', 40, 0.9, 3, 160),

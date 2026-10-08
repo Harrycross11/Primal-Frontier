@@ -66,6 +66,25 @@ const FIT: Record<string, Fit> = {
   'ruin-wall': { width: 6 },
   'rubble-pile': { width: 5 },
   'rubble-chunks': { width: 0.5, set: true },
+  // The landmarks' buildings and props at real size (see shared/landmarks.ts, whose solid parts
+  // are measured at these sizes).
+  'lm-petrol': { width: 22 },
+  'lm-warehouse': { width: 14 },
+  'lm-house': { width: 11 },
+  'lm-shed': { height: 4.2 },
+  'lm-container': { width: 6.1 },
+  'lm-container2': { width: 9 },
+  'lm-waterTower': { height: 12 },
+  'lm-pumpJack': { height: 6 },
+  'lm-guardTower': { height: 7 },
+  'lm-tent': { width: 9 },
+  'lm-radioTower': { height: 30 },
+  // Loot crates (sized as DEPLOYABLE_INFO), the parachute and a C-17 sized supply plane.
+  crate: { width: 1.5 },
+  'crate-military': { width: 1.3 },
+  'crate-drop': { width: 1.4 },
+  parachute: { height: 5 },
+  plane: { width: 55 },
   // Held guns, turned so the barrel points along +z, at their real overall lengths.
   'gun-assaultRifle': { length: 0.88, turn: [0, -Math.PI / 2, 0] },
   'gun-boltRifle': { length: 1.23, drop: /bayonet/ },

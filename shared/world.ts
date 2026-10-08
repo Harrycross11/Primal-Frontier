@@ -3,6 +3,7 @@
 import { HALF_WORLD } from './constants.ts';
 import type { ItemId } from './items.ts';
 import { BIOME_IDS, biomeAt, type BiomeId } from './biomes.ts';
+import { atLandmark } from './landmarks.ts';
 import { craters, mulberry32, slopeAt, terrainHeight } from './terrain.ts';
 
 export type ResourceKind = 'tree' | 'deadTree' | 'scrap' | 'stone' | 'metalOre' | 'sulfurOre' | 'hqmOre' | 'hemp' | 'mushroom' | 'waterBarrel';
@@ -70,6 +71,8 @@ export function generateResources(seed: number): ResourceNode[] {
   const nodes: ResourceNode[] = [];
   const span = HALF_WORLD * 0.86;
   const add = (kind: ResourceKind, x: number, z: number) => {
+    // The landmarks' ground is kept clear.
+    if (atLandmark(seed, x, z, 3)) return;
     nodes.push({
       id: nodes.length,
       kind,
@@ -153,8 +156,11 @@ export function generateDecor(seed: number): Decor[] {
   const rand = mulberry32(seed ^ 0x1b873593);
   const span = HALF_WORLD * 0.86;
   const list: Decor[] = [];
-  const add = (kind: DecorKind, x: number, z: number, scale = 1) =>
-    list.push({ kind, x, y: terrainHeight(seed, x, z), z, rot: rand() * Math.PI * 2, scale, variant: Math.floor(rand() * 1000) });
+  const add = (kind: DecorKind, x: number, z: number, scale = 1) => {
+    const rot = rand() * Math.PI * 2;
+    const variant = Math.floor(rand() * 1000);
+    if (!atLandmark(seed, x, z, kind === 'ruin' ? 14 : 2)) list.push({ kind, x, y: terrainHeight(seed, x, z), z, rot, scale, variant });
+  };
   /** A random spot in one of `lands` (or anywhere if it can't find one). */
   const somewhere = (lands: BiomeId[] | null): [number, number] => {
     let x = 0;

@@ -6,6 +6,7 @@ import { rayBox, type Vec3 } from './combat.ts';
 import { CORE_RADIUS, biomeAt } from './biomes.ts';
 import { mulberry32 } from './terrain.ts';
 import { generateDecor } from './world.ts';
+import { atLandmark } from './landmarks.ts';
 
 /** What a hound is doing, for its animation: `snarl` is squaring up to a fight between bites. */
 export type CreatureAnim = 'idle' | 'snarl' | 'walk' | 'run' | 'attack' | 'hit' | 'eat' | 'dead';
@@ -94,7 +95,7 @@ export function clearOfRuins(seed: number, x: number, z: number, gap = 8): boole
       .map((d) => [d.x, d.z]);
     ruinCache.set(seed, ruins);
   }
-  return ruins.every(([rx, rz]) => Math.hypot(rx - x, rz - z) >= gap);
+  return ruins.every(([rx, rz]) => Math.hypot(rx - x, rz - z) >= gap) && !atLandmark(seed, x, z, gap);
 }
 
 // The hound's body in its own frame (facing +z, feet at 0): a box for the body and legs, and

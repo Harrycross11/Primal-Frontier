@@ -135,6 +135,11 @@ export type ServerMessage =
   | { t: 'died'; by: string | null; item: ItemId | null; cause?: DeathCause }
   /** Something blew up. */
   | { t: 'explosion'; at: Vec3; item: 'beancan' | 'satchel' | 'c4' }
+  /**
+   * The supply plane crosses the map at `y`, from `from` to `to` (x, z), leaving at `start`
+   * (server ms) at `speed` m/s. It drops its crate at `drop`, over the land named `over`.
+   */
+  | { t: 'plane'; from: [number, number]; to: [number, number]; y: number; start: number; speed: number; drop: [number, number]; over: string }
   /** That door is locked: ask for its code. */
   | { t: 'codeNeeded'; key: string }
   | { t: 'full' };

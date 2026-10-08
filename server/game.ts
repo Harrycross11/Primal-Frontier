@@ -37,6 +37,7 @@ import {
 } from '../shared/building.ts';
 import {
   CHARGE_KINDS,
+  CRATE_KINDS,
   DEPLOYABLE_INFO,
   DEPLOYABLE_KINDS,
   FURNACE_FUEL,
@@ -90,7 +91,9 @@ import {
 } from '../shared/combat.ts';
 import { EXPLOSIVES, PLANT_RANGE, POINT_BLANK, THROW_SPEED, blastFalloff, isExplosive, type ExplosiveId } from '../shared/explosives.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
-import { CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
+import { BIOMES, CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
+import { atLandmark, crateSpots, landmarks } from '../shared/landmarks.ts';
+import { rollLoot } from '../shared/loot.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, PACK_SIZE, clearOfRuins, packDens, rayCreature, yawTowards } from '../shared/creatures.ts';
 import { blocked, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
@@ -178,6 +181,8 @@ export interface WorldSave {
   fuses?: [number, { in: number; key?: string; door?: boolean }][];
   /** Sleeping bags still cooling down: ms until each can be used again. */
   bagCooldowns?: [number, number][];
+  /** Landmark crate spots waiting to refill: ms until each does. */
+  crates?: [string, number][];
 }
 
 /** A code lock's code, and everyone who has opened it with the code (its owner first). */
@@ -210,6 +215,22 @@ const CONTAINER_RANGE = 3.5;
 const SAFE_SECONDS = 20;
 /** Seconds a tame hound remembers who just fought its owner. */
 const FEUD_SECONDS = 10;
+/** Seconds before an emptied landmark crate fills up again. */
+export const CRATE_RESPAWN = 8 * 60;
+/** Minutes before the first supply plane once someone is playing, and between planes after that (give or take a fifth). */
+export const FIRST_DROP = 6;
+export const DROP_EVERY = 25;
+/** The supply plane: metres up, metres a second, and how far either side of its drop it flies. */
+const PLANE_HEIGHT = 95;
+const PLANE_SPEED = 45;
+const PLANE_REACH = 340;
+/** How fast a supply drop comes down under its parachute, m/s, and how long it waits to be looted, s. */
+export const DROP_FALL = 4.5;
+const DROP_EXPIRY = 30 * 60;
+/** Seconds from a supply signal landing to the plane being sent, and to its smoke dying out. */
+export const SIGNAL_DELAY = 5;
+const SIGNAL_SMOKE = 45;
+
 /** Damage a hit by hand does to a wooden wall or door inside someone else's tool cupboard range. */
 const SOFT_HIT = 3;
 /** Seconds before a sleeping bag can be used again. */
@@ -251,6 +272,8 @@ export class Game {
   private hurt = new Map<number, { prey: Prey; at: number }>();
   /** Turned off for tests that need an empty map; the packs are born on the first tick. */
   wildlife = true;
+  /** Landmark crates and the supply plane, also turned off for tests that need an empty map. */
+  loot = true;
   private wildlifeStarted = false;
   /** Separate again, so the hounds' wandering never changes loot or spawns. */
   private houndRand: () => number;
@@ -260,6 +283,18 @@ export class Game {
   private bagReady = new Map<number, number>();
   /** When each player may next try a code (ms). */
   private nextCodeAt = new Map<number, number>();
+  /** Every landmark crate spot, and when each empty one fills up again (ms). */
+  private spots: ReturnType<typeof crateSpots>;
+  private crateDue = new Map<string, number>();
+  private nextCrateCheck = 0;
+  /** Its own random stream, so what crates hold never moves spawns or hounds. */
+  private crateRand: () => number;
+  /** Thrown supply signals: when each calls the plane (ms), and when its smoke is gone. */
+  private signals = new Map<number, { call: number; gone: number }>();
+  /** Crates on their way, leaving the plane at `at` (ms) over (x, z). */
+  private drops: { at: number; x: number; z: number }[] = [];
+  /** When the next supply plane is due (ms), or -1 until someone is playing. */
+  private nextDropAt = -1;
 
   /**
    * @param startKit what players spawn with besides the rock and plan: a count of each basic
@@ -274,6 +309,8 @@ export class Game {
     this.rand = mulberry32(seed ^ 0x5bd1e995);
     this.lootRand = mulberry32(seed ^ 0x2545f491);
     this.houndRand = mulberry32(seed ^ 0x3c6ef372);
+    this.crateRand = mulberry32(seed ^ 0x6a09e667);
+    this.spots = crateSpots(seed);
   }
 
   /** Adds a player at a random spawn point. Returns null when the server is full. */
@@ -475,6 +512,7 @@ export class Game {
     if (this.pieces.has(key)) return [];
     const bounds = pieceBounds(piece);
     if (!this.inReach(p, bounds)) return [notice(id, 'Too far away')];
+    if (this.landmarkAt(bounds)) return [notice(id, this.landmarkAt(bounds)!)];
     if (this.blockedAt(p, bounds)) return [notice(id, BLOCKED)];
     if (countItem(p.slots, material) < PIECE_COST) return [notice(id, `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`)];
     if (!pieceSupported(this.seed, piece, this.pieces.values())) {
@@ -545,6 +583,15 @@ export class Game {
   }
 
   /** True inside a tool cupboard's range that doesn't trust this player. */
+  /** Why nobody may build here, if it is on a landmark's ground. */
+  private landmarkAt(b: Box): string | null {
+    const x = (b.min[0] + b.max[0]) / 2;
+    const z = (b.min[2] + b.max[2]) / 2;
+    if (!atLandmark(this.seed, x, z, 4)) return null;
+    const near = landmarks(this.seed).reduce((a, l) => (Math.hypot(l.site.x - x, l.site.z - z) < Math.hypot(a.site.x - x, a.site.z - z) ? l : a));
+    return `You can't build at ${near.landmark.name}`;
+  }
+
   private blockedAt(p: Player, b: Box): boolean {
     return privilege(this.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, p.id) === 'blocked';
   }
@@ -556,7 +603,8 @@ export class Game {
   hitDeployable(id: number, deployableId: number, now: number): Outgoing[] {
     const p = this.alive(id);
     const d = this.deployables.get(deployableId);
-    if (!p || !d || CHARGE_KINDS.includes(d.kind)) return [];
+    if (!p || !d || CHARGE_KINDS.includes(d.kind) || d.kind === 'supplySignal') return [];
+    if (CRATE_KINDS.includes(d.kind)) return [notice(id, 'Press E to open it')];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
     if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Too far away')];
     p.lastGatherAt = now;
@@ -650,8 +698,8 @@ export class Game {
     if (src.deployable === null || dst.deployable === null) out.push(this.inventory(p));
     for (const d of new Set([src.deployable, dst.deployable])) {
       if (!d) continue;
-      // An emptied loot bag goes away.
-      if (d.kind === 'lootBag' && !d.slots.some(Boolean)) out.push(...this.removeDeployable(d.id, id));
+      // An emptied loot bag or crate goes away.
+      if ((d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) && !d.slots.some(Boolean)) out.push(...this.removeDeployable(d.id, id));
       else out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } });
     }
     return out;
@@ -666,6 +714,7 @@ export class Game {
     const kind = stack.item as DeployableKind;
     const box = deployableBox({ kind, x, y, z, rot });
     if (!this.inReach(p, box)) return [notice(id, 'Too far away')];
+    if (this.landmarkAt(box)) return [notice(id, this.landmarkAt(box)!)];
     if (this.blockedAt(p, box)) return [notice(id, BLOCKED)];
     if (!this.deploySupported(x, y, z)) return [notice(id, 'Place it on flat ground or a floor')];
     const blockers: Box[] = [
@@ -824,13 +873,17 @@ export class Game {
    */
   throwGrenade(id: number, slot: number, dir: Vec3, now: number): Outgoing[] {
     const p = this.alive(id);
-    if (!p || !isBeltSlot(slot) || !isVec3(dir) || p.slots[slot]?.item !== 'beancan') return [];
+    const item = p && isBeltSlot(slot) ? p.slots[slot]?.item : undefined;
+    if (!p || !isVec3(dir) || (item !== 'beancan' && item !== 'supplySignal')) return [];
     if (now < p.nextAttackAt) return [];
     p.nextAttackAt = now + 800;
     const d = normalize(dir);
     let pos: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
     const v: Vec3 = [d[0] * THROW_SPEED, d[1] * THROW_SPEED + 2, d[2] * THROW_SPEED];
-    const boxes = [...[...this.pieces.values()].flatMap((piece) => pieceBoxes(piece)), ...[...this.deployables.values()].filter((x) => !CHARGE_KINDS.includes(x.kind)).map(deployableBox)];
+    const boxes = [
+      ...[...this.pieces.values()].flatMap((piece) => pieceBoxes(piece)),
+      ...[...this.deployables.values()].filter((x) => !CHARGE_KINDS.includes(x.kind) && x.kind !== 'supplySignal').map(deployableBox),
+    ];
     const step = 0.03;
     for (let t = 0; t < 3; t += step) {
       const next: Vec3 = [pos[0] + v[0] * step, pos[1] + v[1] * step, pos[2] + v[2] * step];
@@ -851,10 +904,15 @@ export class Game {
     const stack = p.slots[slot]!;
     stack.count -= 1;
     if (stack.count === 0) p.slots[slot] = null;
-    const g = newDeployable(this.nextDeployableId++, 'beancan', pos[0], y, pos[2], p.yaw, id);
+    const g = newDeployable(this.nextDeployableId++, item, pos[0], y, pos[2], p.yaw, id);
     this.deployables.set(g.id, g);
-    this.fuses.set(g.id, { at: now + EXPLOSIVES.beancan.fuse * 1000 });
-    return [{ to: 'all', msg: { t: 'deployable', id: g.id, d: g, by: id } }, this.inventory(p)];
+    const out: Outgoing[] = [{ to: 'all', msg: { t: 'deployable', id: g.id, d: g, by: id } }, this.inventory(p)];
+    if (item === 'beancan') this.fuses.set(g.id, { at: now + EXPLOSIVES.beancan.fuse * 1000 });
+    else {
+      this.signals.set(g.id, { call: now + SIGNAL_DELAY * 1000, gone: now + SIGNAL_SMOKE * 1000 });
+      out.push(notice(id, 'Red smoke is up: the supply plane is on its way'));
+    }
+    return out;
   }
 
   /** The top of the ground, a floor or anything else solid under a point. */
@@ -892,7 +950,7 @@ export class Game {
       if (!onDoor) out.push(...this.damagePiece(key, piece, info.structure * share(dist), d.owner));
     }
     for (const other of [...this.deployables.values()]) {
-      if (CHARGE_KINDS.includes(other.kind)) continue;
+      if (CHARGE_KINDS.includes(other.kind) || CRATE_KINDS.includes(other.kind) || other.kind === 'supplySignal') continue;
       const dist = distanceToBox(c, deployableBox(other));
       if (dist > info.radius) continue;
       other.hp -= info.structure * blastFalloff(dist, info.radius);
@@ -1304,6 +1362,7 @@ export class Game {
       locks: [...this.locks],
       fuses: [...this.fuses].map(([id, f]) => [id, { in: Math.max(0, f.at - now), key: f.key, door: f.door }]),
       bagCooldowns: [...this.bagReady].filter(([, at]) => at > now).map(([id, at]) => [id, at - now]),
+      crates: [...this.crateDue].map(([key, at]) => [key, Math.max(0, at - now)]),
     });
   }
 
@@ -1325,8 +1384,13 @@ export class Game {
     game.locks = new Map(save.locks ?? []);
     game.fuses = new Map((save.fuses ?? []).map(([id, f]) => [id, { at: now + f.in, key: f.key, door: f.door }]));
     game.bagReady = new Map((save.bagCooldowns ?? []).map(([id, ms]) => [id, now + ms]));
-    // A charge whose fuse was lost would never go off; take it away.
-    for (const d of [...game.deployables.values()]) if (CHARGE_KINDS.includes(d.kind) && !game.fuses.has(d.id)) game.deployables.delete(d.id);
+    game.crateDue = new Map((save.crates ?? []).map(([key, ms]) => [key, now + ms]));
+    for (const d of [...game.deployables.values()]) {
+      // A charge whose fuse was lost would never go off, and a signal's plane is gone; take them away.
+      if ((CHARGE_KINDS.includes(d.kind) && !game.fuses.has(d.id)) || d.kind === 'supplySignal') game.deployables.delete(d.id);
+      // A drop that was still falling has landed by now.
+      delete d.fall;
+    }
     for (const saved of save.hounds ?? []) {
       const h = newHound(game.nextHoundId++, -1, saved.x, saved.z, game.seed, saved.yaw);
       Object.assign(h, { hp: saved.hp, owner: saved.owner, name: saved.name });
@@ -1354,6 +1418,7 @@ export class Game {
       if (!d) this.fuses.delete(id);
       else if (fuse.at <= now) out.push(...this.explode(d, now));
     }
+    out.push(...this.tickCrates(now), ...this.tickAirdrops(now));
     for (const [bag, left] of this.bagExpiry) {
       if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
       else out.push(...this.removeDeployable(bag));
@@ -1363,6 +1428,94 @@ export class Game {
       out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState), creatures: this.creatures() } });
     }
     return out;
+  }
+
+  /** Fills every landmark crate spot that has stood empty long enough (all of them, at first). */
+  private tickCrates(now: number): Outgoing[] {
+    if (!this.loot || now < this.nextCrateCheck) return [];
+    this.nextCrateCheck = now + 1000;
+    const filled = new Set<string>();
+    for (const d of this.deployables.values()) if (d.spot) filled.add(d.spot);
+    const out: Outgoing[] = [];
+    for (const s of this.spots) {
+      if (filled.has(s.key) || (this.crateDue.get(s.key) ?? 0) > now) continue;
+      this.crateDue.delete(s.key);
+      const crate = this.fillCrate(newDeployable(this.nextDeployableId++, s.kind, s.x, s.y, s.z, s.rot, 0), s.land);
+      crate.spot = s.key;
+      this.deployables.set(crate.id, crate);
+      out.push({ to: 'all', msg: { t: 'deployable', id: crate.id, d: crate, by: 0 } });
+    }
+    return out;
+  }
+
+  private fillCrate(d: Deployable, land: Parameters<typeof rollLoot>[1]): Deployable {
+    rollLoot(d.kind as Parameters<typeof rollLoot>[0], land, this.crateRand).forEach((stack, i) => {
+      if (i < d.slots.length) d.slots[i] = stack;
+    });
+    return d;
+  }
+
+  /**
+   * The supply plane: one comes over every so often while anyone is playing, and whenever a
+   * supply signal calls it. It drops a crate that drifts down under a parachute.
+   */
+  private tickAirdrops(now: number): Outgoing[] {
+    const out: Outgoing[] = [];
+    if (this.players.size > 0 && this.loot) {
+      if (this.nextDropAt < 0) this.nextDropAt = now + FIRST_DROP * 60_000;
+      if (now >= this.nextDropAt) {
+        this.nextDropAt = now + DROP_EVERY * 60_000 * (0.8 + this.crateRand() * 0.4);
+        out.push(...this.callPlane(...this.dropSpot(), now));
+      }
+    }
+    for (const [id, signal] of [...this.signals]) {
+      const d = this.deployables.get(id);
+      if (!d) this.signals.delete(id);
+      else if (signal.call && now >= signal.call) {
+        signal.call = 0;
+        out.push(...this.callPlane(d.x + (this.crateRand() - 0.5) * 6, d.z + (this.crateRand() - 0.5) * 6, now));
+      } else if (now >= signal.gone) out.push(...this.removeDeployable(id));
+    }
+    this.drops = this.drops.filter((drop) => {
+      if (now < drop.at) return true;
+      const y = this.groundBelow(drop.x, PLANE_HEIGHT, drop.z);
+      const crate = this.fillCrate(newDeployable(this.nextDeployableId++, 'supplyDrop', drop.x, y, drop.z, this.crateRand() * Math.PI * 2, 0), null);
+      const from = PLANE_HEIGHT - 4;
+      crate.fall = { from, start: now, land: now + ((from - y) / DROP_FALL) * 1000 };
+      this.deployables.set(crate.id, crate);
+      this.bagExpiry.set(crate.id, DROP_EXPIRY);
+      out.push({ to: 'all', msg: { t: 'deployable', id: crate.id, d: crate, by: 0 } });
+      return false;
+    });
+    return out;
+  }
+
+  /** Somewhere open for a scheduled drop: inside the map, off the landmarks and away from bases. */
+  private dropSpot(): [number, number] {
+    const span = HALF_WORLD * 0.7;
+    let spot: [number, number] = [0, 0];
+    for (let tries = 0; tries < 40; tries++) {
+      spot = [(this.crateRand() - 0.5) * 2 * span, (this.crateRand() - 0.5) * 2 * span];
+      if (atLandmark(this.seed, spot[0], spot[1], 6)) continue;
+      if ([...this.pieces.values()].some((p) => Math.hypot(pieceBounds(p).min[0] - spot[0], pieceBounds(p).min[2] - spot[1]) < 25)) continue;
+      break;
+    }
+    return spot;
+  }
+
+  /** Sends the plane across the map over (x, z), from a random side, and tells everyone. */
+  private callPlane(x: number, z: number, now: number): Outgoing[] {
+    const a = this.crateRand() * Math.PI * 2;
+    const dx = Math.cos(a);
+    const dz = Math.sin(a);
+    const from: [number, number] = [x - dx * PLANE_REACH, z - dz * PLANE_REACH];
+    const to: [number, number] = [x + dx * PLANE_REACH, z + dz * PLANE_REACH];
+    this.drops.push({ at: now + (PLANE_REACH / PLANE_SPEED) * 1000, x, z });
+    const over = BIOMES[biomeAt(this.seed, x, z)].name;
+    return [
+      { to: 'all', msg: { t: 'plane', from, to, y: PLANE_HEIGHT, start: now, speed: PLANE_SPEED, drop: [x, z], over } },
+      { to: 'all', msg: { t: 'notice', text: `A supply plane is coming over ${over}` } },
+    ];
   }
 
   private tickCrafting(p: Player, dt: number): Outgoing[] {
@@ -1729,6 +1882,9 @@ export class Game {
 
   /** Removes a deployable from the world, telling everyone. */
   private removeDeployable(id: number, by = 0): Outgoing[] {
+    const spot = this.deployables.get(id)?.spot;
+    if (spot) this.crateDue.set(spot, Math.max(0, this.lastTick) + CRATE_RESPAWN * 1000);
+    this.signals.delete(id);
     this.deployables.delete(id);
     this.furnaces.delete(id);
     this.bagExpiry.delete(id);
@@ -1744,6 +1900,8 @@ export class Game {
     if (typeof c !== 'number') return null;
     const d = this.deployables.get(c);
     if (!d || d.slots.length === 0) return null;
+    // A supply drop can't be opened while it is still in the air.
+    if (d.fall && d.fall.land > this.lastTick) return null;
     const b = deployableBox(d);
     const dx = Math.max(b.min[0] - p.x, 0, p.x - b.max[0]);
     const dz = Math.max(b.min[2] - p.z, 0, p.z - b.max[2]);

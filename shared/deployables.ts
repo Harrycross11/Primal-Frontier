@@ -14,6 +14,12 @@ export type DeployableKind =
   | 'toolCupboard'
   | 'sleepingBag'
   | 'lootBag'
+  // Loot crates at the landmarks, and the crate the supply plane drops.
+  | 'crate'
+  | 'militaryCrate'
+  | 'supplyDrop'
+  // A thrown supply signal, smoking.
+  | 'supplySignal'
   // Explosives once they are lit: thrown, or stuck to a wall or door.
   | 'beancan'
   | 'satchel'
@@ -22,6 +28,8 @@ export type DeployableKind =
 export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox', 'toolCupboard', 'sleepingBag'];
 /** Lit explosives waiting to go off. */
 export const CHARGE_KINDS: DeployableKind[] = ['beancan', 'satchel', 'c4'];
+/** Crates full of loot that nobody owns: you can only take from them, and they can't be broken. */
+export const CRATE_KINDS: DeployableKind[] = ['crate', 'militaryCrate', 'supplyDrop'];
 
 export interface Deployable {
   id: number;
@@ -42,6 +50,10 @@ export interface Deployable {
   label?: string;
   /** Tool cupboards: the players allowed to build near it. */
   auth?: number[];
+  /** Landmark crates: which crate spot it fills (see crateSpots). */
+  spot?: string;
+  /** Supply drops: the height it was dropped from and when (server ms) it left the plane and lands. */
+  fall?: { from: number; start: number; land: number };
 }
 
 export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [number, number, number]; hp: number; slots: number }> = {
@@ -53,6 +65,10 @@ export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [numb
   toolCupboard: { name: 'Tool Cupboard', size: [0.9, 1.75, 0.55], hp: 600, slots: 0 },
   sleepingBag: { name: 'Sleeping Bag', size: [0.8, 0.14, 1.9], hp: 100, slots: 0 },
   lootBag: { name: 'Loot Bag', size: [0.7, 0.45, 0.7], hp: 40, slots: INVENTORY_SIZE },
+  crate: { name: 'Wooden Crate', size: [0.49, 0.28, 1.5], hp: 1e9, slots: 12 },
+  militaryCrate: { name: 'Military Crate', size: [0.71, 0.77, 1.3], hp: 1e9, slots: 12 },
+  supplyDrop: { name: 'Supply Drop', size: [1.4, 1.37, 1.4], hp: 1e9, slots: 18 },
+  supplySignal: { name: 'Supply Signal', size: [0.09, 0.2, 0.09], hp: 1e9, slots: 0 },
   beancan: { name: 'Beancan Grenade', size: [0.14, 0.16, 0.14], hp: 1e9, slots: 0 },
   satchel: { name: 'Satchel Charge', size: [0.3, 0.3, 0.16], hp: 1e9, slots: 0 },
   c4: { name: 'Timed Explosive Charge', size: [0.3, 0.22, 0.12], hp: 1e9, slots: 0 },
@@ -114,7 +130,7 @@ export function deployableBox(d: Pick<Deployable, 'kind' | 'x' | 'y' | 'z' | 'ro
 
 /** Whether an item may go into a container slot. Furnace outputs and loot bags only give. */
 export function slotAccepts(d: Deployable, slot: number, item: ItemId): boolean {
-  if (d.kind === 'lootBag') return false;
+  if (d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) return false;
   if (d.kind !== 'furnace') return true;
   if (slot === FURNACE_FUEL) return item === 'wood';
   if (FURNACE_ORE_SLOTS.includes(slot)) return SMELTS[item] !== undefined;

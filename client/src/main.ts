@@ -17,13 +17,14 @@ import {
   type Piece,
   type PieceKind,
 } from '../../shared/building.ts';
-import { CHARGE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
 import { BIOMES, biomeAt } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ASHHOUND } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
+import { atLandmark } from '../../shared/landmarks.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import { MATERIALS, RESOURCE_INFO, generateDecor, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
@@ -39,7 +40,7 @@ import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
-import { buildCharge, buildDeployable } from './props.ts';
+import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.ts';
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
@@ -150,6 +151,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   for (const d of welcome.deployables) world.setDeployable(d.id, d);
 
   const dayNight = new DayNight(world, gfx, welcome.seed, welcome.now);
+  world.serverNow = () => dayNight.now;
   const clock = document.getElementById('clock')!;
   let clockIn = 0;
   /** Everything burning that could light the dark: torches in hand and lit furnaces. */
@@ -177,6 +179,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     z: controller.position.z,
     yaw: controller.yaw,
     hounds: [...creatures.views.values()].filter((v) => v.state.owner === welcome.you.id && v.state.anim !== 'dead').map((v) => v.root.position),
+    drops: [...world.deployables.values()].filter((d) => d.kind === 'supplyDrop'),
   });
   creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
@@ -338,15 +341,16 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         const old = world.deployables.get(m.id);
         world.setDeployable(m.id, m.d);
         const kind = (m.d ?? old)?.kind;
-        if (kind && kind !== 'lootBag' && !CHARGE_KINDS.includes(kind)) deployableEffects(old ?? null, m.d);
-        if (!old && m.d?.kind === 'beancan') {
-          // The grenade flies there from the thrower's hand before it shows where it landed.
+        if (kind && kind !== 'lootBag' && kind !== 'supplySignal' && !CHARGE_KINDS.includes(kind) && !CRATE_KINDS.includes(kind)) deployableEffects(old ?? null, m.d);
+        if (!old && (m.d?.kind === 'beancan' || m.d?.kind === 'supplySignal')) {
+          // The grenade or signal flies there from the thrower's hand before it shows where it landed.
           const thrower = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
           const mesh = world.deployableMeshes.get(m.id);
           if (thrower && mesh) {
             mesh.visible = false;
             const from = thrower.root.position.clone().setY(thrower.root.position.y + 1.6);
-            effects.toss(buildCharge('beancan', true), from, new THREE.Vector3(m.d.x, m.d.y, m.d.z), () => (mesh.visible = true));
+            const flying = m.d.kind === 'beancan' ? buildCharge('beancan', true) : buildSignal(true);
+            effects.toss(flying, from, new THREE.Vector3(m.d.x, m.d.y, m.d.z), () => (mesh.visible = true));
           }
         }
         if (ui.container?.id === m.id) {
@@ -425,6 +429,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'notice':
         hud.notice(m.text);
         break;
+      case 'plane': {
+        const from = new THREE.Vector3(m.from[0], m.y, m.from[1]);
+        const to = new THREE.Vector3(m.to[0], m.y, m.to[1]);
+        effects.plane(buildPlane(), from, to, m.speed, Math.max(0, (dayNight.now - m.start) / 1000));
+        break;
+      }
       case 'explosion': {
         const at = new THREE.Vector3(...m.at);
         effects.explosion(at, m.item, terrainHeight(world.seed, at.x, at.z));
@@ -771,6 +781,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return;
     }
     if (item && isExplosive(item)) return useExplosive(item);
+    if (item === 'supplySignal') return throwHeld();
     if (item && DOOR_KINDS.includes(item as DoorKind)) {
       const p = aim?.piece;
       if (p?.kind !== 'wall' || p.edit !== 'door') return hud.notice('Aim at a doorway: press G on a wall to make one');
@@ -807,21 +818,25 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     hitTarget();
   }
 
+  /** Lobs the beancan or supply signal in your hands a little above where you look. */
+  function throwHeld() {
+    const now = performance.now();
+    if (now - lastAttack < 800) return;
+    lastAttack = now;
+    const look = new THREE.Vector3();
+    camera.getWorldDirection(look);
+    look.y += 0.18;
+    look.normalize();
+    net.send({ t: 'throw', slot: ui.active, d: [look.x, look.y, look.z] });
+    me.swing();
+    effects.swingSound(false, null);
+  }
+
   /** Throws a beancan, or sticks a satchel or C4 to whatever the crosshair is on. */
   function useExplosive(item: ExplosiveId) {
     const now = performance.now();
     if (now - lastAttack < 800) return;
-    if (item === 'beancan') {
-      lastAttack = now;
-      const look = new THREE.Vector3();
-      camera.getWorldDirection(look);
-      look.y += 0.18;
-      look.normalize();
-      net.send({ t: 'throw', slot: ui.active, d: [look.x, look.y, look.z] });
-      me.swing();
-      effects.swingSound(false, null);
-      return;
-    }
+    if (item === 'beancan') return throwHeld();
     const spot = plantSpot(item);
     if (!spot) return hud.notice('Get closer to a wall, a door or the ground to stick it on');
     lastAttack = now;
@@ -870,6 +885,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
     if (aimDeployable && aimDeployable.slots.length > 0) {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
+      if (falling(aimDeployable)) return hud.notice("Wait for it to land");
       return openScreen(aimDeployable);
     }
     if (aimResource && RESOURCE_INFO[aimResource.kind].tool === 'pickup' && resourceInRange(aimResource)) {
@@ -956,9 +972,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     ghostMat.color.set(blockedAt(box) ? 0xff5a4a : 0x4fb3ff);
   }
 
-  /** True inside the range of a tool cupboard that doesn't trust you. */
+  /** True inside the range of a tool cupboard that doesn't trust you, or on a landmark's ground. */
   function blockedAt(b: { min: number[]; max: number[] }): boolean {
+    if (atLandmark(world.seed, (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, 4)) return true;
     return privilege(world.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, welcome.id) === 'blocked';
+  }
+
+  /** A supply drop still under its parachute. */
+  function falling(d: Deployable): boolean {
+    return !!d.fall && dayNight.now < d.fall.land;
   }
 
   function describeTarget(): { text: string; health?: number } {
@@ -968,6 +990,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (!aimPlayer && !aimHound) return { text: spot ? `${ITEMS[item].name}  ·  Left click to stick it here` : `${ITEMS[item].name}  ·  Get close to a wall or door` };
     }
     if (item === 'beancan' && !aimPlayer && !aimHound) return { text: 'Beancan Grenade  ·  Left click to throw' };
+    if (item === 'supplySignal' && !aimPlayer && !aimHound) return { text: 'Supply Signal  ·  Left click to throw it and call the plane' };
     if (aimResource?.kind === 'waterBarrel') {
       const r = aimResource;
       if (r.amount <= 0) return { text: 'Rain barrel: dry, it will refill' };
@@ -989,6 +1012,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (aimDeployable) {
       const d = aimDeployable;
       if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
+      if (CRATE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  ${falling(d) ? 'Still coming down' : 'E to open'}` };
+      if (d.kind === 'supplySignal') return { text: 'Supply Signal  ·  The plane is on its way' };
       if (CHARGE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  About to blow: get away!` };
       const mine = d.owner === welcome.id;
       if (d.kind === 'toolCupboard') {
@@ -1117,6 +1142,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
     /** Keeps the camera on a hound from an offset, for screenshots of them moving about. */
     watchHound: (id: number | null, offset: number[] = [2.6, 1.2, 1.6]) => (watched = id === null ? null : { id, offset }),
+    /** Holds the clock supply drops fall by at a server time (ms), or lets it run again, for screenshots. */
+    clockAt: (ms: number | null) => (world.serverNow = ms === null ? () => dayNight.now : () => ms),
+    /** Flies a supply plane over, `elapsed` seconds into its crossing, for screenshots. */
+    showPlane: (from: number[], to: number[], speed: number, elapsed: number) =>
+      effects.plane(buildPlane(), new THREE.Vector3().fromArray(from), new THREE.Vector3().fromArray(to), speed, elapsed),
+    /** Throws what is in your hands. */
+    throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
     view: (from: number[] | null, to: number[] = [0, 0, 0]) => (fixedView = from ? { from, to } : null),
     setQuality: (q: 'high' | 'low') => {
@@ -1158,6 +1190,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let sendTimer = 0;
   let time = 0;
   let chargeIn = 0;
+  let smokeIn = 0;
   gfx.renderer.setAnimationLoop((now) => {
     timer.update(now);
     // The first frame's timestamp can come from before the timer started; never step backwards.
@@ -1203,6 +1236,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const k = effects.shake * 0.09;
       camera.position.add(new THREE.Vector3((Math.random() - 0.5) * k, (Math.random() - 0.5) * k, (Math.random() - 0.5) * k));
       effects.shake *= Math.exp(-dt * 5);
+    }
+    // Supply signals pour out red smoke, and so does a supply drop for a while after it lands.
+    smokeIn -= dt;
+    if (smokeIn <= 0) {
+      smokeIn = 0.16;
+      for (const d of world.deployables.values()) {
+        const landed = d.kind === 'supplyDrop' && d.fall && dayNight.now > d.fall.land && dayNight.now < d.fall.land + 90_000;
+        if (d.kind === 'supplySignal' || landed) effects.redSmoke(new THREE.Vector3(d.x, d.y + (landed ? 1.4 : 0.2), d.z));
+      }
     }
     // Lit charges beep or hiss.
     chargeIn -= dt;

@@ -37,6 +37,11 @@ This repository is the **browser prototype**, built step by step. Milestones don
   - **Code locks** (100 metal, workbench 1): fit one to a door and pick a 4-digit code. Only you, and whoever you tell the code, can open it. A wrong code shocks you.
   - **Sleeping bags** (30 cloth): lay one down and you can wake up in it when you die, once a minute.
   - **Explosives**: beancan grenades you throw (60 gunpowder, 20 metal, workbench 1), satchel charges you stick to a wall or door (4 beancans, 10 cloth, workbench 1), and timed explosive charges, C4 (5 explosives and 5 cloth at workbench 3; explosives are 50 gunpowder, 10 sulfur and 10 metal at workbench 2). Two satchels blow open a wooden wall or door and three a stone or scrap wall; one C4 takes out any wall or a wooden door, two a metal door. Blasts hurt anyone nearby who isn't behind a wall.
+- Places worth looting:
+  - **A landmark in each land**, built from scanned models on levelled ground and marked on the map (M): Smith's Garage in the Ashlands, a Logging Camp in Deadwood, a Mining Outpost on Rust Mesa, an Oil Field on the Sulfur Flats and a Radio Station up in the Frostpeaks. Nobody can build there.
+  - **Crates** at every landmark: wooden crates hold the basics (scrap, metal, ammo, bandages, early guns and armour), military crates better guns, ammo, syringes and armour. Each land's crates add what it is known for. Press **E** to open one; once emptied it fills up again 8 minutes later.
+  - **Air drops**: a cargo plane flies over every 20 to 30 minutes while anyone is playing and drops a crate of the best gear, which floats down on a parachute and puffs red smoke when it lands. It shows on the map, and everyone gets told which land it is over.
+  - **Supply signals**, found in military crates: throw one and its red smoke calls the plane to drop right there.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
 - The server checks every action (reach, cost, cooldowns, movement speed), so players can't cheat by editing the client.
 
@@ -92,6 +97,5 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Places worth looting: a ruined landmark in each land with crates, and air drops
-2. More creatures, one for each land, and riding the bigger ones
-3. More building pieces: roofs, ramps, foundations and doorways
+1. More creatures, one for each land, and riding the bigger ones
+2. More building pieces: roofs, ramps, foundations and doorways

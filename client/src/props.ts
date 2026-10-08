@@ -341,6 +341,33 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     const charge = buildCharge(kind, true);
     g.add(charge);
     g.userData.tick = charge.userData.tick;
+  } else if (kind === 'crate' || kind === 'militaryCrate' || kind === 'supplyDrop') {
+    const scan = model(kind === 'crate' ? 'crate' : kind === 'militaryCrate' ? 'crate-military' : 'crate-drop');
+    if (scan) g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
+    else {
+      const look = kind === 'crate' ? plankMat() : plain(kind === 'supplyDrop' ? 0x3d4a2e : 0x4a5a3a, 0.7, 0.2);
+      g.add(mesh(new RoundedBoxGeometry(w, h, l, 2, 0.02), look, 0, h / 2, 0));
+    }
+    if (kind === 'supplyDrop') {
+      // Its parachute, shown while it comes down (see World.update).
+      const chute = new THREE.Group();
+      chute.name = 'chute';
+      const canopy = model('parachute');
+      if (canopy) {
+        const c = shared(new THREE.Mesh(canopy.geometry, canopy.material));
+        chute.add(c);
+      } else {
+        const dome = mesh(new THREE.SphereGeometry(2.2, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), plain(0x4f5a3a, 1));
+        dome.position.y = 3.6;
+        (dome.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+        chute.add(dome);
+      }
+      chute.position.y = h - 0.1;
+      chute.visible = false;
+      g.add(chute);
+    }
+  } else if (kind === 'supplySignal') {
+    g.add(buildSignal(true));
   } else if (kind === 'lootBag') {
     // A stuffed canvas sack left where someone died.
     const sack = mesh(new THREE.SphereGeometry(0.34, 14, 10), plain(0x6a5d44, 1), 0, 0.26, 0);
@@ -355,6 +382,50 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     g.add(mesh(new THREE.BoxGeometry(w + 0.01, 0.04, l + 0.01), metalMat(), 0, h - 0.12, 0));
     g.add(mesh(new THREE.BoxGeometry(0.1, 0.12, 0.03), metalMat(), 0, h - 0.18, l / 2 + 0.01));
   }
+  return g;
+}
+
+/** A model's own geometry, shared with every copy: marked so nobody disposes of it. */
+function shared(m: THREE.Mesh): THREE.Mesh {
+  m.castShadow = true;
+  m.receiveShadow = true;
+  m.userData.shared = true;
+  return m;
+}
+
+/** A supply signal: a red smoke canister with a pull ring. Lit ones glow at the top. */
+export function buildSignal(lit: boolean): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.17, 16), plain(0xa82a22, 0.55, 0.3), 0, 0.085, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.041, 0.041, 0.05, 16, 1, true), plain(0xd8d2c0, 0.8), 0, 0.09, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.03, 16), plain(0x2a2c2e, 0.5, 0.6), 0, 0.185, 0));
+  const ring = mesh(new THREE.TorusGeometry(0.02, 0.004, 6, 14), plain(0x9a9c9a, 0.4, 0.8), 0.03, 0.2, 0);
+  ring.rotation.y = Math.PI / 2;
+  g.add(ring);
+  if (lit) {
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.position.y = 0.21;
+    glow.userData.noAO = true;
+    g.add(glow);
+    g.userData.tick = () => glow.scale.setScalar(0.7 + Math.random() * 0.6);
+  }
+  return g;
+}
+
+/** The supply plane, nose along +z, or a rough stand-in if its model didn't load. */
+export function buildPlane(): THREE.Group {
+  const g = new THREE.Group();
+  const scan = model('plane');
+  if (scan) {
+    const body = shared(new THREE.Mesh(scan.geometry, scan.material));
+    body.castShadow = false;
+    g.add(body);
+    return g;
+  }
+  const grey = plain(0x8a8e92, 0.6, 0.3);
+  g.add(mesh(new THREE.CylinderGeometry(2.6, 2.2, 48, 12).rotateX(Math.PI / 2), grey, 0, 4, 0));
+  g.add(mesh(new THREE.BoxGeometry(52, 0.6, 7), grey, 0, 6, 2));
+  g.add(mesh(new THREE.BoxGeometry(0.6, 8, 5), grey, 0, 9, -22));
   return g;
 }
 
@@ -504,6 +575,12 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       const charge = buildCharge(item, false);
       charge.position.y = item === 'beancan' ? -0.04 : -0.08;
       g.add(charge);
+      return g;
+    }
+    case 'supplySignal': {
+      const can = buildSignal(false);
+      can.position.y = -0.06;
+      g.add(can);
       return g;
     }
     case 'explosives': {

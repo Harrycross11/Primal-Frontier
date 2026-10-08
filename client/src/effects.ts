@@ -38,6 +38,20 @@ interface Puff {
   sprite: THREE.Sprite;
   life: number;
   max: number;
+  /** Metres a second it climbs and swells. */
+  rise: number;
+  grow: number;
+}
+
+/** The supply plane crossing the sky, with the drone of its engines. */
+interface Plane {
+  obj: THREE.Object3D;
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  /** Seconds since it set off, and how long the whole crossing takes. */
+  t: number;
+  time: number;
+  hum: { gain: GainNode; pan: StereoPannerNode; stop: () => void } | null;
 }
 
 export class Effects {
@@ -57,6 +71,8 @@ export class Effects {
   private arrowMat = new THREE.MeshBasicMaterial({ color: 0x6a5030, transparent: true });
   private flashTex = radialTexture('rgba(255,236,170,1)', 'rgba(255,140,40,0.6)', 'rgba(255,120,30,0)');
   private dustTex = radialTexture('rgba(150,135,110,0.75)', 'rgba(120,110,95,0.35)', 'rgba(120,110,95,0)');
+  private redSmokeTex = radialTexture('rgba(205,62,48,0.8)', 'rgba(180,58,46,0.4)', 'rgba(170,60,50,0)');
+  private planes: Plane[] = [];
   private audio: { ctx: AudioContext; noise: AudioBuffer; out: AudioNode; reverb: ConvolverNode } | null = null;
   /** Recorded shots, swings and strikes from client/public/sounds, by name, once decoded. */
   private samples = new Map<string, AudioBuffer>();
@@ -518,7 +534,70 @@ export class Effects {
     sprite.position.copy(at);
     sprite.scale.setScalar(size);
     this.scene.add(sprite);
-    this.puffs.push({ sprite, life, max: life });
+    this.puffs.push({ sprite, life, max: life, rise: 0.3, grow: 0.8 });
+  }
+
+  /** One billow of thick red smoke from a supply signal or a landed supply drop, climbing high. */
+  redSmoke(at: THREE.Vector3) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.redSmokeTex, depthWrite: false, transparent: true }));
+    sprite.position.copy(at).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3));
+    sprite.scale.setScalar(0.6);
+    this.scene.add(sprite);
+    const life = 5 + Math.random() * 3;
+    this.puffs.push({ sprite, life, max: life, rise: 2.2 + Math.random(), grow: 1.1 });
+  }
+
+  /**
+   * The supply plane flying over, from `from` to `to` at `speed` m/s, `elapsed` seconds into
+   * its crossing already (if it set off before we heard).
+   */
+  plane(obj: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, speed: number, elapsed: number) {
+    obj.position.copy(from);
+    obj.lookAt(to);
+    this.scene.add(obj);
+    this.planes.push({ obj, from: from.clone(), to: to.clone(), t: elapsed, time: from.distanceTo(to) / speed, hum: this.engineHum() });
+  }
+
+  /** Four turbofans heard from the ground: a deep roar with a whine on top, fed into the mix. */
+  private engineHum(): Plane['hum'] {
+    const a = this.context();
+    if (!a) return null;
+    const { ctx, noise } = a;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+    const roar = ctx.createBiquadFilter();
+    roar.type = 'lowpass';
+    roar.frequency.value = 420;
+    roar.Q.value = 0.7;
+    const whine = ctx.createOscillator();
+    whine.type = 'sawtooth';
+    whine.frequency.value = 1180;
+    const whineLevel = ctx.createGain();
+    whineLevel.gain.value = 0.015;
+    const throb = ctx.createOscillator();
+    throb.type = 'triangle';
+    throb.frequency.value = 58;
+    const throbLevel = ctx.createGain();
+    throbLevel.gain.value = 0.25;
+    src.connect(roar).connect(gain);
+    whine.connect(whineLevel).connect(gain);
+    throb.connect(throbLevel).connect(gain);
+    gain.connect(pan).connect(this.audio!.out);
+    src.start();
+    whine.start();
+    throb.start();
+    return {
+      gain,
+      pan,
+      stop: () => {
+        for (const n of [src, whine, throb]) n.stop();
+        gain.disconnect();
+      },
+    };
   }
 
   /**
@@ -660,11 +739,27 @@ export class Effects {
       this.scene.remove(c.mesh);
       return false;
     });
+    this.planes = this.planes.filter((p) => {
+      p.t += dt;
+      const k = p.t / p.time;
+      p.obj.position.lerpVectors(p.from, p.to, Math.min(1, k));
+      if (p.hum) {
+        // Heard from far off and loudest overhead; it lags a little, like the real thing.
+        const { near, pan } = this.placed(p.obj.position, 90);
+        const ctx = this.audio!.ctx;
+        p.hum.gain.gain.setTargetAtTime(0.5 * near * near, ctx.currentTime, 0.3);
+        p.hum.pan.pan.setTargetAtTime(pan, ctx.currentTime, 0.3);
+      }
+      if (k < 1) return true;
+      this.scene.remove(p.obj);
+      p.hum?.stop();
+      return false;
+    });
     this.puffs = this.puffs.filter((p) => {
       p.life -= dt;
       const k = 1 - p.life / p.max;
-      p.sprite.scale.setScalar(p.sprite.scale.x + dt * 0.8);
-      p.sprite.position.y += dt * 0.3;
+      p.sprite.scale.setScalar(p.sprite.scale.x + dt * p.grow);
+      p.sprite.position.y += dt * p.rise;
       p.sprite.material.opacity = 1 - k;
       if (p.life > 0) return true;
       this.scene.remove(p.sprite);

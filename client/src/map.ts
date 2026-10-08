@@ -4,6 +4,7 @@
 
 import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { BIOMES, BIOME_IDS, biomeAt, biomeWeights, type BiomeId } from '../../shared/biomes.ts';
+import { landmarks } from '../../shared/landmarks.ts';
 import { radZones } from '../../shared/survival.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
@@ -18,6 +19,8 @@ export interface MapMarks {
   /** Which way you face, as the controller's yaw. */
   yaw: number;
   hounds: { x: number; z: number }[];
+  /** Supply drops lying about, waiting to be looted. */
+  drops: { x: number; z: number }[];
 }
 
 export class WorldMap {
@@ -144,6 +147,30 @@ export class WorldMap {
       ctx.textBaseline = 'middle';
       ctx.fillText('☢', px, py);
     }
+    // The landmarks: a crate symbol and the name, so you know where the loot is.
+    for (const { site, landmark } of landmarks(this.seed)) {
+      const [px, py] = this.toPx(site.x, site.z);
+      ctx.fillStyle = '#e8b04a';
+      ctx.strokeStyle = '#1c1a18';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(px - 4.5, py - 4.5, 9, 9);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px - 4.5, py);
+      ctx.lineTo(px + 4.5, py);
+      ctx.stroke();
+      ctx.font = '600 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(20, 18, 16, 0.8)';
+      ctx.strokeText(landmark.name, px, py + 7);
+      ctx.fillStyle = '#f6d690';
+      ctx.fillText(landmark.name, px, py + 7);
+    }
+    ctx.textBaseline = 'middle';
     ctx.font = 'bold 12px system-ui, sans-serif';
     ctx.textAlign = 'center';
     BIOME_IDS.forEach((id, k) => {
@@ -168,6 +195,17 @@ export class WorldMap {
     ctx.fillStyle = '#c0502e';
     ctx.strokeStyle = '#1c1a18';
     ctx.lineWidth = 1.5;
+    // Supply drops: a red parachute crate, pulsing so it catches the eye.
+    const pulse = 4 + Math.sin(performance.now() / 180) * 1.2;
+    for (const d of marks.drops) {
+      const [px, py] = this.toPx(d.x, d.z);
+      ctx.fillStyle = '#d23a2c';
+      ctx.beginPath();
+      ctx.arc(px, py, pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c0502e';
     for (const h of marks.hounds) {
       const [px, py] = this.toPx(h.x, h.z);
       ctx.beginPath();

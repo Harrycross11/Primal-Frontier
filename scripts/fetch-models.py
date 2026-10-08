@@ -117,6 +117,26 @@ PROPS = {
     'tool-fireAxe': '23cd18766328497286c925705a724b43',
     'tool-sledgehammer': '0d4f90b84b1f43ac9ade0eda770a1626',
 }
+# Game-ready Sketchfab models for the landmarks in each land, the loot crates and the air drop:
+# kept as modelled, with their textures shrunk to the size given.
+LANDMARK_PROPS = {
+    'lm-petrol': ('dacd1c0d9f5045a6bc2180702714f12c', 512),
+    'lm-warehouse': ('c7f4c017c20943cb9e9e559822a5c402', 1024),
+    'lm-house': ('f9159874daad499492cc0a488e06b489', 1024),
+    'lm-shed': ('c90674a377864ac1b8fd141ad1917ee3', 1024),
+    'lm-container': ('2b787d1a02174d0bbca9eac34eb3a486', 1024),
+    'lm-container2': ('fa3e0b6d1b5d4756827ef06fd2c8516d', 1024),
+    'lm-waterTower': ('4e98f8c8fe4e4e9fae250a026974fe99', 1024),
+    'lm-pumpJack': ('73e9e419df5748ceb1bbbd333c5ce8d1', 1024),
+    'lm-guardTower': ('963071f5fe404970a40b166bcee430b8', 1024),
+    'lm-tent': ('e06d68ead08a4c44bfd5f826ecca4987', 1024),
+    'lm-radioTower': ('e0bd9e8f693c496280e0afeb32fece26', 1024),
+    'crate': ('532244d87cdb4920b022831093470eb2', 512),
+    'crate-military': ('819ffa35626044608f497dbb6e405afc', 512),
+    'crate-drop': ('eaf6cbca12f944f498fc6dde845da06e', 512),
+    'parachute': ('af52e08feebc4d94a244692212ac25bb', 512),
+    'plane': ('549bce95137c4304b771a2b046420c6f', 512),
+}
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.
 SMALL_TEXTURES = [name for name in PROPS if list(PROPS).index(name) >= list(PROPS).index('gun-m4')]
@@ -244,6 +264,14 @@ def main():
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(slim_textures(get(link['glb']['url']), 512 if name in SMALL_TEXTURES else 1024))
+        print('saved', name)
+    for name, (uid, size) in LANDMARK_PROPS.items():
+        scans.append(sketchfab_credit(name, uid, 'textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
+            f.write(slim_textures(get(link['glb']['url']), size))
         print('saved', name)
     for name, uid in CHARACTERS.items():
         scans.append(sketchfab_credit(name, uid, 'animated by the game'))
