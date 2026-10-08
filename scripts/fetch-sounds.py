@@ -110,6 +110,8 @@ OGA_SOUNDS = {
     'hound-hurt': ('dog-frieda-grunt-96khz-01.flac', None, 0.0, 0.58, '"Dog Grunt" by qubodup (https://opengameart.org/content/dog-grunt)'),
     'hound-whine': ('dog.7z', 'Dog/Sad Dog.wav', 0.0, 1.6, '"Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds)'),
     'bear-hurt': ('bear.zip', 'flac/bear_01.flac', 0.0, 1.0, '"Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls)'),
+    'bear-growl': ('bear.zip', 'flac/bear_02.flac', 0.0, 1.15, '"Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls)'),
+    'mule-bray': ('donkey_bray_-_starninjas_0.ogg', None, 0.0, 1.7, '"Donkey Bray" by StarNinjas, an imitation (https://opengameart.org/content/donkey-bray)'),
     'camel-groan': ('camel.zip', 'flac/camel_01.flac', 0.0, 2.8, '"Camel Groan" by AntumDeluge, from a recording by craigsmith (https://opengameart.org/content/camel-groan)'),
 }
 
@@ -118,6 +120,7 @@ COMMONS = 'https://upload.wikimedia.org/wikipedia/commons/'
 NPS_BEAR = 'by NPS & MSU Acoustic Atlas / Jennifer Jerrett (https://commons.wikimedia.org/wiki/File:{})'
 WIKI_SOUNDS = {
     'bear-roar': ('e/ef/Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3', 2.0, 2.2, '"Yellowstone sound library - Grizzly Bears Roar - 001" ' + NPS_BEAR.format('Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3'), 'public domain'),
+    'buffalo-grunt': ('b/b2/Cow_in_Antefasy.wav', 0.5, 0.9, '"Cow in Antefasy" by Gasybeaugosse2020 (https://commons.wikimedia.org/wiki/File:Cow_in_Antefasy.wav)', 'CC0'),
     'elk-call': ('8/88/American_Elk_Bugling.ogg', 0.5, 2.8, '"American Elk Bugling" by Jim Pisarowicz, National Park Service (https://commons.wikimedia.org/wiki/File:American_Elk_Bugling.ogg)', 'public domain'),
 }
 

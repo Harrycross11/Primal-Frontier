@@ -104,10 +104,10 @@ const ONCE = new Set<CreatureAnim>(['attack', 'hit', 'dead']);
 /** Sounds each animal makes: when it attacks, is hurt, dies, starts running, and now and then. */
 const VOICES: Record<Species, { attack: string[]; hurt: string; dead: string; run?: string; idle: string[]; pitch?: number }> = {
   ashhound: { attack: ['hound-snarl', 'hound-growl'], hurt: 'hound-hurt', dead: 'hound-whine', run: 'hound-bark', idle: ['hound-growl2', 'hound-grumble'] },
-  mule: { attack: ['mule-bray'], hurt: 'animal-hurt', dead: 'animal-hurt', run: 'mule-bray', idle: ['mule-bray'] },
-  elk: { attack: ['elk-call'], hurt: 'animal-hurt', dead: 'animal-hurt', run: 'elk-call', idle: ['elk-call'] },
-  buffalo: { attack: ['buffalo-grunt'], hurt: 'animal-hurt', dead: 'buffalo-grunt', run: 'buffalo-grunt', idle: ['buffalo-grunt'] },
-  camel: { attack: ['camel-groan'], hurt: 'animal-hurt', dead: 'camel-groan', idle: ['camel-groan'] },
+  mule: { attack: ['mule-bray'], hurt: 'mule-bray', dead: 'mule-bray', run: 'mule-bray', idle: ['mule-bray'] },
+  elk: { attack: ['elk-call'], hurt: 'elk-call', dead: 'elk-call', run: 'elk-call', idle: ['elk-call'] },
+  buffalo: { attack: ['buffalo-grunt'], hurt: 'buffalo-grunt', dead: 'buffalo-grunt', run: 'buffalo-grunt', idle: ['buffalo-grunt'] },
+  camel: { attack: ['camel-groan'], hurt: 'camel-groan', dead: 'camel-groan', idle: ['camel-groan'] },
   bear: { attack: ['bear-roar'], hurt: 'bear-hurt', dead: 'bear-hurt', run: 'bear-roar', idle: ['bear-growl'] },
 };
 

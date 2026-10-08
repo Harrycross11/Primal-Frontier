@@ -71,6 +71,9 @@ Recordings from Freesound and OpenGameArt, all CC0, and Wikimedia Commons, all p
 - hound-hurt.mp3: "Dog Grunt" by qubodup (https://opengameart.org/content/dog-grunt), CC0
 - hound-whine.mp3: "Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds), CC0
 - bear-hurt.mp3: "Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls), CC0
+- bear-growl.mp3: "Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls), CC0
+- mule-bray.mp3: "Donkey Bray" by StarNinjas, an imitation (https://opengameart.org/content/donkey-bray), CC0
 - camel-groan.mp3: "Camel Groan" by AntumDeluge, from a recording by craigsmith (https://opengameart.org/content/camel-groan), CC0
 - bear-roar.mp3: "Yellowstone sound library - Grizzly Bears Roar - 001" by NPS & MSU Acoustic Atlas / Jennifer Jerrett (https://commons.wikimedia.org/wiki/File:Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3), public domain
+- buffalo-grunt.mp3: "Cow in Antefasy" by Gasybeaugosse2020 (https://commons.wikimedia.org/wiki/File:Cow_in_Antefasy.wav), CC0
 - elk-call.mp3: "American Elk Bugling" by Jim Pisarowicz, National Park Service (https://commons.wikimedia.org/wiki/File:American_Elk_Bugling.ogg), public domain
