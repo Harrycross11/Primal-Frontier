@@ -44,6 +44,12 @@ export class Effects {
   private tracers: Tracer[] = [];
   private puffs: Puff[] = [];
   private flashes: { sprite: THREE.Sprite; life: number }[] = [];
+  /** Fireballs of explosions, swelling and fading. */
+  private fireballs: { sprite: THREE.Sprite; life: number; max: number; grow: number }[] = [];
+  /** Grenades in flight, along an arc from hand to where they land. */
+  private tosses: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; t: number; time: number; done: () => void }[] = [];
+  /** How hard the camera should shake right now, from nearby blasts; read and eased by the game. */
+  shake = 0;
   /** One light reused for every muzzle flash: adding and removing lights makes three.js recompile shaders. */
   private flashLight = new THREE.PointLight(0xffa860, 0, 7, 1.6);
   private flashLife = 0;
@@ -500,18 +506,103 @@ export class Effects {
     sprite.position.copy(at);
     sprite.scale.setScalar(0.35 + Math.random() * 0.15);
     this.flashLight.position.copy(at);
+    this.flashLight.distance = 7;
     this.flashLight.intensity = 8;
     this.flashLife = 0.05;
     this.scene.add(sprite);
     this.flashes.push({ sprite, life: 0.05 });
   }
 
-  puff(at: THREE.Vector3, size: number) {
+  puff(at: THREE.Vector3, size: number, life = 0.6) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, depthWrite: false, transparent: true }));
     sprite.position.copy(at);
     sprite.scale.setScalar(size);
     this.scene.add(sprite);
-    this.puffs.push({ sprite, life: 0.6, max: 0.6 });
+    this.puffs.push({ sprite, life, max: life });
+  }
+
+  /**
+   * Something blowing up: a fireball and a flash that lights the area, a cloud of smoke,
+   * debris thrown out, a boom that arrives late from far away, and a shake if it was close.
+   */
+  explosion(at: THREE.Vector3, item: 'beancan' | 'satchel' | 'c4', floor: number) {
+    const size = item === 'c4' ? 1.7 : item === 'satchel' ? 1.25 : 0.9;
+    for (let n = 0; n < 6; n++) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+      sprite.position.copy(at).add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(0.8 * size));
+      sprite.scale.setScalar(0.4 * size);
+      this.scene.add(sprite);
+      const max = 0.25 + Math.random() * 0.2;
+      this.fireballs.push({ sprite, life: max, max, grow: (3 + Math.random() * 3) * size });
+    }
+    this.flashLight.position.copy(at).setY(at.y + 0.5);
+    this.flashLight.distance = 30;
+    this.flashLight.intensity = 45 * size;
+    this.flashLife = 0.18;
+    for (let n = 0; n < 9; n++) {
+      const p = at.clone().add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).multiplyScalar(1.4 * size));
+      this.puff(p, (1 + Math.random()) * size, 1.6 + Math.random() * 1.4);
+    }
+    this.chipsAt(at, 'stone', floor, Math.round(18 * size), 2.2 * size);
+    if (this.listener) this.shake = Math.max(this.shake, size * Math.max(0, 1 - this.listener.position.distanceTo(at) / 25));
+    const a = this.context();
+    if (!a) return;
+    const { near, pan, distance } = this.placed(at, 30);
+    if (near < 0.01) return;
+    const { ctx, noise } = a;
+    // Sound takes its time to arrive from far away.
+    const now = ctx.currentTime + 0.005 + distance / 343;
+    const bus = this.voiceBus(pan, 0.35 + Math.min(0.45, distance / 120), 0.95);
+    const v = near * Math.min(1.2, 0.6 + size * 0.35);
+    this.noiseHit(bus, noise, now, 'highpass', 2200, 0.7, 0.7 * v * Math.max(0.25, 1 - distance / 60), 0.07);
+    this.noiseHit(bus, noise, now, 'lowpass', 1100, 0.6, 1.1 * v, 0.55);
+    this.noiseHit(bus, noise, now + 0.015, 'lowpass', 240, 0.8, 1.4 * v, 0.85);
+    this.tone(bus, now, 'sine', 75, 26, 1.1 * v, 0.75);
+    this.gravel(bus, now + 0.3, 0.25 * v, 20);
+  }
+
+  /** A door swinging: a wooden creak and knock, or a metal scrape and clang shut. */
+  doorSound(open: boolean, metal: boolean, at: THREE.Vector3) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 6);
+    if (near < 0.05) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.12);
+    if (metal) {
+      this.noiseHit(bus, noise, now, 'bandpass', 2200, 4, 0.18 * near, 0.3);
+      if (!open) {
+        this.thud(bus, now + 0.28, 90, 0.5 * near);
+        this.ping(bus, now + 0.28, [210, 570, 1130, 1720], 0.08 * near, 0.6);
+      }
+    } else {
+      this.tone(bus, now, 'sawtooth', open ? 380 : 300, open ? 260 : 210, 0.04 * near, 0.3);
+      if (!open) {
+        this.thud(bus, now + 0.28, 130, 0.45 * near);
+        this.noiseHit(bus, noise, now + 0.28, 'bandpass', 900, 1.5, 0.3 * near, 0.08);
+      }
+    }
+  }
+
+  /** A charge's warning: C4's timer beeps; a satchel or beancan fuse hisses. */
+  chargeSound(kind: 'beancan' | 'satchel' | 'c4', at: THREE.Vector3) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 5);
+    if (near < 0.08) return;
+    const now = a.ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.05);
+    if (kind === 'c4') this.tone(bus, now, 'square', 2600, 2590, 0.05 * near, 0.07);
+    else this.noiseHit(bus, a.noise, now, 'highpass', 3500, 0.7, 0.08 * near, 0.55);
+  }
+
+  /** Throws a grenade model along an arc from `from` to `to`, then calls `done`. */
+  toss(obj: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, done: () => void) {
+    const time = Math.min(0.9, 0.15 + from.distanceTo(to) / 14);
+    obj.position.copy(from);
+    this.scene.add(obj);
+    this.tosses.push({ obj, from: from.clone(), to: to.clone(), t: 0, time, done });
   }
 
   update(dt: number) {
@@ -525,6 +616,28 @@ export class Effects {
     });
     this.flashLife -= dt;
     if (this.flashLife <= 0) this.flashLight.intensity = 0;
+    else if (this.flashLight.intensity > 20) this.flashLight.intensity *= Math.pow(0.02, dt);
+    this.fireballs = this.fireballs.filter((f) => {
+      f.life -= dt;
+      const k = 1 - f.life / f.max;
+      f.sprite.scale.setScalar(f.sprite.scale.x + f.grow * dt * (1 - k));
+      f.sprite.material.opacity = Math.max(0, 1 - k * k);
+      if (f.life > 0) return true;
+      this.scene.remove(f.sprite);
+      f.sprite.material.dispose();
+      return false;
+    });
+    this.tosses = this.tosses.filter((s) => {
+      s.t += dt;
+      const k = Math.min(1, s.t / s.time);
+      s.obj.position.lerpVectors(s.from, s.to, k);
+      s.obj.position.y += Math.sin(k * Math.PI) * s.time * 2.2;
+      s.obj.rotation.x += dt * 12;
+      if (k < 1) return true;
+      this.scene.remove(s.obj);
+      s.done();
+      return false;
+    });
     this.flashes = this.flashes.filter((f) => {
       f.life -= dt;
       if (f.life > 0) return true;

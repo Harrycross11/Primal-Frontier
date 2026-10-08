@@ -3,14 +3,14 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD_SIZE } from '../../shared/constants.ts';
-import { MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
+import { DOORWAY, MAX_HP, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { BIOME_IDS, biomeWeights } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
-import { buildBoulder, buildDeployable, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
+import { buildBoulder, buildDeployable, buildDoorLeaf, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
 import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
@@ -45,6 +45,8 @@ export class World {
   readonly sun: THREE.DirectionalLight;
   readonly hemi: THREE.HemisphereLight;
   readonly fires: THREE.PointLight[] = [];
+  /** How far open each door has swung, 0 shut to 1 open, so a rebuilt door carries on swinging. */
+  private doorSwing = new Map<string, number>();
   readonly terrain: THREE.Mesh;
   readonly resourceMeshes = new Map<number, THREE.Group>();
   readonly pieces = new Map<string, Piece>();
@@ -899,6 +901,8 @@ export class World {
     this.pieces.set(key, piece);
     const g = buildPieceMesh(piece, this.pieceMaterial(piece));
     this.addFraming(g, piece);
+    if (piece.door) g.add(this.doorFor(key, piece));
+    else this.doorSwing.delete(key);
     g.traverse((o) => {
       o.userData.pieceKey = key;
       o.castShadow = true;
@@ -1002,6 +1006,26 @@ export class World {
     }
   }
 
+  /** The door hung in a doorway, on a hinge at the doorway's edge, swung as far as it had got. */
+  private doorFor(key: string, piece: Piece): THREE.Group {
+    const door = piece.door!;
+    const hinge = new THREE.Group();
+    const x0 = piece.i * TILE;
+    const z0 = piece.k * TILE;
+    if (piece.dir === 0) hinge.position.set(x0 + DOORWAY.from, piece.y, z0);
+    else hinge.position.set(x0, piece.y, z0 + DOORWAY.from);
+    const leaf = buildDoorLeaf(door.kind, door.locked);
+    leaf.traverse((o) => (o.userData.door = true));
+    hinge.add(leaf);
+    hinge.userData.base = piece.dir === 0 ? 0 : -Math.PI / 2;
+    hinge.userData.open = door.open ? 1 : 0;
+    hinge.name = 'door';
+    const swing = this.doorSwing.get(key) ?? hinge.userData.open;
+    this.doorSwing.set(key, swing);
+    hinge.rotation.y = hinge.userData.base - swing * (Math.PI / 2);
+    return hinge;
+  }
+
   /** Damaged pieces get darker, so you can see a wall is about to break. */
   private pieceMaterial(piece: Piece): THREE.Material {
     const base = this.materials[piece.material];
@@ -1050,6 +1074,18 @@ export class World {
       } else this.bounce.set(id, left);
     }
 
+    // Doors swing towards open or shut; lit charges spark and blink.
+    for (const [key, swing] of this.doorSwing) {
+      const hinge = this.pieceMeshes.get(key)?.getObjectByName('door');
+      if (!hinge) continue;
+      const target = hinge.userData.open as number;
+      if (swing === target) continue;
+      const next = swing + Math.sign(target - swing) * Math.min(Math.abs(target - swing), dt * 3.5);
+      this.doorSwing.set(key, next);
+      hinge.rotation.y = hinge.userData.base - next * (Math.PI / 2);
+    }
+    for (const g of this.deployableMeshes.values()) g.userData.tick?.(time);
+
     for (const [key, pop] of this.pops) {
       const g = this.pieceMeshes.get(key);
       pop.t -= dt;
@@ -1074,7 +1110,7 @@ export class World {
 /** Turns a piece's collision boxes into meshes, so what you see is exactly what you bump into. */
 export function buildPieceMesh(piece: Piece, material: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  for (const b of pieceBoxes(piece)) {
+  for (const b of pieceBoxes(piece, false)) {
     const w = b.max[0] - b.min[0];
     const h = b.max[1] - b.min[1];
     const d = b.max[2] - b.min[2];

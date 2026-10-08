@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import './atmosphere.ts';
 import { BUILD_RANGE, GATHER_RANGE } from '../../shared/constants.ts';
 import {
+  DOOR_HP,
+  DOOR_KINDS,
   MAX_HP,
   PIECE_COST,
   STOREY,
@@ -11,10 +13,13 @@ import {
   pieceBounds,
   pieceKey,
   pieceSupported,
+  type DoorKind,
   type Piece,
   type PieceKind,
 } from '../../shared/building.ts';
-import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { CHARGE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
+import { BIOMES, biomeAt } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ASHHOUND } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
@@ -34,7 +39,7 @@ import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
-import { buildDeployable } from './props.ts';
+import { buildCharge, buildDeployable } from './props.ts';
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
@@ -69,8 +74,22 @@ const RESOURCE_SURFACE: Record<ResourceNode['kind'], Surface> = {
   mushroom: 'hemp',
   waterBarrel: 'dirt',
 };
-const SURVIVAL_DEATHS = { starvation: 'You starved to death.', thirst: 'You died of thirst.', radiation: 'Radiation poisoning killed you.', ashhound: 'An Ashhound pack tore you apart.' } as const;
-const SURVIVAL_FEED = { starvation: 'starved', thirst: 'died of thirst', radiation: 'died of radiation poisoning', ashhound: 'was killed by Ashhounds' } as const;
+const SURVIVAL_DEATHS = {
+  starvation: 'You starved to death.',
+  thirst: 'You died of thirst.',
+  radiation: 'Radiation poisoning killed you.',
+  ashhound: 'An Ashhound pack tore you apart.',
+  explosion: 'You were caught in an explosion.',
+} as const;
+const SURVIVAL_FEED = {
+  starvation: 'starved',
+  thirst: 'died of thirst',
+  radiation: 'died of radiation poisoning',
+  ashhound: 'was killed by Ashhounds',
+  explosion: 'blew up',
+} as const;
+/** Seconds before a sleeping bag can be woken up in again (the server holds the real timer). */
+const BAG_COOLDOWN = 60;
 
 interface Remote {
   state: PlayerState;
@@ -203,6 +222,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aiming = false;
   let lastAttack = 0;
   let reloadingUntil = 0;
+  /** When each of your sleeping bags can next be woken up in (performance.now ms). */
+  const bagReadyAt = new Map<number, number>();
   const baseFov = camera.fov;
 
   // Inventory and what is in your hands.
@@ -316,7 +337,18 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'deployable': {
         const old = world.deployables.get(m.id);
         world.setDeployable(m.id, m.d);
-        if (m.d?.kind !== 'lootBag' && old?.kind !== 'lootBag') deployableEffects(old ?? null, m.d);
+        const kind = (m.d ?? old)?.kind;
+        if (kind && kind !== 'lootBag' && !CHARGE_KINDS.includes(kind)) deployableEffects(old ?? null, m.d);
+        if (!old && m.d?.kind === 'beancan') {
+          // The grenade flies there from the thrower's hand before it shows where it landed.
+          const thrower = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
+          const mesh = world.deployableMeshes.get(m.id);
+          if (thrower && mesh) {
+            mesh.visible = false;
+            const from = thrower.root.position.clone().setY(thrower.root.position.y + 1.6);
+            effects.toss(buildCharge('beancan', true), from, new THREE.Vector3(m.d.x, m.d.y, m.d.z), () => (mesh.visible = true));
+          }
+        }
         if (ui.container?.id === m.id) {
           if (m.d) {
             ui.container = m.d;
@@ -362,6 +394,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         if (dead && hp > 0) {
           dead = false;
           me.setDead(false);
+          hud.hideDeath();
         }
         break;
       case 'died': {
@@ -371,11 +404,37 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         ui.hide();
         document.exitPointerLock?.();
         const how = m.item ? ` with a ${ITEMS[m.item].name}` : '';
-        hud.showDeath(m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.', () => net.send({ t: 'respawn' }));
+        const bags = [...world.deployables.values()]
+          .filter((d) => d.kind === 'sleepingBag' && d.owner === welcome.id)
+          .map((d, n) => ({
+            id: d.id,
+            label: `sleeping bag ${n + 1} (${BIOMES[biomeAt(world.seed, d.x, d.z)].name}, ${Math.round(Math.hypot(d.x - controller.position.x, d.z - controller.position.z))} m away)`,
+            wait: () => Math.max(0, Math.ceil(((bagReadyAt.get(d.id) ?? 0) - performance.now()) / 1000)),
+          }));
+        hud.showDeath(
+          m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.',
+          () => net.send({ t: 'respawn' }),
+          bags,
+          (bag) => {
+            net.send({ t: 'respawn', bag });
+            bagReadyAt.set(bag, performance.now() + BAG_COOLDOWN * 1000);
+          },
+        );
         break;
       }
       case 'notice':
         hud.notice(m.text);
+        break;
+      case 'explosion': {
+        const at = new THREE.Vector3(...m.at);
+        effects.explosion(at, m.item, terrainHeight(world.seed, at.x, at.z));
+        break;
+      }
+      case 'codeNeeded':
+        hud.askCode('This door is locked. Enter its code', (code) => {
+          if (code) net.send({ t: 'code', key: m.key, code });
+          canvas.requestPointerLock?.();
+        });
         break;
       case 'kill': {
         const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
@@ -393,6 +452,25 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const b = pieceBounds(p);
     const at = new THREE.Vector3((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
     const surface: Surface = p.material;
+    const was = old?.door;
+    const now = piece?.door;
+    if (old && piece && (was || now)) {
+      const metal = (now ?? was)!.kind === 'metalDoor';
+      const doorAt = new THREE.Vector3(at.x, b.min[1] + 1.1, at.z);
+      if (!was && now) return effects.buildSound(metal ? 'scrap' : 'wood', doorAt);
+      if (was && !now) {
+        effects.breakSound(metal ? 'scrap' : 'wood', doorAt);
+        effects.chipsAt(doorAt, metal ? 'scrap' : 'wood', b.min[1], 18, 1.4);
+        return;
+      }
+      if (was && now && was.open !== now.open) return effects.doorSound(now.open, metal, doorAt);
+      if (was && now && now.hp < was.hp) {
+        effects.gatherSound(metal ? 'scrap' : 'wood', doorAt);
+        effects.chipsAt(doorAt, metal ? 'scrap' : 'wood', b.min[1], 6);
+        return;
+      }
+      if (was && now && was.locked !== now.locked) return effects.uiSound('click');
+    }
     if (!old && piece) {
       effects.buildSound(piece.material, at);
       world.popPiece(pieceKey(piece));
@@ -457,6 +535,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     selectSlot((ui.active + (e.deltaY > 0 ? 1 : -1) + 6) % 6);
   });
   addEventListener('keydown', (e) => {
+    if (hud.codeOpen) return;
     if (e.code === 'Tab' || e.code === 'KeyI') {
       e.preventDefault();
       return ui.open ? closeScreen() : openScreen(null);
@@ -606,6 +685,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   /** Likewise an Ashhound, for melee and feeding. */
   let aimHound: ReturnType<Creatures['ray']> = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
+  /** The face the crosshair is on (world space), and whether it is a door rather than its wall. */
+  let aimNormal: THREE.Vector3 | null = null;
+  let aimDoor = false;
   let proposal: Piece | null = null;
 
   function updateAim() {
@@ -615,6 +697,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     aimResource = null;
     aimDeployable = null;
     aimSurface = null;
+    aimNormal = null;
+    aimDoor = false;
     for (const h of raycaster.intersectObjects(world.pickables, true)) {
       if (!isVisible(h.object)) continue;
       // Ignore things between the camera and the player's back.
@@ -626,6 +710,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const key = h.object.userData.pieceKey as string | undefined;
       const piece = key ? (world.pieces.get(key) ?? null) : null;
       aim = { point: h.point.clone(), piece };
+      aimDoor = !!h.object.userData.door && !!piece?.door;
+      if (h.face) aimNormal = h.face.normal.clone().transformDirection(h.object.matrixWorld);
       // Somewhere a workbench, furnace or box could stand: open ground or the top of a floor.
       if (h.object.name === 'terrain') aimSurface = { point: h.point.clone(), y: terrainHeight(world.seed, h.point.x, h.point.z) };
       else if (piece?.kind === 'floor' && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
@@ -684,6 +770,26 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       if (c) effects.consumeSound(c.rads ? 'pills' : c.food ? 'eat' : 'drink', null);
       return;
     }
+    if (item && isExplosive(item)) return useExplosive(item);
+    if (item && DOOR_KINDS.includes(item as DoorKind)) {
+      const p = aim?.piece;
+      if (p?.kind !== 'wall' || p.edit !== 'door') return hud.notice('Aim at a doorway: press G on a wall to make one');
+      if (p.door) return hud.notice('There is already a door here');
+      if (!inReach(controller.eye, p)) return hud.notice('Too far away');
+      net.send({ t: 'hangDoor', key: pieceKey(p), slot: ui.active });
+      me.swing();
+      return;
+    }
+    if (item === 'codeLock') {
+      const p = aim?.piece;
+      if (!p?.door) return hud.notice('Aim at a door to fit the lock');
+      if (p.door.locked) return hud.notice('This door already has a lock');
+      const slot = ui.active;
+      return hud.askCode('Pick a 4-digit code for this door', (code) => {
+        if (code) net.send({ t: 'lock', key: pieceKey(p), slot, code });
+        canvas.requestPointerLock?.();
+      });
+    }
     if ((aimPlayer || aimHound) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
       if (!proposal) return;
@@ -701,6 +807,39 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     hitTarget();
   }
 
+  /** Throws a beancan, or sticks a satchel or C4 to whatever the crosshair is on. */
+  function useExplosive(item: ExplosiveId) {
+    const now = performance.now();
+    if (now - lastAttack < 800) return;
+    if (item === 'beancan') {
+      lastAttack = now;
+      const look = new THREE.Vector3();
+      camera.getWorldDirection(look);
+      look.y += 0.18;
+      look.normalize();
+      net.send({ t: 'throw', slot: ui.active, d: [look.x, look.y, look.z] });
+      me.swing();
+      effects.swingSound(false, null);
+      return;
+    }
+    const spot = plantSpot(item);
+    if (!spot) return hud.notice('Get closer to a wall, a door or the ground to stick it on');
+    lastAttack = now;
+    net.send({ t: 'plant', slot: ui.active, at: spot, ...(aim?.piece && { key: pieceKey(aim.piece), door: aimDoor }) });
+    me.swing();
+  }
+
+  /** Where a satchel or C4 would sit on the surface under the crosshair, if it is close enough. */
+  function plantSpot(item: 'satchel' | 'c4'): Vec3 | null {
+    if (!aim || !aimNormal || aim.point.distanceTo(controller.eye) > PLANT_RANGE) return null;
+    const [, h, depth] = DEPLOYABLE_INFO[item].size;
+    const p = aim.point.clone();
+    // Stood up on a floor or the ground; against a wall or door, its back to the surface.
+    if (aimNormal.y > 0.7) p.y += h / 2;
+    else p.addScaledVector(aimNormal, depth / 2 + 0.01);
+    return [p.x, p.y, p.z];
+  }
+
   function hitTarget() {
     if (aimResource) {
       if (!resourceInRange(aimResource)) return hud.notice('Get closer to gather');
@@ -713,13 +852,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       me.swing();
     } else if (aim?.piece) {
       if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
-      net.send({ t: 'hit', key: pieceKey(aim.piece) });
+      net.send({ t: 'hit', key: pieceKey(aim.piece), ...(aimDoor && { door: true }) });
       me.swing();
     } else melee();
   }
 
-  /** E: open a furnace or box, or pick a hemp plant. */
+  /** E: open a furnace, box or door, authorise yourself on a tool cupboard, or pick a hemp plant. */
   function interact() {
+    if (aimDeployable?.kind === 'toolCupboard') {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
+      if (aimDeployable.auth?.includes(welcome.id)) return hud.notice('You are already authorised here. G clears everyone else');
+      return net.send({ t: 'authorize', id: aimDeployable.id });
+    }
+    if (aim?.piece?.door) {
+      if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
+      return net.send({ t: 'door', key: pieceKey(aim.piece) });
+    }
     if (aimDeployable && aimDeployable.slots.length > 0) {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
       return openScreen(aimDeployable);
@@ -731,6 +879,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   }
 
   function editTarget() {
+    if (aimDeployable?.kind === 'toolCupboard') {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
+      return net.send({ t: 'clearAuth', id: aimDeployable.id });
+    }
     const piece = aim?.piece;
     if (!piece || piece.kind !== 'wall') return hud.notice('Look at a wall to edit it');
     if (!inReach(controller.eye, piece)) return hud.notice('Too far away');
@@ -763,7 +915,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       ghostKey = key;
     }
     if (proposal) {
-      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
+      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values()) && !blockedAt(pieceBounds(proposal));
       ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
       ghostEdgeMat.color.set(ok ? 0xbfe6ff : 0xffb0a0);
       // A slow pulse, so the preview reads as a preview and not a built piece.
@@ -801,11 +953,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     deployGhost.position.set(aimSurface.point.x, aimSurface.y, aimSurface.point.z);
     deployGhost.rotation.y = controller.yaw;
     deployGhost.visible = true;
-    ghostMat.color.set(0x4fb3ff);
+    ghostMat.color.set(blockedAt(box) ? 0xff5a4a : 0x4fb3ff);
+  }
+
+  /** True inside the range of a tool cupboard that doesn't trust you. */
+  function blockedAt(b: { min: number[]; max: number[] }): boolean {
+    return privilege(world.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, welcome.id) === 'blocked';
   }
 
   function describeTarget(): { text: string; health?: number } {
     const item = held();
+    if (item && isExplosive(item) && item !== 'beancan') {
+      const spot = plantSpot(item);
+      if (!aimPlayer && !aimHound) return { text: spot ? `${ITEMS[item].name}  ·  Left click to stick it here` : `${ITEMS[item].name}  ·  Get close to a wall or door` };
+    }
+    if (item === 'beancan' && !aimPlayer && !aimHound) return { text: 'Beancan Grenade  ·  Left click to throw' };
     if (aimResource?.kind === 'waterBarrel') {
       const r = aimResource;
       if (r.amount <= 0) return { text: 'Rain barrel: dry, it will refill' };
@@ -827,15 +989,41 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (aimDeployable) {
       const d = aimDeployable;
       if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
+      if (CHARGE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  About to blow: get away!` };
+      const mine = d.owner === welcome.id;
+      if (d.kind === 'toolCupboard') {
+        const trusted = d.auth?.includes(welcome.id);
+        const who = d.auth?.length ?? 0;
+        const hints = trusted
+          ? [`You are authorised (${who} ${who === 1 ? 'person' : 'people'})`, 'G to clear everyone else']
+          : ['E to authorise yourself and build here'];
+        if (mine) hints.push('Hit to pick up');
+        return { text: ['Tool Cupboard', ...hints].join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
+      }
+      if (d.kind === 'sleepingBag') {
+        const text = mine ? 'Your sleeping bag  ·  You can wake up here  ·  Hit to pick up' : 'Sleeping bag  ·  Hit to break it';
+        return { text, health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
+      }
       const bench = WORKBENCH_LEVEL[d.kind];
       const hints = [d.slots.length > 0 ? 'E to open' : bench ? `Unlocks level ${bench} recipes nearby` : '', 'Hit to pick up'];
       const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
       return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
     }
+    if (aim?.piece?.door && (aimDoor || item === 'codeLock')) {
+      const door = aim.piece.door;
+      const name = `${ITEMS[door.kind].name}${door.locked ? ' (locked)' : ''}`;
+      const hints = [item === 'codeLock' && !door.locked ? 'Left click to fit the lock' : `E to ${door.open ? 'close' : 'open'}`, 'Left click to hit'];
+      return { text: [name, ...hints].join('  ·  '), health: door.hp / DOOR_HP[door.kind] };
+    }
+    if (item && DOOR_KINDS.includes(item as DoorKind) && aim?.piece?.kind === 'wall') {
+      const p = aim.piece;
+      return { text: p.edit !== 'door' ? 'Make a doorway first: press G on the wall' : p.door ? 'There is already a door here' : 'Doorway  ·  Left click to hang the door' };
+    }
+    if (item === 'buildingPlan' && proposal && blockedAt(pieceBounds(proposal))) return { text: "Building blocked: someone else's tool cupboard is near" };
     if (aim?.piece && (item !== 'buildingPlan' || aim.piece.kind === 'wall')) {
       const p = aim.piece;
       const name = `${ITEMS[p.material].name} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind].toLowerCase()}`;
-      const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : ''].filter(Boolean);
+      const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : '', p.door ? `E to ${p.door.open ? 'close' : 'open'} the door` : ''].filter(Boolean);
       return { text: [name, ...hints].join('  ·  '), health: p.hp / MAX_HP[p.material] };
     }
     if (item === 'buildingPlan' && proposal && countItem(slots, material) < PIECE_COST) return { text: `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}` };
@@ -957,6 +1145,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       dayNight.held = phase;
       if (weather !== undefined) dayNight.forced = weather;
     },
+    /** Sends any message to the server as this player, for tests and screenshots. */
+    send: (m: Parameters<Net['send']>[0]) => net.send(m),
+    /** What the crosshair is on: a piece key, a door, a deployable, and where. */
+    aimInfo: () => ({ key: aim?.piece ? pieceKey(aim.piece) : null, door: aimDoor, deployable: aimDeployable?.id ?? null, point: aim?.point.toArray() ?? null }),
     storey: STOREY,
     iconUrl: (item: ItemId) => itemIconUrl(item),
   };
@@ -965,6 +1157,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const timer = new THREE.Timer();
   let sendTimer = 0;
   let time = 0;
+  let chargeIn = 0;
   gfx.renderer.setAnimationLoop((now) => {
     timer.update(now);
     // The first frame's timestamp can come from before the timer started; never step backwards.
@@ -1003,6 +1196,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (fixedView) {
       camera.position.fromArray(fixedView.from);
       camera.lookAt(new THREE.Vector3().fromArray(fixedView.to));
+    }
+
+    // A nearby blast shakes the view.
+    if (effects.shake > 0.01) {
+      const k = effects.shake * 0.09;
+      camera.position.add(new THREE.Vector3((Math.random() - 0.5) * k, (Math.random() - 0.5) * k, (Math.random() - 0.5) * k));
+      effects.shake *= Math.exp(-dt * 5);
+    }
+    // Lit charges beep or hiss.
+    chargeIn -= dt;
+    if (chargeIn <= 0) {
+      chargeIn = 0.9;
+      for (const d of world.deployables.values()) if (CHARGE_KINDS.includes(d.kind)) effects.chargeSound(d.kind as ExplosiveId, new THREE.Vector3(d.x, d.y, d.z));
     }
 
     for (const r of remotes.values()) {

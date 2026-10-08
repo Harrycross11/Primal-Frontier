@@ -183,13 +183,62 @@ export class Hud {
     $('crosshair').hidden = on;
   }
 
-  showDeath(text: string, onRespawn: () => void) {
+  /**
+   * The death screen, with a button for each of your sleeping bags (greyed out while it cools
+   * down). It stays up until you are actually back on your feet.
+   */
+  showDeath(text: string, onRespawn: () => void, bags: { id: number; label: string; wait: () => number }[] = [], onBag: (id: number) => void = () => {}) {
     $('death-text').textContent = text;
     $('death').hidden = false;
-    $('respawn').onclick = () => {
-      $('death').hidden = true;
-      onRespawn();
+    $('respawn').onclick = onRespawn;
+    const list = $('bags');
+    list.replaceChildren();
+    for (const bag of bags) {
+      const button = document.createElement('button');
+      button.onclick = () => onBag(bag.id);
+      list.append(button);
+      const tick = () => {
+        if ($('death').hidden || !button.isConnected) return;
+        const wait = bag.wait();
+        button.disabled = wait > 0;
+        button.textContent = wait > 0 ? `${bag.label} (ready in ${wait} s)` : `Wake up in ${bag.label}`;
+        setTimeout(tick, 500);
+      };
+      tick();
+    }
+  }
+
+  hideDeath() {
+    $('death').hidden = true;
+  }
+
+  /** Whether the code pad is up, so keys go to it and not the game. */
+  get codeOpen(): boolean {
+    return !$('code').hidden;
+  }
+
+  /** Asks for a 4-digit code; `done` gets it, or nothing if cancelled. */
+  askCode(title: string, done: (code: string | null) => void) {
+    const box = $('code');
+    const input = $('code-input') as HTMLInputElement;
+    $('code-title').textContent = title;
+    input.value = '';
+    box.hidden = false;
+    document.exitPointerLock?.();
+    setTimeout(() => input.focus(), 0);
+    const finish = (code: string | null) => {
+      box.hidden = true;
+      input.onkeydown = null;
+      done(code);
     };
+    input.oninput = () => (input.value = input.value.replace(/\D/g, '').slice(0, 4));
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && input.value.length === 4) finish(input.value);
+      if (e.key === 'Escape') finish(null);
+    };
+    $('code-ok').onclick = () => input.value.length === 4 && finish(input.value);
+    $('code-cancel').onclick = () => finish(null);
   }
 
   disconnected() {

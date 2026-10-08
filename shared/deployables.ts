@@ -5,9 +5,23 @@
 import type { Box } from './building.ts';
 import { INVENTORY_SIZE, emptySlots, type ItemId, type Slots } from './items.ts';
 
-export type DeployableKind = 'workbench' | 'workbench2' | 'workbench3' | 'furnace' | 'storageBox' | 'lootBag';
+export type DeployableKind =
+  | 'workbench'
+  | 'workbench2'
+  | 'workbench3'
+  | 'furnace'
+  | 'storageBox'
+  | 'toolCupboard'
+  | 'sleepingBag'
+  | 'lootBag'
+  // Explosives once they are lit: thrown, or stuck to a wall or door.
+  | 'beancan'
+  | 'satchel'
+  | 'c4';
 /** The kinds that come from an item of the same name and can be placed. */
-export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox'];
+export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox', 'toolCupboard', 'sleepingBag'];
+/** Lit explosives waiting to go off. */
+export const CHARGE_KINDS: DeployableKind[] = ['beancan', 'satchel', 'c4'];
 
 export interface Deployable {
   id: number;
@@ -26,6 +40,8 @@ export interface Deployable {
   on: boolean;
   /** Loot bags: whose they were. */
   label?: string;
+  /** Tool cupboards: the players allowed to build near it. */
+  auth?: number[];
 }
 
 export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [number, number, number]; hp: number; slots: number }> = {
@@ -34,8 +50,31 @@ export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [numb
   workbench3: { name: 'Workbench Level 3', size: [2.0, 1.05, 1.0], hp: 800, slots: 0 },
   furnace: { name: 'Furnace', size: [1.0, 1.7, 1.0], hp: 400, slots: 6 },
   storageBox: { name: 'Storage Box', size: [1.0, 0.62, 0.62], hp: 150, slots: 12 },
+  toolCupboard: { name: 'Tool Cupboard', size: [0.9, 1.75, 0.55], hp: 600, slots: 0 },
+  sleepingBag: { name: 'Sleeping Bag', size: [0.8, 0.14, 1.9], hp: 100, slots: 0 },
   lootBag: { name: 'Loot Bag', size: [0.7, 0.45, 0.7], hp: 40, slots: INVENTORY_SIZE },
+  beancan: { name: 'Beancan Grenade', size: [0.14, 0.16, 0.14], hp: 1e9, slots: 0 },
+  satchel: { name: 'Satchel Charge', size: [0.3, 0.3, 0.16], hp: 1e9, slots: 0 },
+  c4: { name: 'Timed Explosive Charge', size: [0.3, 0.22, 0.12], hp: 1e9, slots: 0 },
 };
+
+/** Metres round a tool cupboard (across the ground) where only those it trusts may build. */
+export const TC_RANGE = 18;
+
+/**
+ * Whether a player may build at a spot: 'none' outside every tool cupboard's reach,
+ * 'authorised' inside only cupboards that trust them, 'blocked' inside any that doesn't.
+ */
+export function privilege(deployables: Iterable<Deployable>, x: number, z: number, player: number): 'none' | 'authorised' | 'blocked' {
+  let result: 'none' | 'authorised' = 'none';
+  for (const d of deployables) {
+    if (d.kind !== 'toolCupboard' || Math.hypot(d.x - x, d.z - z) > TC_RANGE) continue;
+    if (!d.auth?.includes(player)) return 'blocked';
+    result = 'authorised';
+  }
+  return result;
+}
+
 
 export const WORKBENCH_LEVEL: Partial<Record<DeployableKind, 1 | 2 | 3>> = { workbench: 1, workbench2: 2, workbench3: 3 };
 
@@ -57,7 +96,10 @@ export const LOOT_BAG_SECONDS = 300;
 
 export function newDeployable(id: number, kind: DeployableKind, x: number, y: number, z: number, rot: number, owner: number): Deployable {
   const info = DEPLOYABLE_INFO[kind];
-  return { id, kind, x, y, z, rot, hp: info.hp, owner, slots: emptySlots(info.slots), on: false };
+  const d: Deployable = { id, kind, x, y, z, rot, hp: info.hp, owner, slots: emptySlots(info.slots), on: false };
+  // Whoever sets down a tool cupboard is the first one it trusts.
+  if (kind === 'toolCupboard') d.auth = [owner];
+  return d;
 }
 
 /** The space a deployable takes up, as an axis-aligned box (rotations are rounded to the wider fit). */

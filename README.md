@@ -31,6 +31,12 @@ This repository is the **browser prototype**, built step by step. Milestones don
 - Wildlife: five packs of Ashhounds (three in Deadwood), ash-grey mutated hyenas (a scanned, animated model), roam round their dens. Come close and the pack hunts you down, snarling and biting at your legs; sprint and you can just outrun them. Kill one for raw meat and cook it in the furnace. Hold out cooked meat to a wild hound (left click when it is close) three times and it is yours: it wears a red rag collar and your name, follows you and goes for anyone who fights you. Feed it more meat to heal it. Each survivor can keep two, and tame hounds are saved with the world.
 - Combat: 100 health, bandages and syringes to heal. Dying drops everything in a loot bag anyone can open, and you respawn with a rock. The server traces every shot, so walls and the ground stop bullets.
 - Fortnite-style building on a 3 m grid with the building plan in hand: walls, floors and stairs in wood, stone or scrap (10 each). Walls can be edited into a window, a door or a half wall. Pieces must connect to the ground or another piece. Hit a piece to damage it; stone and scrap are tougher than wood.
+- Bases you can protect and raid, Rust-style:
+  - **Tool cupboard** (300 wood): set it down inside your base. Nobody else can build, set things down or edit walls within 18 m, and their hits barely scratch your wooden walls and do nothing to stone or scrap. Press **E** on it to let a friend build too, and **G** to clear everyone else. Without one, anyone can knock your walls down by hand.
+  - **Doors**: press **G** on a wall to make a doorway, then hang a wooden door (150 wood) or a sheet metal door (150 metal, workbench 1) in it. **E** opens and closes them.
+  - **Code locks** (100 metal, workbench 1): fit one to a door and pick a 4-digit code. Only you, and whoever you tell the code, can open it. A wrong code shocks you.
+  - **Sleeping bags** (30 cloth): lay one down and you can wake up in it when you die, once a minute.
+  - **Explosives**: beancan grenades you throw (60 gunpowder, 20 metal, workbench 1), satchel charges you stick to a wall or door (4 beancans, 10 cloth, workbench 1), and timed explosive charges, C4 (5 explosives and 5 cloth at workbench 3; explosives are 50 gunpowder, 10 sulfur and 10 metal at workbench 2). Two satchels blow open a wooden wall or door and three a stone or scrap wall; one C4 takes out any wall or a wooden door, two a metal door. Blasts hurt anyone nearby who isn't behind a wall.
 - Movement handles everything you build: walk up stairs, stand on floors, walk through doors.
 - The server checks every action (reach, cost, cooldowns, movement speed), so players can't cheat by editing the client.
 
@@ -86,7 +92,6 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-1. Bases you can protect and raid: a tool cupboard, doors with code locks, sleeping bags to respawn at, and explosives
-2. Places worth looting: a ruined landmark in each land with crates, and air drops
-3. More creatures, one for each land, and riding the bigger ones
-4. More building pieces: roofs, ramps, foundations and doorways
+1. Places worth looting: a ruined landmark in each land with crates, and air drops
+2. More creatures, one for each land, and riding the bigger ones
+3. More building pieces: roofs, ramps, foundations and doorways

@@ -36,7 +36,7 @@ export interface SlotRef {
 }
 
 /** What killed someone when no player did: hunger, thirst, radiation or a wild Ashhound. */
-export type DeathCause = SurvivalCause | 'ashhound';
+export type DeathCause = SurvivalCause | 'ashhound' | 'explosion';
 
 export interface CraftJob {
   item: ItemId;
@@ -52,7 +52,8 @@ export type ClientMessage =
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }
   | { t: 'place'; kind: PieceKind; i: number; y: number; k: number; dir: number; material: Material }
-  | { t: 'hit'; key: string }
+  /** Hit a building piece, or the door hung in it. */
+  | { t: 'hit'; key: string; door?: boolean }
   | { t: 'hitDeployable'; id: number }
   | { t: 'edit'; key: string; edit: WallEdit }
   | { t: 'craft'; item: ItemId; count: number }
@@ -68,7 +69,23 @@ export type ClientMessage =
   | { t: 'melee'; slot: number; d: Vec3 }
   /** Use a bandage or syringe, eat, drink or take pills. */
   | { t: 'use'; slot: number }
-  | { t: 'respawn' };
+  /** Wake up somewhere random, or in one of your sleeping bags. */
+  | { t: 'respawn'; bag?: number }
+  /** Ask a tool cupboard to trust you, or make it forget everyone else. */
+  | { t: 'authorize'; id: number }
+  | { t: 'clearAuth'; id: number }
+  /** Hang the door in a belt slot in a doorway. */
+  | { t: 'hangDoor'; key: string; slot: number }
+  /** Open or close a door. */
+  | { t: 'door'; key: string }
+  /** Fit the code lock in a belt slot to a door, with a 4-digit code. */
+  | { t: 'lock'; key: string; slot: number; code: string }
+  /** Try a code on someone else's locked door. */
+  | { t: 'code'; key: string; code: string }
+  /** Stick the charge in a belt slot at a point on a wall, door, floor or the ground. */
+  | { t: 'plant'; slot: number; at: Vec3; key?: string; door?: boolean }
+  /** Throw the grenade in a belt slot from your eyes along `d`. */
+  | { t: 'throw'; slot: number; d: Vec3 };
 
 export type ServerMessage =
   | {
@@ -116,4 +133,8 @@ export type ServerMessage =
   | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
   | { t: 'died'; by: string | null; item: ItemId | null; cause?: DeathCause }
+  /** Something blew up. */
+  | { t: 'explosion'; at: Vec3; item: 'beancan' | 'satchel' | 'c4' }
+  /** That door is locked: ask for its code. */
+  | { t: 'codeNeeded'; key: string }
   | { t: 'full' };

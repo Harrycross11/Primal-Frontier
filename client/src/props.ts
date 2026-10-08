@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { DOORWAY, type DoorKind } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
@@ -311,6 +312,35 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
       fireMat.emissiveIntensity = on ? 2.2 : 0;
       light.intensity = on ? 6 : 0;
     };
+  } else if (kind === 'toolCupboard') {
+    // A tall plank cabinet with its tools hung on the front: a hammer, a saw and a wrench.
+    g.add(mesh(new RoundedBoxGeometry(w, h, l, 2, 0.02), plankMat(), 0, h / 2, 0));
+    for (const x of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(w / 2 - 0.06, h - 0.3, 0.02), plain(0x5a4630, 0.9), x * (w / 4), h / 2 + 0.05, l / 2 + 0.01));
+    g.add(mesh(new THREE.BoxGeometry(w + 0.04, 0.08, l + 0.04), plankMat(), 0, h - 0.04, 0));
+    g.add(mesh(new THREE.BoxGeometry(w + 0.02, 0.1, l + 0.02), plankMat(), 0, 0.05, 0));
+    for (const x of [-0.03, 0.03]) g.add(mesh(new THREE.BoxGeometry(0.02, 0.1, 0.03), metalMat(), x, h * 0.55, l / 2 + 0.03));
+    const hammer = new THREE.Group();
+    hammer.add(mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.34, 8), handleMat(), 0, 0, 0));
+    hammer.add(mesh(new THREE.BoxGeometry(0.13, 0.05, 0.05), steelMat(), 0.02, 0.17, 0));
+    hammer.position.set(-w / 4, h * 0.62, l / 2 + 0.05);
+    hammer.rotation.z = 0.2;
+    g.add(hammer);
+    const saw = mesh(new THREE.BoxGeometry(0.1, 0.36, 0.006), steelMat(), w / 4, h * 0.6, l / 2 + 0.04);
+    saw.rotation.z = -0.15;
+    g.add(saw, mesh(new THREE.BoxGeometry(0.12, 0.06, 0.03), handleMat(), w / 4 - 0.03, h * 0.6 + 0.2, l / 2 + 0.04));
+    // A rusty sign on top so it reads at a glance.
+    g.add(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.02), rustMat(), 0, h + 0.08, l / 2 - 0.06));
+  } else if (kind === 'sleepingBag') {
+    // A quilted bag laid flat, with a rolled pillow at the head.
+    const bag = mesh(new RoundedBoxGeometry(w, h, l, 3, 0.06), plain(0x4f5a3a, 1), 0, h / 2, 0);
+    g.add(bag);
+    for (let n = 1; n < 6; n++) g.add(mesh(new THREE.BoxGeometry(w - 0.04, 0.01, 0.02), plain(0x3f4a2e, 1), 0, h + 0.002, -l / 2 + (n * l) / 6));
+    g.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, w - 0.1, 12).rotateZ(Math.PI / 2), plain(0x8a7d64, 1), 0, h + 0.06, -l / 2 + 0.18));
+    g.add(mesh(new THREE.BoxGeometry(w * 0.6, 0.02, 0.5), plain(0x6a3a2a, 1), 0, h + 0.005, l / 2 - 0.4));
+  } else if (kind === 'beancan' || kind === 'satchel' || kind === 'c4') {
+    const charge = buildCharge(kind, true);
+    g.add(charge);
+    g.userData.tick = charge.userData.tick;
   } else if (kind === 'lootBag') {
     // A stuffed canvas sack left where someone died.
     const sack = mesh(new THREE.SphereGeometry(0.34, 14, 10), plain(0x6a5d44, 1), 0, 0.26, 0);
@@ -455,6 +485,40 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       g.userData.flame = flame;
       return g;
     }
+    case 'woodenDoor':
+    case 'metalDoor': {
+      // A small leaf held at its edge.
+      const leaf = buildDoorLeaf(item, false);
+      leaf.scale.setScalar(0.3);
+      leaf.position.set(-0.02, -0.15, 0);
+      g.add(leaf);
+      return g;
+    }
+    case 'codeLock':
+      g.add(buildKeypad(true));
+      g.children[0].position.set(0, 0.04, 0.03);
+      return g;
+    case 'beancan':
+    case 'satchel':
+    case 'c4': {
+      const charge = buildCharge(item, false);
+      charge.position.y = item === 'beancan' ? -0.04 : -0.08;
+      g.add(charge);
+      return g;
+    }
+    case 'explosives': {
+      // Three paper-wrapped sticks taped into a bundle.
+      for (const [x, z] of [
+        [-0.022, 0],
+        [0.022, 0],
+        [0, 0.036],
+      ]) {
+        g.add(mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.22, 12), plain(0xa83a2a, 0.75), x, 0.06, z));
+        g.add(mesh(new THREE.CircleGeometry(0.02, 12).rotateX(-Math.PI / 2), plain(0xd8c8a0, 0.9), x, 0.171, z));
+      }
+      for (const y of [0.0, 0.12]) g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 14), tapeMat(), 0, y, 0.012));
+      return g;
+    }
     case 'buildingPlan': {
       // A rolled blueprint tied with string.
       g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));
@@ -479,4 +543,128 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       return g;
     }
   }
+}
+
+/**
+ * A door for a doorway, hinged at its left edge (the origin) and standing along +x, facing +z
+ * and -z alike: boards with battens and a Z-brace, or a riveted steel sheet. A fitted code lock
+ * shows on both faces.
+ */
+export function buildDoorLeaf(kind: DoorKind, locked: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const W = DOORWAY.to - DOORWAY.from - 0.04;
+  const H = DOORWAY.height - 0.03;
+  const T = 0.05;
+  const x0 = 0.02;
+  if (kind === 'woodenDoor') {
+    const boards = 5;
+    for (let n = 0; n < boards; n++) {
+      const bw = W / boards - 0.006;
+      const board = mesh(new THREE.BoxGeometry(bw, H - (n % 2) * 0.02, T), plankMat(), x0 + (n + 0.5) * (W / boards), H / 2, 0);
+      g.add(board);
+    }
+    for (const side of [-1, 1]) {
+      for (const y of [0.3, H - 0.3]) g.add(mesh(new THREE.BoxGeometry(W - 0.08, 0.13, 0.035), plankMat(), x0 + W / 2, y, side * (T / 2 + 0.017)));
+      const brace = mesh(new THREE.BoxGeometry(Math.hypot(W - 0.16, H - 0.6), 0.11, 0.03), plankMat(), x0 + W / 2, H / 2, side * (T / 2 + 0.015));
+      brace.rotation.z = Math.atan2(H - 0.6, W - 0.16) * (side > 0 ? 1 : -1);
+      g.add(brace);
+      // Black iron strap hinges.
+      for (const y of [0.3, H - 0.3]) g.add(mesh(new THREE.BoxGeometry(0.42, 0.05, 0.008), plain(0x1d1b19, 0.6, 0.7), x0 + 0.2, y, side * (T / 2 + 0.04)));
+    }
+  } else {
+    g.add(mesh(new THREE.BoxGeometry(W, H, T * 0.6), rustMat(), x0 + W / 2, H / 2, 0));
+    for (const side of [-1, 1]) {
+      const z = side * (T * 0.3 + 0.012);
+      // A welded frame round the sheet, a stiffener across the middle, and rivets.
+      g.add(mesh(new THREE.BoxGeometry(W, 0.08, 0.024), metalMat(), x0 + W / 2, 0.04, z));
+      g.add(mesh(new THREE.BoxGeometry(W, 0.08, 0.024), metalMat(), x0 + W / 2, H - 0.04, z));
+      g.add(mesh(new THREE.BoxGeometry(0.08, H, 0.024), metalMat(), x0 + 0.04, H / 2, z));
+      g.add(mesh(new THREE.BoxGeometry(0.08, H, 0.024), metalMat(), x0 + W - 0.04, H / 2, z));
+      g.add(mesh(new THREE.BoxGeometry(W - 0.1, 0.07, 0.02), metalMat(), x0 + W / 2, H * 0.48, z));
+      for (let n = 0; n < 8; n++) {
+        for (const y of [0.04, H - 0.04]) g.add(mesh(new THREE.SphereGeometry(0.012, 6, 4), steelMat(), x0 + 0.1 + (n * (W - 0.2)) / 7, y, z + side * 0.014));
+      }
+    }
+  }
+  // A pull handle on each face.
+  for (const side of [-1, 1]) {
+    const handle = mesh(new THREE.TorusGeometry(0.05, 0.01, 6, 12, Math.PI).rotateZ(-Math.PI / 2), plain(0x2a2826, 0.5, 0.8), x0 + W - 0.13, 1.0, side * (T / 2 + 0.03));
+    g.add(handle);
+    if (locked) {
+      const pad = buildKeypad(false);
+      pad.position.set(x0 + W - 0.13, 1.2, side * (T / 2 + 0.02));
+      if (side < 0) pad.rotation.y = Math.PI;
+      g.add(pad);
+    }
+  }
+  return g;
+}
+
+/** A code lock's keypad: a steel box with a grid of buttons and a green light, facing +z. */
+function buildKeypad(held: boolean): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new RoundedBoxGeometry(0.09, 0.15, 0.035, 2, 0.008), plain(0x3a3e42, 0.45, 0.7), 0, 0, 0));
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) g.add(mesh(new THREE.BoxGeometry(0.018, 0.016, 0.008), plain(0xb8bcc0, 0.5, 0.6), -0.024 + c * 0.024, 0.035 - r * 0.024, 0.02));
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), new THREE.MeshStandardMaterial({ color: 0x6cff6a, emissive: 0x3cff4a, emissiveIntensity: 2 }));
+  led.position.set(0.03, 0.062, 0.018);
+  g.add(led);
+  if (held) g.rotation.x = -0.4;
+  return g;
+}
+
+/**
+ * A charge: a beancan grenade (a food tin with a fuse), a satchel charge (a canvas bag of
+ * cans with a fuse), or C4 (taped blocks, wires and a timer). Lit ones spark or blink. Each
+ * stands with its back against -z and its base at y = 0.
+ */
+export function buildCharge(kind: 'beancan' | 'satchel' | 'c4', lit: boolean): THREE.Group {
+  const g = new THREE.Group();
+  let spark: THREE.Object3D | null = null;
+  let led: THREE.MeshStandardMaterial | null = null;
+  const sparkAt = (x: number, y: number, z: number) => {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+    s.position.set(x, y, z);
+    s.userData.noAO = true;
+    g.add(s);
+    spark = s;
+  };
+  if (kind === 'beancan') {
+    g.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.12, 16), plain(0x9a9c9a, 0.4, 0.8), 0, 0.06, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.07, 16, 1, true), plain(0xb04a2a, 0.8), 0, 0.06, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6), plain(0x3a2a1c, 1), 0.01, 0.145, 0));
+    if (lit) sparkAt(0.01, 0.17, 0);
+  } else if (kind === 'satchel') {
+    const bag = mesh(new RoundedBoxGeometry(0.28, 0.24, 0.13, 3, 0.04), plain(0x6a5d44, 1), 0, 0.12, 0);
+    g.add(bag);
+    g.add(mesh(new THREE.BoxGeometry(0.29, 0.1, 0.14), plain(0x5a4e38, 1), 0, 0.2, 0.004));
+    const strap = mesh(new THREE.TorusGeometry(0.11, 0.012, 6, 16, Math.PI), plain(0x3a3026, 1), 0, 0.24, 0);
+    g.add(strap);
+    for (const x of [-0.07, 0, 0.07]) g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 12), plain(0x9a9c9a, 0.4, 0.8), x, 0.255, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 6).rotateZ(0.6), plain(0x3a2a1c, 1), 0.1, 0.28, 0.02));
+    if (lit) sparkAt(0.125, 0.31, 0.02);
+  } else {
+    for (const x of [-0.07, 0.07]) g.add(mesh(new THREE.BoxGeometry(0.12, 0.2, 0.07), plain(0xc8b98a, 0.9), x, 0.1, -0.01));
+    for (const y of [0.05, 0.15]) g.add(mesh(new THREE.BoxGeometry(0.27, 0.03, 0.075), tapeMat(), 0, y, -0.008));
+    g.add(mesh(new RoundedBoxGeometry(0.1, 0.07, 0.03, 2, 0.006), plain(0x1e2124, 0.5, 0.4), 0, 0.12, 0.035));
+    const screen = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a1a, emissiveIntensity: lit ? 1.5 : 0.4 });
+    g.add(mesh(new THREE.PlaneGeometry(0.06, 0.025), screen, 0, 0.125, 0.051));
+    led = screen;
+    for (const [x, c] of [
+      [-0.04, 0xc8302a],
+      [0.0, 0x2a6ac8],
+      [0.04, 0xd8c040],
+    ] as const) {
+      const wire = mesh(new THREE.TorusGeometry(0.04, 0.004, 5, 10, Math.PI), plain(c, 0.6), x, 0.2, 0.02);
+      wire.rotation.y = Math.PI / 2;
+      g.add(wire);
+    }
+  }
+  if (lit) {
+    // Called each frame by the world: sparks gutter, the timer blinks faster as it runs down.
+    g.userData.tick = (t: number) => {
+      if (spark) spark.scale.setScalar(0.7 + Math.random() * 0.8);
+      if (led) led.emissiveIntensity = Math.sin(t * 9) > 0 ? 3 : 0.3;
+    };
+  }
+  return g;
 }

@@ -29,6 +29,16 @@ export type ItemId =
   | 'workbench3'
   | 'furnace'
   | 'storageBox'
+  | 'toolCupboard'
+  | 'sleepingBag'
+  | 'woodenDoor'
+  | 'metalDoor'
+  | 'codeLock'
+  // Explosives
+  | 'beancan'
+  | 'satchel'
+  | 'explosives'
+  | 'c4'
   // Melee weapons
   | 'woodenSpear'
   | 'stoneSpear'
@@ -162,7 +172,7 @@ export interface ConsumeInfo {
 
 export interface ItemInfo {
   name: string;
-  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour' | 'food';
+  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour' | 'food' | 'explosive';
   stack: number;
   description: string;
   tool?: ToolInfo;
@@ -256,6 +266,20 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   workbench3: { name: 'Workbench Level 3', kind: 'deployable', stack: 1, description: 'Unlocks the assault rifles, sniper rifles and the M249.' },
   furnace: { name: 'Furnace', kind: 'deployable', stack: 1, description: 'Burns wood to smelt metal, sulfur and high quality ore.' },
   storageBox: { name: 'Storage Box', kind: 'deployable', stack: 1, description: 'Holds 12 stacks of items.' },
+  toolCupboard: {
+    name: 'Tool Cupboard',
+    kind: 'deployable',
+    stack: 1,
+    description: 'Put it inside your base. Nobody else can build within 18 m, and their hits barely scratch your walls. Press E on it to let a friend build too.',
+  },
+  sleepingBag: { name: 'Sleeping Bag', kind: 'deployable', stack: 1, description: 'Lay it down in your base and wake up there when you die.' },
+  woodenDoor: { name: 'Wooden Door', kind: 'deployable', stack: 1, description: 'Hang it in a doorway (edit a wall with G). E opens and closes it.' },
+  metalDoor: { name: 'Sheet Metal Door', kind: 'deployable', stack: 1, description: 'A much tougher door. Takes five satchel charges or two C4 to blow open.' },
+  codeLock: { name: 'Code Lock', kind: 'deployable', stack: 5, description: 'Fit it to a door and pick a 4-digit code. Only you, and whoever knows the code, can open it.' },
+  beancan: { name: 'Beancan Grenade', kind: 'explosive', stack: 10, description: 'Thrown with left click. Blows up after a few seconds: hurts people and chips at walls.' },
+  satchel: { name: 'Satchel Charge', kind: 'explosive', stack: 10, description: 'Left click to stick it to a wall or door. Two blow open a wooden wall or door, three a stone one.' },
+  explosives: res('Explosives', 'Packed gunpowder and sulfur. Needed for timed explosive charges.'),
+  c4: { name: 'Timed Explosive Charge', kind: 'explosive', stack: 10, description: 'C4. Left click to stick it to a wall or door. One takes out any wall or a wooden door.' },
 
   woodenSpear: melee('Wooden Spear', 'A sharpened stick with a long reach.', 30, 0.9, 3, 120),
   stoneSpear: melee('Stone Spear', 'A wooden spear with a stone tip. Hits harder.', 40, 0.9, 3, 160),
@@ -518,8 +542,8 @@ export interface Recipe {
   category: RecipeCategory;
 }
 
-export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Ammo' | 'Armour' | 'Medical' | 'Resources';
-export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Ammo', 'Armour', 'Medical', 'Resources'];
+export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Explosives' | 'Ammo' | 'Armour' | 'Medical' | 'Resources';
+export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Explosives', 'Ammo', 'Armour', 'Medical', 'Resources'];
 
 export const RECIPES: Recipe[] = [
   { item: 'rock', count: 1, cost: { stone: 10 }, time: 1, category: 'Tools' },
@@ -532,6 +556,11 @@ export const RECIPES: Recipe[] = [
   { item: 'storageBox', count: 1, cost: { wood: 100 }, time: 4, category: 'Construction' },
   { item: 'furnace', count: 1, cost: { stone: 150, wood: 50, cloth: 10 }, time: 6, category: 'Construction' },
   { item: 'workbench', count: 1, cost: { wood: 250, metal: 50, scrap: 50 }, time: 10, category: 'Construction' },
+  { item: 'toolCupboard', count: 1, cost: { wood: 300 }, time: 6, category: 'Construction' },
+  { item: 'sleepingBag', count: 1, cost: { cloth: 30 }, time: 3, category: 'Construction' },
+  { item: 'woodenDoor', count: 1, cost: { wood: 150 }, time: 4, category: 'Construction' },
+  { item: 'metalDoor', count: 1, cost: { metal: 150 }, time: 8, workbench: 1, category: 'Construction' },
+  { item: 'codeLock', count: 1, cost: { metal: 100 }, time: 5, workbench: 1, category: 'Construction' },
   { item: 'workbench2', count: 1, cost: { metal: 500, hqm: 20, scrap: 200 }, time: 15, workbench: 1, category: 'Construction' },
   { item: 'workbench3', count: 1, cost: { metal: 1000, hqm: 100, scrap: 500 }, time: 20, workbench: 2, category: 'Construction' },
 
@@ -577,6 +606,11 @@ export const RECIPES: Recipe[] = [
   { item: 'svd', count: 1, cost: { metal: 500, hqm: 80, wood: 150 }, time: 30, workbench: 3, category: 'Weapons' },
   { item: 'm60', count: 1, cost: { metal: 650, hqm: 100, scrap: 300 }, time: 35, workbench: 3, category: 'Weapons' },
   { item: 'm82', count: 1, cost: { metal: 800, hqm: 150, scrap: 400 }, time: 40, workbench: 3, category: 'Weapons' },
+
+  { item: 'beancan', count: 1, cost: { gunpowder: 60, metal: 20 }, time: 4, workbench: 1, category: 'Explosives' },
+  { item: 'satchel', count: 1, cost: { beancan: 4, cloth: 10 }, time: 5, workbench: 1, category: 'Explosives' },
+  { item: 'explosives', count: 1, cost: { gunpowder: 50, sulfur: 10, metal: 10 }, time: 5, workbench: 2, category: 'Explosives' },
+  { item: 'c4', count: 1, cost: { explosives: 5, cloth: 5 }, time: 10, workbench: 3, category: 'Explosives' },
 
   { item: 'arrow', count: 2, cost: { wood: 25, stone: 10 }, time: 1, category: 'Ammo' },
   { item: 'handmadeShell', count: 2, cost: { stone: 5, gunpowder: 5 }, time: 1, category: 'Ammo' },

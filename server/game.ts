@@ -16,22 +16,28 @@ import type { CraftJob, DeathCause, PlayerState, ServerMessage, SlotRef } from '
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
 import { cleanLook } from '../shared/look.ts';
 import {
+  DOOR_HP,
+  DOOR_KINDS,
   HIT_DAMAGE,
   MAX_HP,
   PIECE_COST,
   WALL_EDITS,
   boxesTouch,
+  doorBox,
   pieceBounds,
   pieceBoxes,
   pieceKey,
   pieceSupported,
   validPieceShape,
   type Box,
+  type DoorKind,
   type Piece,
   type PieceKind,
   type WallEdit,
 } from '../shared/building.ts';
 import {
+  CHARGE_KINDS,
+  DEPLOYABLE_INFO,
   DEPLOYABLE_KINDS,
   FURNACE_FUEL,
   FURNACE_ORE_SLOTS,
@@ -42,6 +48,7 @@ import {
   WORKBENCH_LEVEL,
   deployableBox,
   newDeployable,
+  privilege,
   slotAccepts,
   type Deployable,
   type DeployableKind,
@@ -81,6 +88,7 @@ import {
   spreadDir,
   type Vec3,
 } from '../shared/combat.ts';
+import { EXPLOSIVES, PLANT_RANGE, POINT_BLANK, THROW_SPEED, blastFalloff, isExplosive, type ExplosiveId } from '../shared/explosives.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
 import { CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
@@ -164,6 +172,25 @@ export interface WorldSave {
   survivors: [string, Sleeper][];
   /** Tame hounds (wild ones are born afresh). */
   hounds?: SavedHound[];
+  /** Code locks by the key of the wall their door hangs in. */
+  locks?: [string, Lock][];
+  /** Lit charges: ms left on each fuse, and what it is stuck to. */
+  fuses?: [number, { in: number; key?: string; door?: boolean }][];
+  /** Sleeping bags still cooling down: ms until each can be used again. */
+  bagCooldowns?: [number, number][];
+}
+
+/** A code lock's code, and everyone who has opened it with the code (its owner first). */
+interface Lock {
+  code: string;
+  auth: number[];
+}
+
+/** A lit charge: when it goes off (ms), and the wall or door it was stuck to, if any. */
+interface Fuse {
+  at: number;
+  key?: string;
+  door?: boolean;
 }
 
 /** Furnace burn and smelt timers, kept off the shared deployable state. */
@@ -183,6 +210,14 @@ const CONTAINER_RANGE = 3.5;
 const SAFE_SECONDS = 20;
 /** Seconds a tame hound remembers who just fought its owner. */
 const FEUD_SECONDS = 10;
+/** Damage a hit by hand does to a wooden wall or door inside someone else's tool cupboard range. */
+const SOFT_HIT = 3;
+/** Seconds before a sleeping bag can be used again. */
+export const BAG_COOLDOWN = 60;
+/** Seconds between tries at a code lock's code. */
+const CODE_DELAY = 1;
+/** Health a wrong code costs: the lock shocks you. */
+const CODE_SHOCK = 5;
 
 export class Game {
   readonly seed: number;
@@ -219,6 +254,12 @@ export class Game {
   private wildlifeStarted = false;
   /** Separate again, so the hounds' wandering never changes loot or spawns. */
   private houndRand: () => number;
+  private locks = new Map<string, Lock>();
+  private fuses = new Map<number, Fuse>();
+  /** When each sleeping bag can next be woken up in (ms). */
+  private bagReady = new Map<number, number>();
+  /** When each player may next try a code (ms). */
+  private nextCodeAt = new Map<number, number>();
 
   /**
    * @param startKit what players spawn with besides the rock and plan: a count of each basic
@@ -434,6 +475,7 @@ export class Game {
     if (this.pieces.has(key)) return [];
     const bounds = pieceBounds(piece);
     if (!this.inReach(p, bounds)) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, bounds)) return [notice(id, BLOCKED)];
     if (countItem(p.slots, material) < PIECE_COST) return [notice(id, `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`)];
     if (!pieceSupported(this.seed, piece, this.pieces.values())) {
       return [notice(id, 'Must connect to the ground or another piece')];
@@ -453,19 +495,58 @@ export class Game {
     return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p)];
   }
 
-  /** Hits damage a piece; at zero health it breaks and refunds a little material. */
-  hit(id: number, key: string, now: number): Outgoing[] {
+  /**
+   * Hits damage a piece, or the door hung in it; at zero health it breaks, and a piece refunds
+   * a little material. Inside someone else's tool cupboard range, hands barely scratch wood and
+   * do nothing to stone, scrap or metal: that takes explosives.
+   */
+  hit(id: number, key: string, now: number, door = false): Outgoing[] {
     const p = this.alive(id);
     const piece = this.pieces.get(key);
     if (!p || !piece) return [];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
     if (!this.inReach(p, pieceBounds(piece))) return [notice(id, 'Too far away')];
+    const blocked = this.blockedAt(p, pieceBounds(piece));
+    if (door && piece.door) {
+      const amount = blocked ? (piece.door.kind === 'woodenDoor' ? SOFT_HIT : 0) : HIT_DAMAGE;
+      if (amount === 0) return [notice(id, 'Too strong to break by hand: you need explosives')];
+      p.lastGatherAt = now;
+      return this.damageDoor(key, piece, amount, id);
+    }
+    const amount = blocked ? (piece.material === 'wood' ? SOFT_HIT : 0) : HIT_DAMAGE;
+    if (amount === 0) return [notice(id, 'Too strong to break by hand: you need explosives')];
     p.lastGatherAt = now;
-    piece.hp -= HIT_DAMAGE;
-    if (piece.hp > 0) return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
+    const out = this.damagePiece(key, piece, amount, id);
+    if (!this.pieces.has(key) && !blocked) {
+      addItem(p.slots, piece.material, PIECE_COST / 2);
+      out.push(this.inventory(p));
+    }
+    return out;
+  }
+
+  /** Takes health off a piece, breaking it (and any door and lock in it) at zero. */
+  private damagePiece(key: string, piece: Piece, amount: number, by: number): Outgoing[] {
+    piece.hp -= amount;
+    if (piece.hp > 0) return [{ to: 'all', msg: { t: 'piece', key, piece, by } }];
     this.pieces.delete(key);
-    addItem(p.slots, piece.material, PIECE_COST / 2);
-    return [{ to: 'all', msg: { t: 'piece', key, piece: null, by: id } }, this.inventory(p)];
+    this.locks.delete(key);
+    return [{ to: 'all', msg: { t: 'piece', key, piece: null, by } }];
+  }
+
+  /** Takes health off the door in a piece; at zero it is gone, lock and all, leaving the doorway. */
+  private damageDoor(key: string, piece: Piece, amount: number, by: number): Outgoing[] {
+    if (!piece.door) return [];
+    piece.door.hp -= amount;
+    if (piece.door.hp <= 0) {
+      delete piece.door;
+      this.locks.delete(key);
+    }
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by } }];
+  }
+
+  /** True inside a tool cupboard's range that doesn't trust this player. */
+  private blockedAt(p: Player, b: Box): boolean {
+    return privilege(this.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, p.id) === 'blocked';
   }
 
   /**
@@ -475,7 +556,7 @@ export class Game {
   hitDeployable(id: number, deployableId: number, now: number): Outgoing[] {
     const p = this.alive(id);
     const d = this.deployables.get(deployableId);
-    if (!p || !d) return [];
+    if (!p || !d || CHARGE_KINDS.includes(d.kind)) return [];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
     if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Too far away')];
     p.lastGatherAt = now;
@@ -492,8 +573,19 @@ export class Game {
     const piece = this.pieces.get(key);
     if (!p || !piece || piece.kind !== 'wall' || !WALL_EDITS.includes(edit)) return [];
     if (!this.inReach(p, pieceBounds(piece))) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, pieceBounds(piece))) return [notice(id, BLOCKED)];
+    const out: Outgoing[] = [];
+    if (piece.door && edit !== 'door') {
+      // Walling up a doorway takes the door down, and its lock, back into your pack.
+      addItem(p.slots, piece.door.kind, 1);
+      if (piece.door.locked) addItem(p.slots, 'codeLock', 1);
+      delete piece.door;
+      this.locks.delete(key);
+      out.push(this.inventory(p));
+    }
     piece.edit = edit;
-    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
+    out.unshift({ to: 'all', msg: { t: 'piece', key, piece, by: id } });
+    return out;
   }
 
   /** Queues crafting jobs. Ingredients are taken now and refunded if the job is cancelled. */
@@ -574,9 +666,10 @@ export class Game {
     const kind = stack.item as DeployableKind;
     const box = deployableBox({ kind, x, y, z, rot });
     if (!this.inReach(p, box)) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, box)) return [notice(id, BLOCKED)];
     if (!this.deploySupported(x, y, z)) return [notice(id, 'Place it on flat ground or a floor')];
     const blockers: Box[] = [
-      ...[...this.pieces.values()].flatMap(pieceBoxes),
+      ...[...this.pieces.values()].flatMap((piece) => pieceBoxes(piece)),
       ...[...this.deployables.values()].map(deployableBox),
       ...[...this.players.values()].map(playerBox),
     ];
@@ -596,6 +689,267 @@ export class Game {
     if (on && !d.slots[FURNACE_FUEL]) return [notice(id, 'Put some wood in first')];
     d.on = !!on;
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }];
+  }
+
+  /** Asks a tool cupboard to trust you, so you can build round it. You must be able to reach it. */
+  authorize(id: number, deployableId: number): Outgoing[] {
+    const p = this.alive(id);
+    const d = this.deployables.get(deployableId);
+    if (!p || !d || d.kind !== 'toolCupboard') return [];
+    if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Get closer to the tool cupboard')];
+    d.auth ??= [];
+    if (d.auth.includes(id)) return [notice(id, 'You are already authorised here')];
+    d.auth.push(id);
+    return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, notice(id, 'Authorised: you can build round this tool cupboard')];
+  }
+
+  /** Makes a tool cupboard forget everyone but you. Only someone it trusts can do this. */
+  clearAuth(id: number, deployableId: number): Outgoing[] {
+    const p = this.alive(id);
+    const d = this.deployables.get(deployableId);
+    if (!p || !d || d.kind !== 'toolCupboard') return [];
+    if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Get closer to the tool cupboard')];
+    if (!d.auth?.includes(id)) return [notice(id, 'Only someone authorised can clear the list')];
+    d.auth = [id];
+    return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, notice(id, 'Cleared: only you are authorised now')];
+  }
+
+  /** Hangs the door in a belt slot in a doorway, closed (or open if someone is standing in it). */
+  hangDoor(id: number, key: string, slot: number): Outgoing[] {
+    const p = this.alive(id);
+    const piece = this.pieces.get(key);
+    if (!p || !piece || !isBeltSlot(slot)) return [];
+    const stack = p.slots[slot];
+    if (!stack || !DOOR_KINDS.includes(stack.item as DoorKind)) return [];
+    if (piece.kind !== 'wall' || piece.edit !== 'door') return [notice(id, 'Hang it in a doorway: press G on a wall to make one')];
+    if (piece.door) return [notice(id, 'There is already a door here')];
+    if (!this.inReach(p, pieceBounds(piece))) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, pieceBounds(piece))) return [notice(id, BLOCKED)];
+    const kind = stack.item as DoorKind;
+    piece.door = { kind, open: this.doorwayBusy(piece), hp: DOOR_HP[kind], locked: false };
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p)];
+  }
+
+  /** Opens or closes a door. A locked one only opens for those who know its code. */
+  toggleDoor(id: number, key: string): Outgoing[] {
+    const p = this.alive(id);
+    const piece = this.pieces.get(key);
+    if (!p || !piece?.door) return [];
+    if (!this.inReach(p, doorBox(piece))) return [notice(id, 'Too far away')];
+    const lock = this.locks.get(key);
+    if (piece.door.locked && lock && !lock.auth.includes(id)) return [{ to: id, msg: { t: 'codeNeeded', key } }];
+    if (piece.door.open && this.doorwayBusy(piece)) return [notice(id, 'Someone is standing in the doorway')];
+    piece.door.open = !piece.door.open;
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
+  }
+
+  /** Fits the code lock in a belt slot to a door, set to a 4-digit code. */
+  lock(id: number, key: string, slot: number, code: string): Outgoing[] {
+    const p = this.alive(id);
+    const piece = this.pieces.get(key);
+    if (!p || !piece?.door || !isBeltSlot(slot) || p.slots[slot]?.item !== 'codeLock') return [];
+    if (!/^\d{4}$/.test(code)) return [notice(id, 'The code must be 4 digits')];
+    if (piece.door.locked) return [notice(id, 'This door already has a lock')];
+    if (!this.inReach(p, doorBox(piece))) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, pieceBounds(piece))) return [notice(id, BLOCKED)];
+    this.locks.set(key, { code, auth: [id] });
+    piece.door.locked = true;
+    const stack = p.slots[slot]!;
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p), notice(id, `Locked with code ${code}. Tell it only to friends`)];
+  }
+
+  /** Tries a code on a locked door: the right one opens it and remembers you; a wrong one shocks you. */
+  tryCode(id: number, key: string, code: string, now: number): Outgoing[] {
+    const p = this.alive(id);
+    const piece = this.pieces.get(key);
+    const lock = this.locks.get(key);
+    if (!p || !piece?.door || !lock) return [];
+    if (!this.inReach(p, doorBox(piece))) return [notice(id, 'Too far away')];
+    if (now < (this.nextCodeAt.get(id) ?? 0)) return [];
+    this.nextCodeAt.set(id, now + CODE_DELAY * 1000);
+    if (code !== lock.code) {
+      p.hp = Math.max(1, p.hp - CODE_SHOCK);
+      p.sentHp = Math.round(p.hp);
+      return [notice(id, 'Wrong code: the lock shocks you'), { to: id, msg: { t: 'health', hp: p.sentHp, from: [p.x, p.y + 1, p.z] } }];
+    }
+    if (!lock.auth.includes(id)) lock.auth.push(id);
+    if (!piece.door.open && !this.doorwayBusy(piece)) piece.door.open = true;
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, notice(id, 'Code accepted')];
+  }
+
+  /** True when someone stands where a closed door would swing shut. */
+  private doorwayBusy(piece: Piece): boolean {
+    const b = doorBox(piece);
+    return [...this.players.values()].some((o) => !o.dead && boxesTouch(b, playerBox(o), -0.02));
+  }
+
+  /**
+   * Sticks the satchel or C4 in a belt slot to a wall, door, floor, deployable or the ground
+   * at `at`, and lights it. `key` (and `door`) say which piece it is stuck to.
+   */
+  plant(id: number, slot: number, at: Vec3, now: number, key?: string, door = false): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot) || !isVec3(at)) return [];
+    const stack = p.slots[slot];
+    if (!stack || (stack.item !== 'satchel' && stack.item !== 'c4')) return [];
+    const eye: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
+    if (Math.hypot(at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]) > PLANT_RANGE + 0.6) return [notice(id, 'Too far away')];
+    const piece = key ? this.pieces.get(key) : undefined;
+    const onPiece = piece && distanceToBox(at, door && piece.door ? doorBox(piece) : pieceBounds(piece)) < 0.35;
+    if (!onPiece && !this.solidNear(at)) return [notice(id, 'Stick it to a wall, a door or the ground')];
+    const item = stack.item as ExplosiveId;
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    const d = newDeployable(this.nextDeployableId++, item, at[0], at[1] - DEPLOYABLE_INFO[item].size[1] / 2, at[2], p.yaw, id);
+    this.deployables.set(d.id, d);
+    this.fuses.set(d.id, { at: now + EXPLOSIVES[item].fuse * 1000, ...(onPiece && { key, door: door && !!piece!.door }) });
+    return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, this.inventory(p)];
+  }
+
+  /** True when a point is on the ground or against a piece or deployable. */
+  private solidNear(at: Vec3): boolean {
+    if (Math.abs(at[1] - terrainHeight(this.seed, at[0], at[2])) < 0.4) return true;
+    for (const piece of this.pieces.values()) if (pieceBoxes(piece).some((b) => distanceToBox(at, b) < 0.35)) return true;
+    for (const d of this.deployables.values()) if (!CHARGE_KINDS.includes(d.kind) && distanceToBox(at, deployableBox(d)) < 0.35) return true;
+    return false;
+  }
+
+  /**
+   * Throws the beancan in a belt slot along `dir`. It flies in an arc until it hits a wall,
+   * the ground or a floor, drops to whatever is under it, and goes off when its fuse runs out.
+   */
+  throwGrenade(id: number, slot: number, dir: Vec3, now: number): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !isBeltSlot(slot) || !isVec3(dir) || p.slots[slot]?.item !== 'beancan') return [];
+    if (now < p.nextAttackAt) return [];
+    p.nextAttackAt = now + 800;
+    const d = normalize(dir);
+    let pos: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
+    const v: Vec3 = [d[0] * THROW_SPEED, d[1] * THROW_SPEED + 2, d[2] * THROW_SPEED];
+    const boxes = [...[...this.pieces.values()].flatMap((piece) => pieceBoxes(piece)), ...[...this.deployables.values()].filter((x) => !CHARGE_KINDS.includes(x.kind)).map(deployableBox)];
+    const step = 0.03;
+    for (let t = 0; t < 3; t += step) {
+      const next: Vec3 = [pos[0] + v[0] * step, pos[1] + v[1] * step, pos[2] + v[2] * step];
+      v[1] -= 9.8 * step;
+      const len = Math.hypot(next[0] - pos[0], next[1] - pos[1], next[2] - pos[2]);
+      const sd: Vec3 = [(next[0] - pos[0]) / len, (next[1] - pos[1]) / len, (next[2] - pos[2]) / len];
+      let hit = len;
+      for (const b of boxes) hit = rayBox(pos, sd, b, hit) ?? hit;
+      hit = rayTerrain(this.seed, pos, sd, hit) ?? hit;
+      if (hit < len) {
+        const back = Math.max(0, hit - 0.08);
+        pos = [pos[0] + sd[0] * back, pos[1] + sd[1] * back, pos[2] + sd[2] * back];
+        break;
+      }
+      pos = next;
+    }
+    const y = this.groundBelow(pos[0], pos[1], pos[2]);
+    const stack = p.slots[slot]!;
+    stack.count -= 1;
+    if (stack.count === 0) p.slots[slot] = null;
+    const g = newDeployable(this.nextDeployableId++, 'beancan', pos[0], y, pos[2], p.yaw, id);
+    this.deployables.set(g.id, g);
+    this.fuses.set(g.id, { at: now + EXPLOSIVES.beancan.fuse * 1000 });
+    return [{ to: 'all', msg: { t: 'deployable', id: g.id, d: g, by: id } }, this.inventory(p)];
+  }
+
+  /** The top of the ground, a floor or anything else solid under a point. */
+  private groundBelow(x: number, y: number, z: number): number {
+    let top = terrainHeight(this.seed, x, z);
+    for (const piece of this.pieces.values()) {
+      for (const b of pieceBoxes(piece)) {
+        if (x >= b.min[0] && x <= b.max[0] && z >= b.min[2] && z <= b.max[2] && b.max[1] <= y + 0.1) top = Math.max(top, b.max[1]);
+      }
+    }
+    return top;
+  }
+
+  /**
+   * A charge goes off: the wall or door it sits on takes the full blast, pieces and doors
+   * nearby take up to half, deployables break open, and anyone in reach who isn't behind a
+   * wall gets hurt.
+   */
+  private explode(d: Deployable, now: number): Outgoing[] {
+    const fuse = this.fuses.get(d.id);
+    const item = d.kind as ExplosiveId;
+    const info = EXPLOSIVES[item];
+    const c: Vec3 = [d.x, d.y + DEPLOYABLE_INFO[item].size[1] / 2, d.z];
+    const out: Outgoing[] = [...this.removeDeployable(d.id), { to: 'all', msg: { t: 'explosion', at: c, item } }];
+    const share = (dist: number) => (dist <= POINT_BLANK ? 1 : 0.5 * blastFalloff(dist, info.radius));
+    for (const [key, piece] of [...this.pieces]) {
+      const target = fuse?.key === key;
+      const onDoor = target && fuse?.door && piece.door;
+      const dist = target ? 0 : distanceToBox(c, pieceBounds(piece));
+      if (dist > info.radius) continue;
+      if (piece.door) {
+        const doorDist = onDoor ? 0 : distanceToBox(c, doorBox(piece));
+        if (doorDist <= info.radius) out.push(...this.damageDoor(key, piece, info.structure * share(doorDist), d.owner));
+      }
+      if (!onDoor) out.push(...this.damagePiece(key, piece, info.structure * share(dist), d.owner));
+    }
+    for (const other of [...this.deployables.values()]) {
+      if (CHARGE_KINDS.includes(other.kind)) continue;
+      const dist = distanceToBox(c, deployableBox(other));
+      if (dist > info.radius) continue;
+      other.hp -= info.structure * blastFalloff(dist, info.radius);
+      if (other.hp > 0) {
+        out.push({ to: 'all', msg: { t: 'deployable', id: other.id, d: other, by: d.owner } });
+        continue;
+      }
+      // Whatever was inside spills out in a bag.
+      const spilled = other.slots.filter(Boolean);
+      out.push(...this.removeDeployable(other.id, d.owner));
+      if (spilled.length && other.kind !== 'lootBag') out.push(...this.dropBag(other.x, other.y, other.z, other.slots, DEPLOYABLE_INFO[other.kind].name));
+    }
+    const owner = this.players.get(d.owner);
+    for (const victim of [...this.players.values()]) {
+      if (victim.dead) continue;
+      const chest: Vec3 = [victim.x, victim.y + 1, victim.z];
+      const dist = Math.hypot(chest[0] - c[0], chest[1] - c[1], chest[2] - c[2]);
+      if (dist > info.radius || this.sheltered(c, chest, dist)) continue;
+      const amount = info.people * blastFalloff(dist, info.radius) * armourFactor(victim.wear, 'chest');
+      if (owner && owner !== victim) {
+        out.push(...this.damage(victim, amount, owner, item, false, new Set<ArmourSlot>(['chest'])));
+        continue;
+      }
+      victim.hp = Math.max(0, victim.hp - amount);
+      victim.sentHp = Math.round(victim.hp);
+      out.push({ to: victim.id, msg: { t: 'health', hp: victim.sentHp, from: c } });
+      if (victim.hp <= 0) out.push(...this.kill(victim, null, null, false, 'explosion'));
+    }
+    for (const h of [...this.hounds.values()]) {
+      if (h.deadAt) continue;
+      const dist = Math.hypot(h.x - c[0], h.y + 0.5 - c[1], h.z - c[2]);
+      if (dist > info.radius) continue;
+      out.push(...this.hurtHound(h, info.people * blastFalloff(dist, info.radius), { kind: 'player', id: d.owner }, now));
+    }
+    return out;
+  }
+
+  /** True when a wall, door or floor stands between a blast and someone (ignoring what it sits in). */
+  private sheltered(from: Vec3, to: Vec3, dist: number): boolean {
+    const dir: Vec3 = [(to[0] - from[0]) / dist, (to[1] - from[1]) / dist, (to[2] - from[2]) / dist];
+    for (const piece of this.pieces.values()) {
+      for (const b of pieceBoxes(piece)) {
+        if (distanceToBox(from, b) === 0) continue;
+        if (rayBox(from, dir, b, dist) !== null) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Leaves a loot bag of whatever was in a broken box or furnace. */
+  private dropBag(x: number, y: number, z: number, slots: Slots, label: string): Outgoing[] {
+    const bag = newDeployable(this.nextDeployableId++, 'lootBag', x, y, z, 0, 0);
+    bag.slots = [...slots, ...emptySlots(Math.max(0, INVENTORY_SIZE - slots.length))].slice(0, INVENTORY_SIZE);
+    bag.label = label;
+    this.deployables.set(bag.id, bag);
+    this.bagExpiry.set(bag.id, LOOT_BAG_SECONDS);
+    return [{ to: 'all', msg: { t: 'deployable', id: bag.id, d: bag, by: 0 } }];
   }
 
   /**
@@ -763,14 +1117,24 @@ export class Game {
     return out;
   }
 
-  /** Back to life at a random spot with a rock, a building plan and full health. */
-  respawn(id: number): Outgoing[] {
+  /**
+   * Back to life with a rock, a building plan and full health: at a random spot, or in one of
+   * your sleeping bags if it has cooled down since you last woke there.
+   */
+  respawn(id: number, bag?: number, now = Math.max(0, this.lastTick)): Outgoing[] {
     const p = this.players.get(id);
     if (!p || !p.dead) return [];
-    const [x, z] = this.spawnPoint();
+    const b = bag === undefined ? undefined : this.deployables.get(bag);
+    if (bag !== undefined) {
+      if (!b || b.kind !== 'sleepingBag' || b.owner !== id) return [notice(id, 'That sleeping bag is gone')];
+      const wait = Math.ceil(((this.bagReady.get(b.id) ?? 0) - now) / 1000);
+      if (wait > 0) return [notice(id, `That sleeping bag is ready in ${wait} s`)];
+      this.bagReady.set(b.id, now + BAG_COOLDOWN * 1000);
+    }
+    const [x, z] = b ? [b.x, b.z] : this.spawnPoint();
     p.x = x;
     p.z = z;
-    p.y = terrainHeight(this.seed, x, z);
+    p.y = b ? b.y + 0.15 : terrainHeight(this.seed, x, z);
     p.dead = false;
     p.hp = MAX_HEALTH;
     p.sentHp = MAX_HEALTH;
@@ -937,6 +1301,9 @@ export class Game {
       hounds: [...this.hounds.values()]
         .filter((h) => h.owner !== null && !h.deadAt)
         .map((h) => ({ x: h.x, y: h.y, z: h.z, yaw: h.yaw, hp: h.hp, owner: h.owner!, name: h.name ?? 'Ashhound' })),
+      locks: [...this.locks],
+      fuses: [...this.fuses].map(([id, f]) => [id, { in: Math.max(0, f.at - now), key: f.key, door: f.door }]),
+      bagCooldowns: [...this.bagReady].filter(([, at]) => at > now).map(([id, at]) => [id, at - now]),
     });
   }
 
@@ -955,6 +1322,11 @@ export class Game {
     game.furnaces = new Map(save.furnaces);
     game.bagExpiry = new Map(save.bags);
     game.sleepers = new Map(save.survivors);
+    game.locks = new Map(save.locks ?? []);
+    game.fuses = new Map((save.fuses ?? []).map(([id, f]) => [id, { at: now + f.in, key: f.key, door: f.door }]));
+    game.bagReady = new Map((save.bagCooldowns ?? []).map(([id, ms]) => [id, now + ms]));
+    // A charge whose fuse was lost would never go off; take it away.
+    for (const d of [...game.deployables.values()]) if (CHARGE_KINDS.includes(d.kind) && !game.fuses.has(d.id)) game.deployables.delete(d.id);
     for (const saved of save.hounds ?? []) {
       const h = newHound(game.nextHoundId++, -1, saved.x, saved.z, game.seed, saved.yaw);
       Object.assign(h, { hp: saved.hp, owner: saved.owner, name: saved.name });
@@ -977,6 +1349,11 @@ export class Game {
     });
     for (const p of this.players.values()) out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt, now));
     for (const d of this.deployables.values()) if (d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
+    for (const [id, fuse] of [...this.fuses]) {
+      const d = this.deployables.get(id);
+      if (!d) this.fuses.delete(id);
+      else if (fuse.at <= now) out.push(...this.explode(d, now));
+    }
     for (const [bag, left] of this.bagExpiry) {
       if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
       else out.push(...this.removeDeployable(bag));
@@ -1355,6 +1732,8 @@ export class Game {
     this.deployables.delete(id);
     this.furnaces.delete(id);
     this.bagExpiry.delete(id);
+    this.fuses.delete(id);
+    this.bagReady.delete(id);
     return [{ to: 'all', msg: { t: 'deployable', id, d: null, by } }];
   }
 
@@ -1462,6 +1841,15 @@ function furnaceOutput(d: Deployable, item: ItemId) {
 
 function isVec3(v: unknown): v is Vec3 {
   return Array.isArray(v) && v.length === 3 && v.every(Number.isFinite) && v.some((n) => n !== 0);
+}
+
+/** What a survivor is told when someone else's tool cupboard stops them building. */
+const BLOCKED = "Building blocked: you are inside someone else's tool cupboard range";
+
+/** Metres from a point to the nearest point of a box (0 inside it). */
+function distanceToBox(p: Vec3, b: Box): number {
+  const d = [0, 1, 2].map((a) => Math.max(b.min[a] - p[a], 0, p[a] - b.max[a]));
+  return Math.hypot(d[0], d[1], d[2]);
 }
 
 function notice(id: number, text: string): Outgoing {

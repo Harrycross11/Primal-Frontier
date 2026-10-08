@@ -172,7 +172,7 @@ wss.on('connection', (ws) => {
         deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
         break;
       case 'hit':
-        deliver(game.hit(id, String(msg.key), now));
+        deliver(game.hit(id, String(msg.key), now, msg.door === true));
         break;
       case 'hitDeployable':
         deliver(game.hitDeployable(id, msg.id, now));
@@ -208,7 +208,31 @@ wss.on('connection', (ws) => {
         deliver(game.use(id, msg.slot, now));
         break;
       case 'respawn':
-        deliver(game.respawn(id));
+        deliver(game.respawn(id, typeof msg.bag === 'number' ? msg.bag : undefined, now));
+        break;
+      case 'authorize':
+        deliver(game.authorize(id, msg.id));
+        break;
+      case 'clearAuth':
+        deliver(game.clearAuth(id, msg.id));
+        break;
+      case 'hangDoor':
+        deliver(game.hangDoor(id, String(msg.key), msg.slot));
+        break;
+      case 'door':
+        deliver(game.toggleDoor(id, String(msg.key)));
+        break;
+      case 'lock':
+        deliver(game.lock(id, String(msg.key), msg.slot, String(msg.code)));
+        break;
+      case 'code':
+        deliver(game.tryCode(id, String(msg.key), String(msg.code), now));
+        break;
+      case 'plant':
+        deliver(game.plant(id, msg.slot, msg.at, now, typeof msg.key === 'string' ? msg.key : undefined, msg.door === true));
+        break;
+      case 'throw':
+        deliver(game.throwGrenade(id, msg.slot, msg.d, now));
         break;
     }
   });

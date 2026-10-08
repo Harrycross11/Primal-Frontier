@@ -17,6 +17,20 @@ export type PieceKind = 'wall' | 'floor' | 'stairs';
 export type WallEdit = 'solid' | 'window' | 'door' | 'half';
 export const WALL_EDITS: WallEdit[] = ['solid', 'window', 'door', 'half'];
 
+/** A door hung in a doorway: what it is made of, whether it stands open, and its health. */
+export type DoorKind = 'woodenDoor' | 'metalDoor';
+export const DOOR_KINDS: DoorKind[] = ['woodenDoor', 'metalDoor'];
+export interface Door {
+  kind: DoorKind;
+  open: boolean;
+  hp: number;
+  /** A code lock is fitted (the code itself never leaves the server). */
+  locked: boolean;
+}
+export const DOOR_HP: Record<DoorKind, number> = { woodenDoor: 200, metalDoor: 500 };
+/** The doorway in a door wall: where along the wall it runs, and how tall it is. */
+export const DOORWAY = { from: TILE / 2 - 0.65, to: TILE / 2 + 0.65, height: 2.3 };
+
 /**
  * A placed piece. (i, k) is the tile, y is the bottom height in whole metres.
  * dir: for walls 0 = runs along x on the tile's -z edge, 1 = runs along z on the tile's -x edge;
@@ -31,6 +45,8 @@ export interface Piece {
   material: Material;
   edit: WallEdit;
   hp: number;
+  /** The door hung in it, for walls edited into a doorway. */
+  door?: Door;
 }
 
 export type Box = { min: [number, number, number]; max: [number, number, number] };
@@ -74,18 +90,31 @@ function wallParts(edit: WallEdit): [number, number, number, number][] {
   }
 }
 
-/** Solid boxes used for collision and drawing. Stairs return their steps. */
-export function pieceBoxes(p: Piece): Box[] {
+/** A box along a wall: a0..a1 along its length, h0..h1 up it, `t` either side of its middle. */
+function alongWall(p: Piece, a0: number, h0: number, a1: number, h1: number, t: number): Box {
+  const x0 = p.i * TILE;
+  const z0 = p.k * TILE;
+  return p.dir === 0 ? box(x0 + a0, p.y + h0, z0 - t, x0 + a1, p.y + h1, z0 + t) : box(x0 - t, p.y + h0, z0 + a0, x0 + t, p.y + h1, z0 + a1);
+}
+
+/** The space a closed door fills in its doorway. */
+export function doorBox(p: Piece): Box {
+  return alongWall(p, DOORWAY.from, 0, DOORWAY.to, DOORWAY.height, THICK / 4);
+}
+
+/**
+ * Solid boxes used for collision and drawing. Stairs return their steps. A closed door is
+ * included unless `withDoor` is false (it is drawn on its own, so it can swing).
+ */
+export function pieceBoxes(p: Piece, withDoor = true): Box[] {
   const x0 = p.i * TILE;
   const z0 = p.k * TILE;
   const t = THICK / 2;
   if (p.kind === 'floor') return [box(x0, p.y - THICK, z0, x0 + TILE, p.y, z0 + TILE)];
   if (p.kind === 'wall') {
-    return wallParts(p.edit).map(([a0, h0, a1, h1]) =>
-      p.dir === 0
-        ? box(x0 + a0, p.y + h0, z0 - t, x0 + a1, p.y + h1, z0 + t)
-        : box(x0 - t, p.y + h0, z0 + a0, x0 + t, p.y + h1, z0 + a1),
-    );
+    const parts = wallParts(p.edit).map(([a0, h0, a1, h1]) => alongWall(p, a0, h0, a1, h1, t));
+    if (withDoor && p.edit === 'door' && p.door && !p.door.open) parts.push(doorBox(p));
+    return parts;
   }
   // Stairs: steps rising across the tile.
   const steps = 6;
