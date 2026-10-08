@@ -99,6 +99,7 @@ export type ItemId =
   | 'bottledWater'
   | 'rawMeat'
   | 'cookedMeat'
+  | 'feedSack'
   // Armour
   | 'burlapHeadwrap'
   | 'burlapShirt'
@@ -421,13 +422,19 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   mushroom: { name: 'Mushroom', kind: 'food', stack: 20, consume: { food: 10, water: 3 }, description: 'Grows in the shade of ruins. Chewy, but it is food. Left click to eat.' },
   cannedBeans: { name: 'Can of Beans', kind: 'food', stack: 10, consume: { food: 40, water: 5 }, description: 'Still sealed. Found in the glove boxes of old wrecks. Left click to eat.' },
   bottledWater: { name: 'Bottled Water', kind: 'food', stack: 10, consume: { water: 35 }, description: 'Clean water from before the bombs. Found in old wrecks. Left click to drink.' },
-  rawMeat: { name: 'Raw Hound Meat', kind: 'food', stack: 20, consume: { food: 6 }, description: 'Cut from a dead Ashhound. Cook it in a furnace, or eat it raw if you must. Left click to eat.' },
+  rawMeat: { name: 'Raw Meat', kind: 'food', stack: 20, consume: { food: 6 }, description: 'Cut from a dead animal. Cook it in a furnace, or eat it raw if you must. Left click to eat.' },
   cookedMeat: {
-    name: 'Cooked Hound Meat',
+    name: 'Cooked Meat',
     kind: 'food',
     stack: 20,
     consume: { food: 35, water: 2 },
-    description: 'Seared over a furnace. Filling, and a wild Ashhound will take it from your hand: feed one three times to tame it.',
+    description: 'Seared over a furnace. Filling, and Ashhounds and Frost Bears will take it from your hand: feed one enough and it is yours.',
+  },
+  feedSack: {
+    name: 'Feed Sack',
+    kind: 'food',
+    stack: 10,
+    description: 'Hemp mash and mushrooms in a cloth sack. Walk slowly up to a mule, elk, buffalo or camel and hold it out (left click) to tame it.',
   },
 };
 
@@ -638,6 +645,7 @@ export const RECIPES: Recipe[] = [
   { item: 'bandage', count: 1, cost: { cloth: 4 }, time: 2, category: 'Medical' },
   { item: 'syringe', count: 1, cost: { cloth: 15, metal: 10 }, time: 4, workbench: 1, category: 'Medical' },
   { item: 'antiRadPills', count: 1, cost: { charcoal: 15, mushroom: 2 }, time: 3, category: 'Medical' },
+  { item: 'feedSack', count: 1, cost: { cloth: 10, mushroom: 2 }, time: 3, category: 'Tools' },
 
   { item: 'gunpowder', count: 10, cost: { charcoal: 30, sulfur: 20 }, time: 3, category: 'Resources' },
 ];

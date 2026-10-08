@@ -36,7 +36,7 @@ function run(game: Game, from: number, seconds: number, each?: (t: number) => vo
   return t;
 }
 
-const alive = (game: Game) => [...game.hounds.values()].filter((h) => !h.deadAt);
+const alive = (game: Game) => [...game.hounds.values()].filter((h) => !h.deadAt && h.species === 'ashhound');
 const have = (game: Game, id: number, item: ItemId) => countItem(game.players.get(id)!.slots, item);
 
 /** Puts an item in belt slot 2. */
@@ -48,9 +48,10 @@ function hold(game: Game, id: number, item: ItemId, count = 1) {
 
 test('packs of hounds are born round their dens', () => {
   const { game } = setup();
-  assert.equal(game.hounds.size, PACKS * PACK_SIZE);
+  const hounds = [...game.hounds.values()].filter((h) => h.species === 'ashhound');
+  assert.equal(hounds.length, PACKS * PACK_SIZE);
   const dens = packDens(SEED);
-  for (const h of game.hounds.values()) {
+  for (const h of hounds) {
     const [x, z] = dens[h.pack];
     assert.ok(Math.hypot(h.x - x, h.z - z) < 7, 'near its den');
     assert.equal(h.owner, null);

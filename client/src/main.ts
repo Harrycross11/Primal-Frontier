@@ -21,7 +21,7 @@ import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
 import { BIOMES, biomeAt } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
-import { ASHHOUND } from '../../shared/creatures.ts';
+import { ASHHOUND, MOUNT_RANGE, SPECIES } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
 import { atLandmark } from '../../shared/landmarks.ts';
@@ -365,6 +365,17 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'correct':
         controller.teleport(m.x, m.y, m.z);
         break;
+      case 'mounted': {
+        riding = m.id;
+        const view = m.id === null ? undefined : creatures.views.get(m.id);
+        const ride = view ? SPECIES[view.species].ride : undefined;
+        controller.mount = ride ?? null;
+        if (m.id === null || !ride) riding = null;
+        controller.teleport(m.x, m.y + (ride?.seat ?? 0), m.z);
+        creatures.mine = riding;
+        if (riding !== null) hud.notice('E to get off, Shift to gallop');
+        break;
+      }
       case 'shot': {
         const shooter = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
         const muzzle = shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
@@ -694,6 +705,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aimPlayer: Remote | null = null;
   /** Likewise an Ashhound, for melee and feeding. */
   let aimHound: ReturnType<Creatures['ray']> = null;
+  /** The animal you are riding, if you are. */
+  let riding: number | null = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
   /** The face the crosshair is on (world space), and whether it is a door rather than its wall. */
   let aimNormal: THREE.Vector3 | null = null;
@@ -755,8 +768,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     return true;
   }
 
-  function houndInReach(at: THREE.Vector3) {
-    return Math.hypot(at.x - controller.position.x, at.z - controller.position.z) < ASHHOUND.feedRange;
+  /** Close enough to an animal to feed it (or, with `range`, to climb on). */
+  function houndInReach(at: THREE.Vector3, range: number = ASHHOUND.feedRange) {
+    const length = aimHound ? SPECIES[aimHound.view.species].length : 1.5;
+    return Math.hypot(at.x - controller.position.x, at.z - controller.position.z) - length / 2 + 0.75 < range;
   }
 
   function resourceInRange(node: ResourceNode) {
@@ -771,12 +786,16 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const item = held();
     if (heldGun()) return fire();
     if (item && ITEMS[item].armour) return net.send({ t: 'use', slot: ui.active });
+    if (item === 'feedSack') {
+      net.send({ t: 'use', slot: ui.active });
+      return me.swing();
+    }
     if (item && (ITEMS[item].heal || ITEMS[item].consume)) {
       net.send({ t: 'use', slot: ui.active });
       me.swing();
       const c = ITEMS[item].consume;
-      // Held out to a hound rather than eaten.
-      if (item === 'cookedMeat' && aimHound && houndInReach(aimHound.view.root.position)) return;
+      // Held out to an animal rather than eaten.
+      if (item === 'cookedMeat' && aimHound && SPECIES[aimHound.view.species].food === item && houndInReach(aimHound.view.root.position)) return;
       if (c) effects.consumeSound(c.rads ? 'pills' : c.food ? 'eat' : 'drink', null);
       return;
     }
@@ -874,6 +893,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   /** E: open a furnace, box or door, authorise yourself on a tool cupboard, or pick a hemp plant. */
   function interact() {
+    if (riding !== null) return net.send({ t: 'ride', id: null });
+    const animal = aimHound?.view;
+    if (animal && animal.state.owner === welcome.id && SPECIES[animal.species].ride && animal.state.anim !== 'dead') {
+      if (!houndInReach(animal.root.position, MOUNT_RANGE)) return hud.notice('Get closer to climb on');
+      return net.send({ t: 'ride', id: animal.state.id });
+    }
     if (aimDeployable?.kind === 'toolCupboard') {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
       if (aimDeployable.auth?.includes(welcome.id)) return hud.notice('You are already authorised here. G clears everyone else');
@@ -1147,6 +1172,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     /** Flies a supply plane over, `elapsed` seconds into its crossing, for screenshots. */
     showPlane: (from: number[], to: number[], speed: number, elapsed: number) =>
       effects.plane(buildPlane(), new THREE.Vector3().fromArray(from), new THREE.Vector3().fromArray(to), speed, elapsed),
+    /** Climbs on one of your animals, or gets off with null. */
+    ride: (id: number | null) => net.send({ t: 'ride', id }),
     /** Throws what is in your hands. */
     throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
@@ -1199,6 +1226,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
+    me.seated = riding !== null;
+    // Your own mount goes where you steer it at once, rather than waiting on the server.
+    const mount = riding === null ? undefined : creatures.views.get(riding);
+    if (mount) mount.carry(controller.position.x, controller.position.y - (controller.mount?.seat ?? 0), controller.position.z, controller.yaw + Math.PI);
     me.setHeld(dead ? null : held());
     me.setWear(ui.wear.map((s) => s?.item ?? null));
     me.aimPitch = controller.pitch;
@@ -1225,7 +1256,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
     const hound = watched && creatures.views.get(watched.id);
-    if (hound) fixedView = { from: hound.root.position.clone().add(new THREE.Vector3().fromArray(watched!.offset)).toArray(), to: hound.root.position.clone().setY(hound.root.position.y + 0.5).toArray() };
+    if (hound) fixedView = { from: hound.root.position.clone().add(new THREE.Vector3().fromArray(watched!.offset)).toArray(), to: hound.root.position.clone().setY(hound.root.position.y + SPECIES[hound.species].height * 0.6).toArray() };
     if (fixedView) {
       camera.position.fromArray(fixedView.from);
       camera.lookAt(new THREE.Vector3().fromArray(fixedView.to));
@@ -1260,7 +1291,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.setHeld(r.state.held);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
-      r.avatar.update(dt, r.state.moving);
+      r.avatar.seated = r.state.riding !== undefined;
+      r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
     creatures.update(dt);
 

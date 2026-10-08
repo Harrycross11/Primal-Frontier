@@ -474,6 +474,18 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       part(g, new THREE.SphereGeometry(0.013, 8, 6), bone, -0.14, 0.028, -0.008);
       return g;
     }
+    case 'feedSack': {
+      // A tied hessian sack, plump with mash.
+      const cloth = mat('feed-sack', () => new THREE.MeshStandardMaterial({ color: 0xb59a6a, roughness: 1 }));
+      const sack = new THREE.SphereGeometry(0.06, 14, 10);
+      const pos = sack.attributes.position;
+      for (let i = 0; i < pos.count; i++) pos.setY(i, pos.getY(i) * (pos.getY(i) > 0 ? 1.5 : 1.1));
+      sack.computeVertexNormals();
+      part(g, sack, cloth, 0, 0.066, 0);
+      part(g, new THREE.CylinderGeometry(0.014, 0.022, 0.03, 10), cloth, 0, 0.16, 0);
+      part(g, new THREE.TorusGeometry(0.016, 0.004, 5, 12).rotateX(Math.PI / 2), mat('feed-string', () => new THREE.MeshStandardMaterial({ color: 0x5a4426, roughness: 1 })), 0, 0.152, 0);
+      return g;
+    }
     case 'mushroom': {
       const stem = mat('shroom-stem', () => new THREE.MeshStandardMaterial({ color: 0xd8cdb4, roughness: 0.9 }));
       const cap = mat('shroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));

@@ -1,5 +1,6 @@
 // Dedicated game server: serves the built client over HTTP and runs the game over a WebSocket at /ws.
 
+import type { Species } from '../shared/creatures.ts';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, relative, resolve } from 'node:path';
@@ -158,6 +159,8 @@ wss.on('connection', (ws) => {
       id = joined.id;
       sockets.set(id, ws);
       deliver(joined.out);
+      // START_PET=mule gives everyone who joins a tame one beside them (for screenshots).
+      if (process.env.START_PET) game.givePet(id, process.env.START_PET as Species);
       console.log(`player ${id} joined (${game.players.size} online)`);
       return;
     }
@@ -206,6 +209,9 @@ wss.on('connection', (ws) => {
         break;
       case 'use':
         deliver(game.use(id, msg.slot, now));
+        break;
+      case 'ride':
+        deliver(game.ride(id, typeof msg.id === 'number' ? msg.id : null));
         break;
       case 'respawn':
         deliver(game.respawn(id, typeof msg.bag === 'number' ? msg.bag : undefined, now));

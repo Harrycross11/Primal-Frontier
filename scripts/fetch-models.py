@@ -67,6 +67,18 @@ CHARACTERS = {
     'ashhound': '134831b49ca54a1ab8f5bf28441fc2fc',
 }
 
+# Rigged, animated Sketchfab animals: each land's animal to tame and ride. Only the clips the
+# game plays are kept (scripts/trim-animals.ts), with textures at most 1024 px.
+# Our name: (Sketchfab model uid, clips kept).
+ANIMALS = {
+    'mule': ('32ce1c2f276a4e27bb26b8bb99439bb7', ['Armature|idle', 'Armature|walk', 'Armature|trot', 'Armature|run', 'Armature|rear leg kick', 'Armature|grazing', 'Armature|wound']),
+    'elk': ('787834f9caa2474d9f1814b807c072d7', ['Stand_Breathing_01', 'Walk', 'Trot', 'Sprint', 'Stand_Eating_01', 'Hit_Stand_L01', 'Death_Stand_R01', 'JumpStand']),
+    'buffalo': ('d85ea147be1f4eb891d254f6899ff4d6', ['Idle', 'Walk', 'Run', 'Attack', 'Eating', 'Death']),
+    # Its clips are unnamed: idle, walk, a head toss, falling dead and a gallop.
+    'camel': ('3e1ddd35d0f045ab84177f6f68678ef3', ['Take 001', 'Take 001_1', 'Take 001_2', 'Take 001_3', 'Take 001_4']),
+    'bear': ('bffc3c87d2d148ff8533e1cc8a11c9f1', ['Stand_Idle_01', 'StandAngry_Breathing_01', 'Walk', 'Trot', 'Run', 'Attack_StandAngry_01_High', 'Hit_Stand_F01', 'Death_Stand_R01', 'Stand_Eating_01']),
+}
+
 # Game-ready Sketchfab models for held weapons and tools: kept as modelled, with their textures
 # shrunk to at most 1024 px (needs Pillow). Named after the item they replace.
 PROPS = {
@@ -280,6 +292,21 @@ def main():
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(get(link['glb']['url']))
+        print('saved', name)
+    for name, (uid, keep) in ANIMALS.items():
+        scans.append(sketchfab_credit(name, uid, 'unused animations dropped, textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        out = os.path.join(OUT, f'{name}.glb')
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, 'raw.glb')
+            with open(raw, 'wb') as f:
+                f.write(get(link['glb']['url']))
+            # Some use the old specular-glossiness materials, which three.js no longer reads.
+            subprocess.run([*CLI, 'metalrough', raw, raw], capture_output=True)
+            subprocess.run(['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'trim-animals.ts'), raw, out, *keep], check=True)
+            subprocess.run([*CLI, 'resize', out, out, '--width', '1024', '--height', '1024'], check=True, capture_output=True)
         print('saved', name)
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write(

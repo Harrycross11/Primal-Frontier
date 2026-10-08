@@ -27,6 +27,8 @@ export interface PlayerState {
   wear: (ItemId | null)[];
   /** Skin, hair, clothing and gear they picked before joining. */
   look: Look;
+  /** The animal they are riding. */
+  riding?: number;
 }
 
 /** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
@@ -69,6 +71,8 @@ export type ClientMessage =
   | { t: 'melee'; slot: number; d: Vec3 }
   /** Use a bandage or syringe, eat, drink or take pills. */
   | { t: 'use'; slot: number }
+  /** Climb on your own tame animal, or (id null) get off the one you are riding. */
+  | { t: 'ride'; id: number | null }
   /** Wake up somewhere random, or in one of your sleeping bags. */
   | { t: 'respawn'; bag?: number }
   /** Ask a tool cupboard to trust you, or make it forget everyone else. */
@@ -120,6 +124,8 @@ export type ServerMessage =
   /** A deployable was placed or changed (set), or destroyed (null). */
   | { t: 'deployable'; id: number; d: Deployable | null; by: number }
   | { t: 'correct'; x: number; y: number; z: number }
+  /** You climbed on an animal (id), or got off one (id null) at this spot. */
+  | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }
   /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
   | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause }

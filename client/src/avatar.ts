@@ -110,6 +110,8 @@ export class Avatar {
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
+  /** Astride an animal: sitting, legs either side. */
+  seated = false;
   private tag: THREE.Sprite | null = null;
   /** Bind-pose positions of the bones, for hanging armour on them. */
   private boneAt = new Map<BoneName, THREE.Vector3>();
@@ -557,7 +559,7 @@ export class Avatar {
     // A foot lands each time the stride swings through the middle.
     const sign = Math.sign(s);
     if (sign !== 0 && sign !== this.stepSign) {
-      if (this.stepSign !== 0 && w > 0.5 && !this.dead && this.speed > 1) this.onStep?.(r > 0.5);
+      if (this.stepSign !== 0 && w > 0.5 && !this.dead && !this.seated && this.speed > 1) this.onStep?.(r > 0.5);
       this.stepSign = sign;
     }
     const c = Math.cos(this.phase);
@@ -585,6 +587,19 @@ export class Avatar {
     b.torso.rotation.set(lean, s * 0.1 * w, 0);
     b.torso.scale.setScalar(1 + breathe * 0.006 * (1 - w));
     b.head.rotation.set(-lean * 0.7, Math.sin(this.time * 0.4) * 0.15 * (1 - w), 0);
+
+    if (this.seated && !this.dead) {
+      // Sat on an animal's back (the avatar stands at the saddle): thighs forward and apart,
+      // shins hanging, sitting up straight with a gentle sway as it moves.
+      b.root.position.set(0, -0.93, 0);
+      b.hipL.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipL')!.x));
+      b.hipR.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipR')!.x));
+      b.kneeL.rotation.x = b.kneeR.rotation.x = 1.25;
+      b.torso.rotation.set(0.05 + s * 0.04 * w, 0, 0);
+      b.shoulderL.rotation.set(-0.5, 0, hang);
+      b.shoulderR.rotation.set(-0.5, 0, -hang);
+      b.elbowL.rotation.x = b.elbowR.rotation.x = -0.9;
+    }
 
     if (this.dead) {
       // Limp: arms out, knees slightly bent, lying on the back.

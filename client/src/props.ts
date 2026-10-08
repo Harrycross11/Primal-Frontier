@@ -532,6 +532,7 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'bottledWater':
     case 'antiRadPills':
     case 'mushroom':
+    case 'feedSack':
     case 'rawMeat':
     case 'cookedMeat':
       // Held upright in the palm.

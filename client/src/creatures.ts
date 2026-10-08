@@ -1,28 +1,115 @@
-// Ashhounds as you see and hear them: the scanned hyena re-coloured ash grey, animated from the
-// server's snapshots, with a growl, a snarl as it bites, a yelp when hit and a whine as it dies.
-// Tame ones wear a rag collar and their owner's name.
+// The animals as you see and hear them, animated from the server's snapshots: Ashhounds (the
+// scanned hyena re-coloured ash grey, with a growl, a snarl as it bites, a yelp when hit and a
+// whine as it dies) and each land's big animal. Tame ones wear their owner's name: a hound a
+// rag collar, an animal you can ride a saddle.
 
 import * as THREE from 'three';
-import { ASHHOUND, rayCreature, type CreatureAnim, type CreatureState } from '../../shared/creatures.ts';
+import { SPECIES, rayCreature, type CreatureAnim, type CreatureState, type Species } from '../../shared/creatures.ts';
 import type { Vec3 } from '../../shared/combat.ts';
 import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
 import { character, characterClips } from './models.ts';
 
-/** The clip each thing a hound does plays, and how fast. */
-const CLIPS: Record<CreatureAnim, [string, number]> = {
-  idle: ['Idle', 1],
-  snarl: ['Fight Idle', 1],
-  walk: ['Walk', 1.15],
-  run: ['Run', 1.25],
-  attack: ['Attack', 2.1],
-  hit: ['Hit Front', 1.4],
-  eat: ['Eating', 1],
-  dead: ['Death', 0.8],
+type Clips = Partial<Record<CreatureAnim, [string, number]>>;
+
+/**
+ * Each animal's model, the clip each thing it does plays (and how fast), and its size: the
+ * hound is scaled to the top of its head, the rest nose to tail, matching the server's bodies.
+ */
+const LOOKS: Record<Species, { model: string; clips: Clips; height?: number }> = {
+  ashhound: {
+    model: 'ashhound',
+    height: 0.92,
+    clips: {
+      idle: ['Idle', 1],
+      snarl: ['Fight Idle', 1],
+      walk: ['Walk', 1.15],
+      trot: ['Run', 0.9],
+      run: ['Run', 1.25],
+      attack: ['Attack', 2.1],
+      hit: ['Hit Front', 1.4],
+      eat: ['Eating', 1],
+      dead: ['Death', 0.8],
+    },
+  },
+  mule: {
+    model: 'mule',
+    clips: {
+      idle: ['Armature|idle', 1],
+      snarl: ['Armature|idle', 1.4],
+      walk: ['Armature|walk', 1],
+      trot: ['Armature|trot', 1],
+      run: ['Armature|run', 0.9],
+      attack: ['Armature|rear leg kick', 1.2],
+      eat: ['Armature|grazing', 1],
+      dead: ['Armature|wound', 1.4],
+    },
+  },
+  elk: {
+    model: 'elk',
+    clips: {
+      idle: ['Stand_Breathing_01', 1],
+      snarl: ['Stand_Breathing_01', 1.5],
+      walk: ['Walk', 1],
+      trot: ['Trot', 1],
+      run: ['Sprint', 1],
+      attack: ['JumpStand', 1.3],
+      hit: ['Hit_Stand_L01', 1.2],
+      eat: ['Stand_Eating_01', 1],
+      dead: ['Death_Stand_R01', 1],
+    },
+  },
+  buffalo: {
+    model: 'buffalo',
+    clips: {
+      idle: ['Idle', 1],
+      snarl: ['Idle', 1.6],
+      walk: ['Walk', 1],
+      trot: ['Run', 0.75],
+      run: ['Run', 1],
+      attack: ['Attack', 1.3],
+      eat: ['Eating', 1],
+      dead: ['Death', 1],
+    },
+  },
+  camel: {
+    model: 'camel',
+    clips: {
+      idle: ['Take 001', 1],
+      snarl: ['Take 001', 1],
+      walk: ['Take 001_1', 1],
+      trot: ['Take 001_4', 0.75],
+      run: ['Take 001_4', 1],
+      attack: ['Take 001_2', 1.2],
+      eat: ['Take 001_2', 0.6],
+      dead: ['Take 001_3', 1],
+    },
+  },
+  bear: {
+    model: 'bear',
+    clips: {
+      idle: ['Stand_Idle_01', 1],
+      snarl: ['StandAngry_Breathing_01', 1],
+      walk: ['Walk', 1],
+      trot: ['Trot', 1],
+      run: ['Run', 1],
+      attack: ['Attack_StandAngry_01_High', 1.3],
+      hit: ['Hit_Stand_F01', 1.2],
+      eat: ['Stand_Eating_01', 1],
+      dead: ['Death_Stand_R01', 1],
+    },
+  },
 };
 const ONCE = new Set<CreatureAnim>(['attack', 'hit', 'dead']);
-/** Height of the top of its head, metres, matching the server's hit boxes. */
-const HEIGHT = 0.92;
+/** Sounds each animal makes: when it attacks, is hurt, dies, starts running, and now and then. */
+const VOICES: Record<Species, { attack: string[]; hurt: string; dead: string; run?: string; idle: string[]; pitch?: number }> = {
+  ashhound: { attack: ['hound-snarl', 'hound-growl'], hurt: 'hound-hurt', dead: 'hound-whine', run: 'hound-bark', idle: ['hound-growl2', 'hound-grumble'] },
+  mule: { attack: ['mule-bray'], hurt: 'animal-hurt', dead: 'animal-hurt', run: 'mule-bray', idle: ['mule-bray'] },
+  elk: { attack: ['elk-call'], hurt: 'animal-hurt', dead: 'animal-hurt', run: 'elk-call', idle: ['elk-call'] },
+  buffalo: { attack: ['buffalo-grunt'], hurt: 'animal-hurt', dead: 'buffalo-grunt', run: 'buffalo-grunt', idle: ['buffalo-grunt'] },
+  camel: { attack: ['camel-groan'], hurt: 'animal-hurt', dead: 'camel-groan', idle: ['camel-groan'] },
+  bear: { attack: ['bear-roar'], hurt: 'bear-hurt', dead: 'bear-hurt', run: 'bear-roar', idle: ['bear-growl'] },
+};
 
 /** The hyena's fur turned to grey ash: most of the colour drained out, the spots left dark. */
 function ashen(m: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
@@ -65,36 +152,62 @@ class HoundView {
   /** Seconds until it next growls on its own. */
   growlIn = 2 + Math.random() * 8;
 
+  readonly species: Species;
+  private info: (typeof SPECIES)[Species];
+  /** Where its saddle sits on its back, in its own frame, for those that can be ridden. */
+  private saddle: THREE.Group | null = null;
+  private lastAt = new THREE.Vector3();
+  private pace = 0;
+
   constructor(state: CreatureState) {
     this.state = state;
+    this.species = state.species ?? 'ashhound';
+    this.info = SPECIES[this.species];
     this.root.position.set(state.x, state.y, state.z);
     this.root.rotation.y = state.yaw;
     this.target.copy(this.root.position);
-    const body = character('ashhound');
+    this.lastAt.copy(this.root.position);
+    const look = LOOKS[this.species];
+    const body = character(look.model);
     if (!body) return;
-    // Scale the scan to the size the server plays it at, feet on the ground.
     body.updateMatrixWorld(true);
     body.traverse((o) => (o as THREE.SkinnedMesh).skeleton?.update());
-    // Measured from the skinned vertices, as the raw mesh bounds ignore the skeleton.
-    const box = new THREE.Box3().setFromObject(body, true);
-    const s = HEIGHT / (box.max.y - box.min.y);
+    // Turn it to face +z, the way the server's animals look: towards its head.
+    const headBone = this.species === 'ashhound' ? null : findBone(body, /head/i);
+    const holder = new THREE.Group();
+    holder.add(body);
+    if (headBone) {
+      const box0 = new THREE.Box3().setFromObject(body, true);
+      const mid = box0.getCenter(new THREE.Vector3());
+      const head = headBone.getWorldPosition(new THREE.Vector3());
+      const angle = Math.atan2(head.x - mid.x, head.z - mid.z);
+      // Models are built along an axis, so a quarter turn is always right.
+      holder.rotation.y = -Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
+    }
+    holder.updateMatrixWorld(true);
+    // Scale the scan to the size the server plays it at, feet on the ground. Measured from the
+    // skinned vertices, as the raw mesh bounds ignore the skeleton.
+    const box = new THREE.Box3().setFromObject(holder, true);
+    const s = look.height ? look.height / (box.max.y - box.min.y) : this.info.length / (box.max.z - box.min.z);
     const centre = box.getCenter(new THREE.Vector3());
-    body.scale.multiplyScalar(s);
-    body.position.set(-centre.x * s, -box.min.y * s, -centre.z * s);
-    ashMaterial ??= new Map();
-    body.traverse((o) => {
-      const mesh = o as THREE.SkinnedMesh;
-      if (!mesh.isMesh) return;
-      const m = mesh.material as THREE.MeshStandardMaterial;
-      if (!ashMaterial!.has(m)) ashMaterial!.set(m, ashen(m));
-      mesh.material = ashMaterial!.get(m)!;
-    });
-    this.neck = body.getObjectByName('head1_neck_024') ?? null;
-    this.head = body.getObjectByName('head1_head_025') ?? null;
-    this.root.add(body);
+    holder.scale.multiplyScalar(s);
+    holder.position.set(-centre.x * s, -box.min.y * s, -centre.z * s);
+    if (this.species === 'ashhound') {
+      ashMaterial ??= new Map();
+      body.traverse((o) => {
+        const mesh = o as THREE.SkinnedMesh;
+        if (!mesh.isMesh) return;
+        const m = mesh.material as THREE.MeshStandardMaterial;
+        if (!ashMaterial!.has(m)) ashMaterial!.set(m, ashen(m));
+        mesh.material = ashMaterial!.get(m)!;
+      });
+      this.neck = body.getObjectByName('head1_neck_024') ?? null;
+      this.head = body.getObjectByName('head1_head_025') ?? null;
+    }
+    this.root.add(holder);
     this.mixer = new THREE.AnimationMixer(body);
-    const clips = characterClips('ashhound');
-    for (const [anim, [name, speed]] of Object.entries(CLIPS) as [CreatureAnim, [string, number]][]) {
+    const clips = characterClips(look.model);
+    for (const [anim, [name, speed]] of Object.entries(look.clips) as [CreatureAnim, [string, number]][]) {
       const clip = clips.find((c) => c.name === name);
       if (!clip) continue;
       const action = this.mixer.clipAction(clip);
@@ -106,8 +219,15 @@ class HoundView {
       this.actions.set(anim, action);
     }
     this.play(state.anim, 0);
-    // Some way through its idle, so a pack never breathes in step.
+    // Some way through its idle, so a herd never breathes in step.
     this.mixer.update(Math.random() * 2);
+  }
+
+  /** Puts it right under its rider (you), rather than where the server last had it. */
+  carry(x: number, y: number, z: number, yaw: number) {
+    this.target.set(x, y, z);
+    this.root.position.set(x, y, z);
+    this.state = { ...this.state, yaw };
   }
 
   /** A new snapshot from the server; returns the animation it changed from, if it did. */
@@ -115,7 +235,7 @@ class HoundView {
     const was = this.state.anim;
     this.state = state;
     this.target.set(state.x, state.y, state.z);
-    this.setOwner(state.owner !== undefined ? (state.name ?? 'Ashhound') : null);
+    this.setOwner(state.owner !== undefined ? (state.name ?? this.info.name) : null);
     if (state.anim === was && !(state.anim === 'attack' && this.finished())) return null;
     this.play(state.anim, 0.15);
     return was;
@@ -127,7 +247,8 @@ class HoundView {
   }
 
   private play(anim: CreatureAnim, fade: number) {
-    const next = this.actions.get(anim);
+    // A clip it has none of (a flinch, say) leaves it doing what it was.
+    const next = this.actions.get(anim) ?? (anim === 'trot' ? this.actions.get('run') : undefined);
     if (!next) return;
     const prev = this.playing ? this.actions.get(this.playing) : undefined;
     next.reset().play();
@@ -135,26 +256,45 @@ class HoundView {
     this.playing = anim;
   }
 
-  /** A tame hound gets a collar of red rag and its name above it. */
+  /** A tame hound gets a collar of red rag, an animal to ride a saddle, and its name above it. */
   private setOwner(name: string | null) {
     if ((this.tag !== null) === (name !== null)) return;
     if (name) {
-      this.collar = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.028, 6, 18), new THREE.MeshStandardMaterial({ color: 0x6a2018, roughness: 0.95 }));
-      this.collar.castShadow = true;
-      this.root.add(this.collar);
+      if (this.species === 'ashhound') {
+        this.collar = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.028, 6, 18), new THREE.MeshStandardMaterial({ color: 0x6a2018, roughness: 0.95 }));
+        this.collar.castShadow = true;
+        this.root.add(this.collar);
+      } else if (this.info.ride) {
+        this.saddle = buildSaddle(this.info.width, this.info.ride.seat);
+        this.root.add(this.saddle);
+      }
       this.tag = nameTag(name, 0x8a2a1e);
-      this.tag.position.y = 1.25;
+      this.tag.position.y = this.species === 'ashhound' ? 1.25 : (this.info.ride?.seat ?? this.info.height) + 1.2;
       this.root.add(this.tag);
     } else {
-      if (this.collar) this.root.remove(this.collar);
-      if (this.tag) this.root.remove(this.tag);
+      for (const o of [this.collar, this.saddle, this.tag]) if (o) this.root.remove(o);
       this.collar = null;
+      this.saddle = null;
       this.tag = null;
     }
   }
 
   update(dt: number) {
     this.root.position.lerp(this.target, Math.min(1, dt * 10));
+    // Legs keep pace with how fast it is really going, so a ridden animal never skates.
+    if (dt > 0) {
+      const v = Math.hypot(this.root.position.x - this.lastAt.x, this.root.position.z - this.lastAt.z) / dt;
+      this.pace += (v - this.pace) * Math.min(1, dt * 6);
+      this.lastAt.copy(this.root.position);
+      const anim = this.playing;
+      const look = LOOKS[this.species].clips;
+      const action = anim && this.actions.get(anim);
+      const base = anim && (look[anim] ?? (anim === 'trot' ? look.run : undefined));
+      if (action && base && (anim === 'walk' || anim === 'trot' || anim === 'run')) {
+        const natural = anim === 'walk' ? this.info.walk * 1.1 : anim === 'trot' ? (this.info.ride?.walk ?? this.info.run * 0.6) : this.info.ride?.sprint ?? this.info.run;
+        action.timeScale = base[1] * THREE.MathUtils.clamp(this.pace / natural, 0.6, 1.6);
+      }
+    }
     let d = this.state.yaw - this.root.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     this.root.rotation.y += d * Math.min(1, dt * 10);
@@ -173,6 +313,8 @@ class HoundView {
 
 export class Creatures {
   readonly views = new Map<number, HoundView>();
+  /** The animal you are riding, which your own aim and shots pass over. */
+  mine: number | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -201,14 +343,16 @@ export class Creatures {
     }
   }
 
-  /** The sound of a hound starting something new. */
+  /** The sound of an animal starting something new. */
   private voice(view: HoundView, anim: CreatureAnim, was: CreatureAnim) {
     const at = view.root.position;
-    if (anim === 'attack') this.effects.creatureSound(Math.random() < 0.5 ? 'hound-snarl' : 'hound-growl', at, 1);
-    else if (anim === 'hit') this.effects.creatureSound('hound-hurt', at, 0.9);
-    else if (anim === 'dead') this.effects.creatureSound('hound-whine', at, 0.9);
-    else if (anim === 'run' && was !== 'run' && view.state.owner === undefined) this.effects.creatureSound('hound-bark', at, 1);
-    else if (anim === 'eat') this.effects.creatureSound('hound-grumble', at, 0.6);
+    const v = VOICES[view.species];
+    const any = (list: string[]) => list[Math.floor(Math.random() * list.length)];
+    if (anim === 'attack') this.effects.creatureSound(any(v.attack), at, 1);
+    else if (anim === 'hit') this.effects.creatureSound(v.hurt, at, 0.9);
+    else if (anim === 'dead') this.effects.creatureSound(v.dead, at, 0.9);
+    else if (anim === 'run' && was !== 'run' && view.state.owner === undefined && v.run) this.effects.creatureSound(v.run, at, 1);
+    else if (anim === 'eat' && view.species === 'ashhound') this.effects.creatureSound('hound-grumble', at, 0.6);
   }
 
   update(dt: number) {
@@ -218,8 +362,10 @@ export class Creatures {
       // Now and then a low growl, more often when squaring up to a fight.
       view.growlIn -= dt * (view.state.anim === 'snarl' ? 4 : 1);
       if (view.growlIn > 0) continue;
-      view.growlIn = 4 + Math.random() * 10;
-      this.effects.creatureSound(Math.random() < 0.5 ? 'hound-growl2' : 'hound-grumble', view.root.position, 0.55);
+      const idle = VOICES[view.species].idle;
+      // Hounds growl often; the big grazers call out now and then.
+      view.growlIn = view.species === 'ashhound' || view.species === 'bear' ? 4 + Math.random() * 10 : 15 + Math.random() * 30;
+      this.effects.creatureSound(idle[Math.floor(Math.random() * idle.length)], view.root.position, 0.55);
     }
   }
 
@@ -227,24 +373,68 @@ export class Creatures {
   ray(o: Vec3, d: Vec3, max: number): { view: HoundView; t: number; head: boolean } | null {
     let best: { view: HoundView; t: number; head: boolean } | null = null;
     for (const view of this.views.values()) {
-      if (view.state.anim === 'dead') continue;
+      if (view.state.anim === 'dead' || view.state.id === this.mine) continue;
       const p = view.root.position;
-      const hit = rayCreature(o, d, { x: p.x, y: p.y, z: p.z, yaw: view.root.rotation.y }, best?.t ?? max);
+      const hit = rayCreature(o, d, { x: p.x, y: p.y, z: p.z, yaw: view.root.rotation.y, species: view.species }, best?.t ?? max);
       if (hit) best = { view, t: hit.t, head: hit.head };
     }
     return best;
   }
 
-  /** What the crosshair says over a hound. */
+  /** What the crosshair says over an animal. */
   describe(view: HoundView, me: number, holding: string | null, near: boolean): string {
     const s = view.state;
-    if (s.anim === 'dead') return 'Dead Ashhound';
+    const info = SPECIES[view.species];
+    if (s.anim === 'dead') return `Dead ${info.name}`;
+    const food = holding === info.food;
     if (s.owner !== undefined) {
-      const label = s.owner === me ? `${s.name} (yours)` : (s.name ?? 'Ashhound');
-      return holding === 'cookedMeat' && s.owner === me && s.hp < 0.99 ? `${label}  ·  ${near ? 'Left click to feed it' : 'Get closer to feed it'}` : label;
+      const label = s.owner === me ? `${s.name} (yours)` : (s.name ?? info.name);
+      if (food && s.owner === me && s.hp < 0.99) return `${label}  ·  ${near ? 'Left click to feed it' : 'Get closer to feed it'}`;
+      if (s.owner === me && info.ride && s.rider === undefined) return `${label}  ·  E to ride`;
+      return label;
     }
-    const label = s.fed ? `Wild Ashhound (fed ${s.fed}/${ASHHOUND.tameFeeds})` : 'Wild Ashhound';
-    if (holding === 'cookedMeat') return `${label}  ·  ${near ? 'Left click to feed it' : 'Get closer to feed it'}`;
+    const label = s.fed ? `Wild ${info.name} (fed ${s.fed}/${info.tameFeeds})` : `Wild ${info.name}`;
+    if (food) return `${label}  ·  ${near ? 'Left click to feed it' : 'Get closer to feed it'}`;
+    if (holding === 'cookedMeat' || holding === 'feedSack') return `${label}  ·  It eats ${info.food === 'feedSack' ? 'from a feed sack' : 'cooked meat'}`;
     return label;
   }
+}
+
+/** The first bone whose name matches, for finding an animal's head. */
+function findBone(root: THREE.Object3D, name: RegExp): THREE.Object3D | null {
+  let found: THREE.Object3D | null = null;
+  root.traverse((o) => {
+    if (!found && (o as THREE.Bone).isBone && name.test(o.name) && !/end|top|nub/i.test(o.name)) found = o;
+  });
+  return found;
+}
+
+/** A worn leather saddle on a blanket, with a horn at the front, sat on an animal's back. */
+function buildSaddle(width: number, seat: number): THREE.Group {
+  const g = new THREE.Group();
+  const leather = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.7 });
+  const blanket = new THREE.MeshStandardMaterial({ color: 0x7a3a22, roughness: 1 });
+  const w = Math.max(0.5, width * 0.95);
+  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.62, w * 0.62, 0.7, 16, 1, true, -Math.PI * 0.42, Math.PI * 0.84), blanket);
+  // Laid along the back, draped over the top and down both flanks.
+  cloth.rotation.x = -Math.PI / 2;
+  cloth.position.y = seat - 0.08 - w * 0.62;
+  cloth.material.side = THREE.DoubleSide;
+  g.add(cloth);
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, 0.08, 0.5), leather);
+  pad.position.y = seat - 0.04;
+  g.add(pad);
+  const cantle = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, 0.14, 0.06), leather);
+  cantle.position.set(0, seat + 0.04, -0.24);
+  g.add(cantle);
+  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 0.14, 8), leather);
+  horn.position.set(0, seat + 0.06, 0.24);
+  g.add(horn);
+  for (const side of [-1, 1]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.55, 0.05), leather);
+    strap.position.set(side * w * 0.45, seat - 0.35, 0.05);
+    g.add(strap);
+  }
+  g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+  return g;
 }

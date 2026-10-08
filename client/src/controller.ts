@@ -29,6 +29,8 @@ export class Controller {
   private onGround = false;
   private keys = new Set<string>();
   private raycaster = new THREE.Raycaster();
+  /** The animal being ridden: its pace at a walk and flat out, and how high its saddle sits. */
+  mount: { walk: number; sprint: number; seat: number } | null = null;
   /** Called on touching down after a jump or fall, with the downward speed. */
   onLand: ((speed: number) => void) | null = null;
   /** Used by automated tests to walk somewhere without a keyboard. */
@@ -81,7 +83,8 @@ export class Controller {
     const colliders = this.nearbyColliders();
     this.moving = dir.lengthSq() > 0;
     if (this.moving) {
-      const speed = this.keys.has('ShiftLeft') ? PLAYER_SPRINT : PLAYER_SPEED;
+      const m = this.mount;
+      const speed = this.keys.has('ShiftLeft') ? (m?.sprint ?? PLAYER_SPRINT) : (m?.walk ?? PLAYER_SPEED);
       dir.normalize().multiplyScalar(speed * dt);
       // Sub-steps stop fast movement from tunnelling through thin walls.
       const steps = Math.ceil(dir.length() / 0.1);
@@ -91,6 +94,13 @@ export class Controller {
       }
     }
 
+    if (this.mount) {
+      // In the saddle: carried over the ground at the animal's back.
+      this.position.y = terrainHeight(this.world.seed, this.position.x, this.position.z) + this.mount.seat;
+      this.vy = 0;
+      this.onGround = true;
+      return;
+    }
     if (this.keys.has('Space') && this.onGround) {
       this.vy = JUMP_SPEED;
       this.onGround = false;
@@ -114,7 +124,8 @@ export class Controller {
       camera.lookAt(eye.addScaledVector(look, 10));
       return;
     }
-    const dist = 3.9 * (1 - 0.5 * zoom);
+    // Further back in the saddle, so the animal is in view.
+    const dist = (this.mount ? 5.6 : 3.9) * (1 - 0.5 * zoom);
     const back = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch),
       -Math.sin(this.pitch),
