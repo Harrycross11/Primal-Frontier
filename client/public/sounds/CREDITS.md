@@ -1,6 +1,6 @@
 # Sounds
 
-Recordings from Freesound and OpenGameArt, all CC0 (public domain), cut to one shot, swing, hit or call.
+Recordings from Freesound and OpenGameArt, all CC0, and Wikimedia Commons, all public domain or CC0, cut to one shot, swing, hit or call.
 
 - shot-eoka.mp3: "S20-04 Flintlock rifle fire.wav" by craigsmith (https://freesound.org/people/craigsmith/sounds/675618/), CC0
 - shot-waterpipe.mp3: "20 gauge shotgun gunshot" by michorvath (https://freesound.org/people/michorvath/sounds/427595/), CC0
@@ -70,3 +70,7 @@ Recordings from Freesound and OpenGameArt, all CC0 (public domain), cut to one s
 - hound-bark.mp3: "Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds), CC0
 - hound-hurt.mp3: "Dog Grunt" by qubodup (https://opengameart.org/content/dog-grunt), CC0
 - hound-whine.mp3: "Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds), CC0
+- bear-hurt.mp3: "Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls), CC0
+- camel-groan.mp3: "Camel Groan" by AntumDeluge, from a recording by craigsmith (https://opengameart.org/content/camel-groan), CC0
+- bear-roar.mp3: "Yellowstone sound library - Grizzly Bears Roar - 001" by NPS & MSU Acoustic Atlas / Jennifer Jerrett (https://commons.wikimedia.org/wiki/File:Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3), public domain
+- elk-call.mp3: "American Elk Bugling" by Jim Pisarowicz, National Park Service (https://commons.wikimedia.org/wiki/File:American_Elk_Bugling.ogg), public domain

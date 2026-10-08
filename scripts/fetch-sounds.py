@@ -1,11 +1,11 @@
 """Downloads real recorded sounds for each weapon and tool into client/public/sounds as short mp3s.
 
-Every sound comes from Freesound under CC0 (public domain); each is credited in CREDITS.md
-anyway. Each recording is cut down to the one shot, swing or hit the game needs: the cut
+Every sound comes from Freesound or OpenGameArt under CC0, or from Wikimedia Commons in the
+public domain; each is credited in CREDITS.md anyway. Each recording is cut down to the one shot, swing or hit the game needs: the cut
 starts on the first sharp attack after the given time, fades out at the end, and is
 normalised. The output is committed, so this only needs running again to change a sound.
 Needs ffmpeg, numpy and network access to freesound.org (and opengameart.org, plus py7zr for its
-archives, for the animal sounds).
+archives, and upload.wikimedia.org, for the animal sounds).
 
     python3 scripts/fetch-sounds.py                 # every sound
     python3 scripts/fetch-sounds.py shot-l96        # just these
@@ -18,7 +18,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
+import zipfile
 
 import numpy as np
 
@@ -106,13 +109,30 @@ OGA_SOUNDS = {
     'hound-bark': ('dog.7z', 'Dog/Dog Bark.wav', 0.0, 0.39, '"Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds)'),
     'hound-hurt': ('dog-frieda-grunt-96khz-01.flac', None, 0.0, 0.58, '"Dog Grunt" by qubodup (https://opengameart.org/content/dog-grunt)'),
     'hound-whine': ('dog.7z', 'Dog/Sad Dog.wav', 0.0, 1.6, '"Dog sounds" by pauliuw (https://opengameart.org/content/dog-sounds)'),
+    'bear-hurt': ('bear.zip', 'flac/bear_01.flac', 0.0, 1.0, '"Bear Growls" by AntumDeluge, from the U.S. Fish & Wildlife Service (https://opengameart.org/content/bear-growls)'),
+    'camel-groan': ('camel.zip', 'flac/camel_01.flac', 0.0, 2.8, '"Camel Groan" by AntumDeluge, from a recording by craigsmith (https://opengameart.org/content/camel-groan)'),
+}
+
+# Animal sounds from Wikimedia Commons: our name: (file, seconds in, seconds to keep, credit, licence).
+COMMONS = 'https://upload.wikimedia.org/wikipedia/commons/'
+NPS_BEAR = 'by NPS & MSU Acoustic Atlas / Jennifer Jerrett (https://commons.wikimedia.org/wiki/File:{})'
+WIKI_SOUNDS = {
+    'bear-roar': ('e/ef/Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3', 2.0, 2.2, '"Yellowstone sound library - Grizzly Bears Roar - 001" ' + NPS_BEAR.format('Yellowstone_sound_library_-_Grizzly_Bears_Roar_-_001.mp3'), 'public domain'),
+    'elk-call': ('8/88/American_Elk_Bugling.ogg', 0.5, 2.8, '"American Elk Bugling" by Jim Pisarowicz, National Park Service (https://commons.wikimedia.org/wiki/File:American_Elk_Bugling.ogg)', 'public domain'),
 }
 
 
 def get(url: str) -> bytes:
     req = urllib.request.Request(url, headers={'User-Agent': 'primal-frontier-fetch'})
-    with urllib.request.urlopen(req) as r:
-        return r.read()
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            # Wikimedia rate-limits downloads; wait as long as it asks and try again.
+            if e.code != 429 or attempt == 3:
+                raise
+            time.sleep(int(e.headers.get('Retry-After') or 30))
 
 
 def cut(src: str, start: float, length: float) -> np.ndarray:
@@ -184,7 +204,11 @@ def main():
             src = os.path.join(tmp, file)
             with open(src, 'wb') as f:
                 f.write(get(f'https://opengameart.org/sites/default/files/{file}'))
-            if member:
+            if member and file.endswith('.zip'):
+                with zipfile.ZipFile(src) as archive:
+                    archive.extract(member, tmp)
+                src = os.path.join(tmp, member)
+            elif member:
                 import py7zr
 
                 with py7zr.SevenZipFile(src) as archive:
@@ -192,14 +216,24 @@ def main():
                 src = os.path.join(tmp, member)
             save(cut(src, start, length), name, tmp)
         print('saved', name, f'{length:.2f}s')
+    for name, (file, start, length, by, licence) in WIKI_SOUNDS.items():
+        credits.append(f'- {name}.mp3: {by}, {licence}')
+        if only and name not in only:
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, os.path.basename(file))
+            with open(src, 'wb') as f:
+                f.write(get(COMMONS + file))
+            save(cut(src, start, length), name, tmp)
+        print('saved', name, f'{length:.2f}s')
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write(
-            '# Sounds\n\nRecordings from Freesound and OpenGameArt, all CC0 (public domain), cut to one shot, swing, hit or call.\n\n'
+            '# Sounds\n\nRecordings from Freesound and OpenGameArt, all CC0, and Wikimedia Commons, all public domain or CC0, cut to one shot, swing, hit or call.\n\n'
             + '\n'.join(credits)
             + '\n'
         )
     with open(os.path.join(OUT, 'index.json'), 'w') as f:
-        json.dump(sorted([*SOUNDS, *OGA_SOUNDS]), f)
+        json.dump(sorted([*SOUNDS, *OGA_SOUNDS, *WIKI_SOUNDS]), f)
 
 
 if __name__ == '__main__':
