@@ -69,13 +69,13 @@ export function packDens(seed: number): [number, number][] {
   const dens: [number, number][] = [];
   for (let n = 0; n < PACKS; n++) {
     let den: [number, number] = [0, 0];
-    for (let tries = 0; tries < 80; tries++) {
+    for (let tries = 0; tries < 300; tries++) {
       const angle = rand() * Math.PI * 2;
       const r = CORE_RADIUS + 25 + rand() * (HALF_WORLD * 0.8 - CORE_RADIUS - 25);
       den = [Math.cos(angle) * r, Math.sin(angle) * r];
       const land = biomeAt(seed, den[0], den[1]);
       const right = n < FOREST_PACKS ? land === 'deadwood' : land !== 'ashlands' && land !== 'deadwood';
-      const apart = dens.every(([x, z]) => Math.hypot(x - den[0], z - den[1]) > 70);
+      const apart = dens.every(([x, z]) => Math.hypot(x - den[0], z - den[1]) > 60);
       if (right && apart && clearOfRuins(seed, den[0], den[1], 18)) break;
     }
     dens.push(den);

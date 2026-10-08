@@ -3,7 +3,8 @@
 The files are committed, so the game and its deploy never fetch anything at run time; this
 script only needs running again to change or add a texture. Needs Pillow and numpy.
 
-    python3 scripts/fetch-textures.py
+    python3 scripts/fetch-textures.py            (everything)
+    python3 scripts/fetch-textures.py snow cliff (just those)
 """
 
 import io
@@ -36,6 +37,12 @@ SURFACES = {
     'cloth': ('hessian_230', '1k', 190),
     'leather': ('brown_leather', '1k', 190),
     'wood-grain': ('fine_grained_wood', '1k', 190),
+    # The ground of each land, and bare rock for cliffs and steep slopes.
+    'forest-floor': ('forrest_ground_01', '1k', None),
+    'red-earth': ('red_laterite_soil_stones', '1k', None),
+    'lake-bed': ('dry_mud_field_001', '1k', None),
+    'snow': ('snow_02', '1k', None),
+    'cliff': ('rock_face', '1k', None),
 }
 SKY = ('wasteland_clouds_puresky', '2k')
 MAPS = {'diff': 'Diffuse', 'nor': 'nor_gl', 'rough': 'Rough'}
@@ -57,7 +64,11 @@ def neutral(img: Image.Image, target: int) -> Image.Image:
 def main():
     os.makedirs(OUT, exist_ok=True)
     credits = []
+    only = sys.argv[1:]
     for name, (asset, res, grey) in SURFACES.items():
+        credits.append(f'- {name}: https://polyhaven.com/a/{asset}')
+        if only and name not in only:
+            continue
         files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
         for short, key in MAPS.items():
             img = Image.open(io.BytesIO(get(files[key][res]['jpg']['url']))).convert('RGB')
@@ -66,12 +77,12 @@ def main():
             if short == 'rough':
                 img = img.convert('L')
             img.save(os.path.join(OUT, f'{name}_{short}.jpg'), quality=85 if short != 'nor' else 90, optimize=True)
-        credits.append(f'- {name}: https://polyhaven.com/a/{asset}')
         print('saved', name)
     asset, res = SKY
-    files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
-    with open(os.path.join(OUT, 'sky.hdr'), 'wb') as f:
-        f.write(get(files['hdri'][res]['hdr']['url']))
+    if not only:
+        files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
+        with open(os.path.join(OUT, 'sky.hdr'), 'wb') as f:
+            f.write(get(files['hdri'][res]['hdr']['url']))
     credits.append(f'- sky: https://polyhaven.com/a/{asset}')
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write('# Textures\n\nPhoto-scanned textures and sky from Poly Haven, all CC0 (public domain).\n\n' + '\n'.join(credits) + '\n')

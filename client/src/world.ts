@@ -15,6 +15,7 @@ import { radZones } from '../../shared/survival.ts';
 import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery, type Patch } from './scenery.ts';
+import { terrainLayers } from './terrainLayers.ts';
 import {
   barkSurface,
   concreteSurface,
@@ -26,7 +27,6 @@ import {
   metalSurface,
   plankSurface,
   rustSurface,
-  sandSurface,
   sheetMetalSurface,
   stoneWallSurface,
   woodGrainSurface,
@@ -130,17 +130,12 @@ export class World {
     const pos = geo.attributes.position;
     const uv = geo.attributes.uv;
     const colors = new Float32Array(pos.count * 3);
-    /** How much of the sand texture each spot shows, and how much snow lies on it. */
-    const lands = new Float32Array(pos.count * 2);
+    /** How much each wild land claims the spot (Deadwood, mesa, flats, peaks); the rest is Ashlands. */
+    const lands = new Float32Array(pos.count * 4);
     const ash = new THREE.Color(0xa49a8a);
     const scorched = new THREE.Color(0x4a443e);
     const glass = new THREE.Color(0x76806e);
     const pale = new THREE.Color(0xb8ae9c);
-    // Each land's ground, as a colour for the scanned earth: the forest floor dark and mossy,
-    // the mesa rust red, the flats bleached salt. The peaks get snow in the shader instead.
-    const tints = [ash, new THREE.Color(0x8e8c68), new THREE.Color(0xc07a52), new THREE.Color(0xe6dcc4), new THREE.Color(0xb4b2ae)];
-    const sandOf = [0, 0.15, 0.35, 0.85, 0];
-    const snowOf = [0, 0, 0, 0, 1];
     const list = craters(this.seed);
     const c = new THREE.Color();
     const w = [0, 0, 0, 0, 0];
@@ -150,17 +145,8 @@ export class World {
       pos.setY(i, terrainHeight(this.seed, x, z));
       uv.setXY(i, x / 6, z / 6);
       biomeWeights(this.seed, x, z, w);
-      c.setRGB(0, 0, 0);
-      let sand = 0;
-      let snow = 0;
-      for (let b = 0; b < BIOME_IDS.length; b++) {
-        if (w[b] <= 0) continue;
-        c.r += tints[b].r * w[b];
-        c.g += tints[b].g * w[b];
-        c.b += tints[b].b * w[b];
-        sand += sandOf[b] * w[b];
-        snow += snowOf[b] * w[b];
-      }
+      let snow = w[4];
+      c.copy(ash);
       for (const cr of list) {
         const d = Math.hypot(x - cr.x, z - cr.z) / cr.radius;
         if (d < 1) c.lerp(glass, (1 - d) * 0.7);
@@ -169,14 +155,16 @@ export class World {
         if (d < 1.8) snow *= Math.min(1, Math.max(0, d - 1.2) / 0.6);
       }
       const n = Math.sin(x * 0.11 + Math.sin(z * 0.07) * 3) * Math.cos(z * 0.09 + x * 0.03);
-      c.lerp(n > 0 ? pale : scorched, Math.abs(n) * 0.25);
-      // The photo texture carries the ground's own colour, so the tints are relative to plain ash.
+      c.lerp(n > 0 ? pale : scorched, Math.abs(n) * 0.18);
+      // The photos carry each land's colour, so the tints are relative to plain ash.
       colors.set([c.r / ash.r, c.g / ash.g, c.b / ash.b], i * 3);
-      lands.set([sand, snow], i * 2);
+      lands.set([w[1], w[2], w[3], snow], i * 4);
     }
-    geo.setAttribute('land', new THREE.BufferAttribute(lands, 2));
+    geo.setAttribute('land', new THREE.BufferAttribute(lands, 4));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
+    // The material's own maps only switch on three.js's normal mapping; the shader below
+    // samples every land's photos from the texture arrays instead.
     const ground = groundSurface();
     const mat = new THREE.MeshStandardMaterial({
       map: ground.map,
@@ -188,62 +176,127 @@ export class World {
       color: new THREE.Color(0.62, 0.62, 0.62),
       roughness: 1,
     });
-    // Break up the texture repeat: mix the cracked earth at two scales, blend in drifts of
-    // rippled sand, and vary brightness over tens of metres.
-    const sand = sandSurface();
+    const layers = terrainLayers();
     const macro = macroNoiseTexture();
     mat.onBeforeCompile = (shader) => {
-      shader.uniforms.sandMap = { value: sand.map };
-      shader.uniforms.sandNormal = { value: sand.normalMap };
+      shader.uniforms.layerDiff = { value: layers.diffuse };
+      shader.uniforms.layerNorm = { value: layers.normal };
       shader.uniforms.macroMap = { value: macro };
-      // World position and normal, so steep crater walls can take the texture from the side
-      // instead of stretching it down the slope.
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nattribute vec2 land;\nvarying vec2 vLand;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nattribute vec4 land;\nvarying vec4 vLand;')
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);\nvLand = land;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nvarying vec2 vLand;')
-        .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D sandMap;\nuniform sampler2D sandNormal;\nuniform sampler2D macroMap;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;\nvarying vec3 vGroundNormal;\nvarying vec4 vLand;')
+        .replace(
+          '#include <map_pars_fragment>',
+          `#include <map_pars_fragment>
+          uniform highp sampler2DArray layerDiff;
+          uniform highp sampler2DArray layerNorm;
+          uniform sampler2D macroMap;
+          // Layers in the arrays (see terrainLayers.ts).
+          const float L_ASH = 0.0, L_FOREST = 1.0, L_RED = 2.0, L_LAKE = 3.0, L_SNOW = 4.0, L_CLIFF = 5.0, L_DIRT = 6.0;
+          // Each photo at two scales and offsets, so its repeat never shows.
+          vec4 groundPhoto(highp sampler2DArray t, vec2 uv, float layer) {
+            return mix(texture(t, vec3(uv, layer)), texture(t, vec3(uv * 0.31 + vec2(0.17, 0.53), layer)), 0.4);
+          }
+          // A land's share at this pixel, nudged by noise of its own near its edges.
+          float edgeNoise(float w, vec2 offset) {
+            if (w < 0.001) return -1.0;
+            float big = texture(macroMap, vGroundPos.xz * 0.0075 + offset).r;
+            float small = texture(macroMap, vGroundPos.xz * 0.031 + offset.yx).r;
+            return w + ((big - 0.5) * 0.75 + (small - 0.5) * 0.3) * smoothstep(0.0, 0.3, w) * smoothstep(1.0, 0.7, w);
+          }
+          // Shared by the colour and the bumps: how much each surface shows at this pixel.
+          float gW[8];
+          float gSteep;
+          vec3 gNormal;`,
+        )
         .replace(
           '#include <map_fragment>',
-          `float sandy = 0.0;
-          float snowy = 0.0;
-          #ifdef USE_MAP
-            vec4 macro = texture2D(macroMap, vMapUv * 0.045);
-            vec4 macro2 = texture2D(macroMap, vMapUv * 0.013 + vec2(0.3, 0.6));
-            vec4 crackA = texture2D(map, vMapUv);
-            vec4 crackB = texture2D(map, vMapUv * 0.37 + vec2(0.17, 0.53));
-            vec4 grit = texture2D(sandMap, vMapUv * 1.6);
-            // The scanned dirt is redder than this ashen land; pull it toward grey.
-            grit.rgb = mix(vec3(dot(grit.rgb, vec3(0.3, 0.55, 0.15))), grit.rgb, 0.55);
-            sandy = max(smoothstep(0.5, 0.62, macro.g * 0.6 + macro2.r * 0.4), vLand.x * smoothstep(0.2, 0.5, macro.r + vLand.x * 0.4));
-            vec4 ground = mix(crackA, crackB, 0.4);
-            vec4 sampledDiffuseColor = mix(ground, grit, sandy);
-            // Steep slopes: the earth projected from the two sides, blended by facing.
+          `{
+            vec2 uv = vGroundPos.xz / 2.4;
+            vec4 macro = texture(macroMap, vGroundPos.xz * 0.0075);
+            vec4 macro2 = texture(macroMap, vGroundPos.xz * 0.0022 + vec2(0.3, 0.6));
+            vec4 macro3 = texture(macroMap, vGroundPos.xz * 0.03 + vec2(0.7, 0.2));
+            // Where lands meet they interleave in ragged patches rather than fading evenly:
+            // each land's share is pushed up or down by its own noise, then the strongest win.
+            float wA = max(0.0, 1.0 - vLand.x - vLand.y - vLand.z - vLand.w);
+            float hA = edgeNoise(wA, vec2(0.0, 0.0));
+            float hF = edgeNoise(vLand.x, vec2(0.37, 0.11));
+            float hM = edgeNoise(vLand.y, vec2(0.71, 0.53));
+            float hL = edgeNoise(vLand.z, vec2(0.13, 0.82));
+            float hS = edgeNoise(vLand.w, vec2(0.59, 0.29));
+            float top = max(max(max(hA, hF), max(hM, hL)), hS) - 0.16;
+            float bA = max(hA - top, 0.0);
+            float bF = max(hF - top, 0.0);
+            float bM = max(hM - top, 0.0);
+            float bL = max(hL - top, 0.0);
+            float bS = max(hS - top, 0.0);
+            float sum = bA + bF + bM + bL + bS + 1e-5;
+            bA /= sum; bF /= sum; bM /= sum; bL /= sum; bS /= sum;
+            // Drifts of dusty dirt over the ash and the flats.
+            float drift = smoothstep(0.5, 0.62, macro.r * 0.6 + macro2.r * 0.4);
+            float dirtA = drift * bA;
+            float dirtL = drift * bL * 0.6;
+            // Bare rock on steep ground: cliffs, mesa sides, crater walls and ridges.
             vec3 gn = normalize(vGroundNormal);
-            float steep = smoothstep(0.82, 0.6, gn.y);
-            if (steep > 0.0) {
-              vec2 s = vec2(0.42);
-              vec4 side = texture2D(map, vGroundPos.xy * s) * abs(gn.z) + texture2D(map, vGroundPos.zy * s + 0.5) * abs(gn.x);
-              side /= abs(gn.z) + abs(gn.x) + 1e-4;
-              // Bands of rock down cliff faces, like layers in the stone.
-              side.rgb *= 0.86 + 0.14 * sin(vGroundPos.y * 2.3 + sin(vGroundPos.x * 0.21 + vGroundPos.z * 0.17) * 2.0);
-              sampledDiffuseColor = mix(sampledDiffuseColor, side, steep);
+            gSteep = smoothstep(0.8, 0.62, gn.y + (macro3.r - 0.5) * 0.12);
+            float level = 1.0 - gSteep;
+            gW[0] = (bA - dirtA) * level; gW[1] = bF * level; gW[2] = bM * level; gW[3] = (bL - dirtL) * level;
+            gW[4] = bS * level; gW[5] = gSteep; gW[6] = (dirtA + dirtL) * level;
+            vec3 col = vec3(0.0);
+            vec3 nrm = vec3(0.0);
+            if (gW[0] > 0.004) { col += groundPhoto(layerDiff, uv, L_ASH).rgb * gW[0]; nrm += groundPhoto(layerNorm, uv, L_ASH).xyz * gW[0]; }
+            if (gW[1] > 0.004) {
+              // A sickly forest floor: the grass in the photo drained towards brown.
+              vec3 f = groundPhoto(layerDiff, uv * 0.8, L_FOREST).rgb;
+              f = mix(vec3(dot(f, vec3(0.3, 0.55, 0.15))), f, 0.75) * vec3(0.92, 0.9, 0.78);
+              col += f * gW[1]; nrm += groundPhoto(layerNorm, uv * 0.8, L_FOREST).xyz * gW[1];
             }
-            sampledDiffuseColor.rgb *= mix(0.8, 1.15, macro2.g) * mix(0.92, 1.06, macro.r);
-            // Snow on the peaks: drifts on the flat, the rock showing through on steep ground.
-            snowy = vLand.y * smoothstep(0.35, 0.55, vLand.y + macro.g * 0.5 - steep * 0.9);
-            vec3 snowColor = vec3(1.08, 1.12, 1.2) * mix(0.82, 1.04, crackB.r) * mix(0.9, 1.04, macro.r);
-            sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, snowColor, snowy);
-            diffuseColor *= sampledDiffuseColor;
-          #endif`,
+            if (gW[2] > 0.004) { col += groundPhoto(layerDiff, uv * 0.7, L_RED).rgb * vec3(1.12, 1.0, 0.92) * gW[2]; nrm += groundPhoto(layerNorm, uv * 0.7, L_RED).xyz * gW[2]; }
+            if (gW[3] > 0.004) {
+              // The old lake bed, bleached by salt, crazed with the ash's cracks in places.
+              vec3 l = groundPhoto(layerDiff, uv * 0.6, L_LAKE).rgb;
+              vec3 crack = groundPhoto(layerDiff, uv * 1.3, L_ASH).rgb;
+              l = mix(l, crack, smoothstep(0.4, 0.7, macro3.r));
+              l = mix(vec3(dot(l, vec3(0.3, 0.55, 0.15))), l, 0.45) * 1.55 + 0.05;
+              col += l * gW[3]; nrm += mix(groundPhoto(layerNorm, uv * 0.6, L_LAKE), groundPhoto(layerNorm, uv * 1.3, L_ASH), smoothstep(0.4, 0.7, macro3.r)).xyz * gW[3];
+            }
+            if (gW[4] > 0.004) { col += groundPhoto(layerDiff, uv * 0.5, L_SNOW).rgb * 1.45 * gW[4]; nrm += mix(groundPhoto(layerNorm, uv * 0.5, L_SNOW).xyz, vec3(0.5, 0.5, 1.0), 0.4) * gW[4]; }
+            if (gW[6] > 0.004) {
+              vec3 d = groundPhoto(layerDiff, uv * 1.6, L_DIRT).rgb;
+              // The scanned dirt is redder than this ashen land; pull it toward grey.
+              d = mix(vec3(dot(d, vec3(0.3, 0.55, 0.15))), d, 0.55);
+              col += d * gW[6]; nrm += groundPhoto(layerNorm, uv * 1.6, L_DIRT).xyz * gW[6];
+            }
+            if (gW[5] > 0.004) {
+              // Cliff rock projected from the two sides, blended by facing, in layered bands.
+              vec2 sx = vGroundPos.zy * 0.25;
+              vec2 sz = vGroundPos.xy * 0.25;
+              float ax = abs(gn.x) + 1e-4;
+              float az = abs(gn.z) + 1e-4;
+              vec3 rock = (texture(layerDiff, vec3(sx, L_CLIFF)).rgb * ax + texture(layerDiff, vec3(sz, L_CLIFF)).rgb * az) / (ax + az);
+              rock *= 0.85 + 0.15 * sin(vGroundPos.y * 2.3 + sin(vGroundPos.x * 0.21 + vGroundPos.z * 0.17) * 2.0);
+              // Grey rock under the snow, red on the mesa, ash-brown elsewhere.
+              float grey = dot(rock, vec3(0.3, 0.55, 0.15));
+              vec3 tint = mix(vec3(grey) * 1.05, rock * vec3(1.15, 0.95, 0.85), bM);
+              tint = mix(tint, vec3(grey) * vec3(0.95, 0.98, 1.05), bS);
+              col += tint * 1.1 * gW[5];
+              nrm += ((texture(layerNorm, vec3(sx, L_CLIFF)).xyz * ax + texture(layerNorm, vec3(sz, L_CLIFF)).xyz * az) / (ax + az)) * gW[5];
+            }
+            // Snow settles on ledges even on the rock.
+            float snowCap = bS * gSteep * smoothstep(0.45, 0.75, gn.y + macro3.r * 0.3);
+            col = mix(col, groundPhoto(layerDiff, uv * 0.5, L_SNOW).rgb * 1.4, snowCap);
+            col *= mix(0.82, 1.12, macro2.r) * mix(0.93, 1.05, macro.r);
+            gNormal = nrm;
+            diffuseColor.rgb *= col;
+          }`,
         )
         .replace(
           '#include <normal_fragment_maps>',
           `#ifdef USE_NORMALMAP_TANGENTSPACE
-            vec3 mapN = mix(texture2D(normalMap, vNormalMapUv).xyz, texture2D(sandNormal, vNormalMapUv * 1.6).xyz, sandy) * 2.0 - 1.0;
-            // The top-down detail would smear down steep walls, so flatten it there.
-            mapN.xy *= normalScale * (1.0 - smoothstep(0.82, 0.6, normalize(vGroundNormal).y) * 0.8) * (1.0 - snowy * 0.75);
+            vec3 mapN = gNormal * 2.0 - 1.0;
+            mapN.xy *= normalScale;
             normal = normalize(tbn * mapN);
           #else
             #include <normal_fragment_maps>

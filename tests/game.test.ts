@@ -455,7 +455,7 @@ test('a shot hurts the player it hits, more on the head, and walls stop it', () 
   // A stone wall across the line between them.
   const i = Math.floor((FLAT.x + 5) / 3);
   const k = Math.floor(FLAT.z / 3);
-  second.game.pieces.set('w', { kind: 'wall', i, y: Math.floor(second.shooter.y) - 1, k, dir: 1, material: 'stone', edit: 'solid', hp: 250 });
+  second.game.pieces.set('w', { kind: 'wall', i, y: Math.floor(second.shooter.y), k, dir: 1, material: 'stone', edit: 'solid', hp: 250 });
   second.game.fire(second.a, 2, AT_BODY, true, 1000);
   assert.equal(second.target.hp, MAX_HEALTH, 'the wall took the bullet');
 });

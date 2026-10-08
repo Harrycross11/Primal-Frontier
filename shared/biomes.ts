@@ -32,8 +32,8 @@ const OUTER: BiomeId[] = ['deadwood', 'mesa', 'flats', 'frost'];
 /** Radius of the Ashlands in the middle, before its edge wanders. */
 export const CORE_RADIUS = HALF_WORLD * 0.38;
 /** How wide the blend between two lands is: metres across the middle's edge, and share of a quarter turn. */
-const CORE_BLEND = 16;
-const SIDE_BLEND = 0.1;
+const CORE_BLEND = 60;
+const SIDE_BLEND = 0.28;
 
 const turnCache = new Map<number, number>();
 /** How far round the outer lands are turned, so each seed lays them out differently. */
@@ -50,16 +50,16 @@ function smooth01(t: number): number {
 
 /**
  * How much each land claims a spot, in BIOME_IDS order, adding up to 1. Borders wander with
- * noise and blend over a few metres, so the ground, grass and heights change gradually.
+ * noise and blend over tens of metres, so the ground, grass and heights change gradually.
  */
 export function biomeWeights(seed: number, x: number, z: number, out: number[] = [0, 0, 0, 0, 0]): number[] {
   const r = Math.hypot(x, z);
-  const wobble = (valueNoise(seed + 77, x / 45, z / 45) - 0.5) * 44 + (valueNoise(seed + 78, x / 15, z / 15) - 0.5) * 8;
+  const wobble = (valueNoise(seed + 77, x / 45, z / 45) - 0.5) * 44 + (valueNoise(seed + 79, x / 26, z / 26) - 0.5) * 26 + (valueNoise(seed + 78, x / 11, z / 11) - 0.5) * 8;
   const core = 1 - smooth01((r + wobble - CORE_RADIUS + CORE_BLEND / 2) / CORE_BLEND);
   out.fill(0);
   out[0] = core;
   if (core >= 1) return out;
-  const warp = (valueNoise(seed + 99, x / 70, z / 70) - 0.5) * 1.1 + (valueNoise(seed + 98, x / 22, z / 22) - 0.5) * 0.18;
+  const warp = (valueNoise(seed + 99, x / 70, z / 70) - 0.5) * 1.1 + (valueNoise(seed + 96, x / 30, z / 30) - 0.5) * 0.35 + (valueNoise(seed + 98, x / 12, z / 12) - 0.5) * 0.12;
   let s = (Math.atan2(z, x) + turn(seed) + warp) / (Math.PI / 2);
   s = ((s % 4) + 4) % 4;
   const k = Math.floor(s);
