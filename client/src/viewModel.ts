@@ -183,10 +183,10 @@ export class ViewModel {
       // A chop: drawn back and up, then brought down and across.
       const s = this.swingT < 1 ? Math.sin(this.swingT * Math.PI) : 0;
       const wind = this.swingT < 0.35 ? this.swingT / 0.35 : 0;
-      rot.x = -0.2 - s * 1.3 + wind * 0.6;
-      rot.z = 0.15 - s * 0.35;
-      // Nearly upright, turned in towards the middle: you see the side of the head, edge leading.
-      rot.y = 0.55;
+      rot.x = -0.35 - s * 1.3 + wind * 0.6;
+      rot.z = 0.05 - s * 0.35;
+      // Upright and pointing ahead, edge first, only a touch turned in towards the middle.
+      rot.y = 0.15;
       at.y += s * 0.06;
       at.z -= s * 0.12;
     }
