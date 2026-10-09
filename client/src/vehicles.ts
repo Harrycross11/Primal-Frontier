@@ -19,6 +19,7 @@ const MODELS: Record<VehicleKind, { file: string; paint: PaintRule }> = {
   // One texture for everything: paint only its coloured panels, not the tyres, glass and chrome.
   van: { file: 'vehicle-van', paint: () => 'body' },
   jeep: { file: 'vehicle-jeep', paint: (mesh) => (mesh.name.startsWith('Body') ? 'soft' : null) },
+  heli: { file: 'vehicle-heli', paint: (_, m) => (m.name === 'Body' ? 'all' : null) },
 };
 
 class VehicleView {
@@ -26,6 +27,12 @@ class VehicleView {
   /** Tilted to the ground under it. */
   private body = new THREE.Group();
   private wheels: { pivot: THREE.Object3D; radius: number }[] = [];
+  /** A minicopter's rotors, turning about their hubs: the main one flat, the tail one on its side. */
+  private rotors: { pivot: THREE.Object3D; axis: 'x' | 'y' }[] = [];
+  /** How fast the rotors turn, 0 to 1: they wind up when someone climbs in and down after. */
+  private spin = 0;
+  /** A minicopter's lean: nose down as it speeds up, banked into turns. */
+  private lean = { pitch: 0, roll: 0, lastSpeed: 0, lastYaw: 0 };
   /** Every mesh with its unpainted material, for repainting. */
   private surfaces: { mesh: THREE.Mesh; base: THREE.Material }[] = [];
   private shownKind: VehicleKind;
@@ -53,6 +60,7 @@ class VehicleView {
   private build() {
     this.body.clear();
     this.wheels = [];
+    this.rotors = [];
     this.surfaces = [];
     const info = VEHICLES[this.state.kind];
     const scene = character(MODELS[this.state.kind].file);
@@ -87,6 +95,20 @@ class VehicleView {
       this.surfaces.push({ mesh, base: mat });
       if (mat.name === 'tire' || /^wheel/i.test(mesh.name)) tyres.push(mesh);
     });
+    // Rotors spin about their own hubs.
+    const rotors: [THREE.Object3D, 'x' | 'y'][] = [];
+    scene.traverse((o) => {
+      if (/main.?rotor/i.test(o.name) && !rotors.some(([r]) => r === o.parent)) rotors.push([o, 'y']);
+      else if (/tail.?rotor/i.test(o.name) && !rotors.some(([r]) => r === o.parent)) rotors.push([o, 'x']);
+    });
+    for (const [rotor, axis] of rotors) {
+      const b = new THREE.Box3().setFromObject(rotor);
+      const pivot = new THREE.Group();
+      pivot.position.copy(scene.worldToLocal(b.getCenter(new THREE.Vector3())));
+      scene.add(pivot);
+      pivot.attach(rotor);
+      this.rotors.push({ pivot, axis });
+    }
     for (const tyre of tyres) {
       const b = new THREE.Box3().setFromObject(tyre);
       const centre = scene.worldToLocal(b.getCenter(new THREE.Vector3()));
@@ -120,8 +142,8 @@ class VehicleView {
   }
 
   /** Puts it right under its driver (you), rather than where the server last had it. */
-  carry(x: number, z: number, yaw: number, speed: number) {
-    this.target.set(x, terrainHeight(this.seed, x, z), z);
+  carry(x: number, z: number, yaw: number, speed: number, y = terrainHeight(this.seed, x, z)) {
+    this.target.set(x, y, z);
     this.root.position.copy(this.target);
     this.yaw = yaw;
     this.speed = speed;
@@ -139,10 +161,31 @@ class VehicleView {
       this.speed += ((dt > 0 ? moved / dt : 0) - this.speed) * Math.min(1, dt * 6);
     }
     this.root.rotation.y = this.yaw;
-    // Lean with the ground: nose up a hill, side down a slope.
     const info = VEHICLES[this.state.kind];
-    const { fx, fz, rx, rz } = axes(this.yaw);
     const p = this.root.position;
+    if (info.flies) {
+      // Rotors wind up while someone is at the controls with fuel in the tank.
+      const running = this.state.driver !== undefined && this.state.fuel > 0;
+      this.spin += ((running ? 1 : 0) - this.spin) * Math.min(1, dt * (running ? 0.8 : 0.3));
+      for (const r of this.rotors) r.pivot.rotation[r.axis] += this.spin * dt * (r.axis === 'y' ? 38 : 70);
+      // Nose down as it speeds up, up as it slows; banked into turns.
+      const l = this.lean;
+      const accel = dt > 0 ? (this.speed - l.lastSpeed) / dt : 0;
+      let turn = this.yaw - l.lastYaw;
+      turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+      const rate = dt > 0 ? turn / dt : 0;
+      const ground = terrainHeight(this.seed, p.x, p.z);
+      const airborne = p.y - ground > 0.3 ? 1 : 0;
+      l.pitch += (THREE.MathUtils.clamp(-accel * 0.04 - this.speed * 0.008, -0.35, 0.25) * airborne - l.pitch) * Math.min(1, dt * 3);
+      l.roll += (THREE.MathUtils.clamp(rate * this.speed * 0.02, -0.45, 0.45) * airborne - l.roll) * Math.min(1, dt * 3);
+      l.lastSpeed = this.speed;
+      l.lastYaw = this.yaw;
+      this.body.rotation.set(l.pitch, 0, l.roll, 'YXZ');
+      p.y = Math.max(p.y, ground);
+      return;
+    }
+    // Lean with the ground: nose up a hill, side down a slope.
+    const { fx, fz, rx, rz } = axes(this.yaw);
     const h = (along: number, side: number) => terrainHeight(this.seed, p.x + fx * along + rx * side, p.z + fz * along + rz * side);
     const half = info.length / 2 - 0.5;
     const pitch = Math.atan2(h(half, 0) - h(-half, 0), half * 2);

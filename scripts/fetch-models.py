@@ -154,6 +154,8 @@ LANDMARK_PROPS = {
     'vehicle-sedan': ('91270dab9d1a47c7ba7ffaaf8c8b0beb', 1024),
     'vehicle-van': ('bb4OJb5V4L0hgYjM3vtGvPB7ZMt', 1024),
     'vehicle-jeep': ('70c8691c6fb64b859fbfc16babfa2c5f', 1024),
+    # The minicopter.
+    'vehicle-heli': ('7677d87826f449ebadb6cccba2af38ca', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.

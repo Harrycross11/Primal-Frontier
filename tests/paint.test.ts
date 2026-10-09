@@ -51,7 +51,7 @@ function wall(game: Game, di: number): string {
 
 test('each landmark has a different model of car, unpainted', () => {
   const { game } = setup();
-  const kinds = [...game.vehicles.values()].map((v) => v.kind);
+  const kinds = [...game.vehicles.values()].map((v) => v.kind).filter((k) => k !== 'heli');
   assert.deepEqual(new Set(kinds), new Set(VEHICLE_KINDS), 'every model turns up somewhere');
   assert.equal(kinds.length, vehicleSpots(SEED).length);
   for (const v of game.vehicles.values()) assert.equal(v.paint, 0);

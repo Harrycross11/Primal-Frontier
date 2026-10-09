@@ -478,11 +478,17 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const info = view ? VEHICLES[view.state.kind] : undefined;
         controller.car = view && info ? { ...info, fuel: () => vehicles.views.get(view.state.id)?.state.fuel ?? 0 } : null;
         controller.carSpeed = 0;
+        controller.climbSpeed = 0;
         if (!controller.car) driving = null;
         controller.yaw = m.yaw;
         controller.teleport(m.x, m.y, m.z);
         vehicles.mine = driving;
-        if (driving !== null) hud.notice(view!.state.fuel > 0 ? 'W and S to drive, A and D to steer, E to get out' : 'The tank is empty: fill it with low grade fuel', 4);
+        if (driving !== null) {
+          const how = info!.flies
+            ? 'W and S to fly forward and back, A and D to turn, Space to climb, Shift to descend, E to get out'
+            : 'W and S to drive, A and D to steer, E to get out';
+          hud.notice(view!.state.fuel > 0 ? how : 'The tank is empty: fill it with low grade fuel', 5);
+        }
         break;
       }
       case 'mounted': {
@@ -1147,7 +1153,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         paint: s.paint,
         model: s.kind,
         preset: paintOwned(style.paint, account?.packs ?? []) ? { label: `My style: ${PAINTS[style.paint].name} ${VEHICLES[style.kind].name}`, paint: style.paint, model: style.kind } : undefined,
-        models: VEHICLE_KINDS.map((k) => ({ id: k, name: VEHICLES[k].name, blurb: VEHICLES[k].blurb })),
+        // The minicopter only takes a new colour; cars can also swap model.
+        models: VEHICLES[s.kind].flies ? undefined : VEHICLE_KINDS.map((k) => ({ id: k, name: VEHICLES[k].name, blurb: VEHICLES[k].blurb })),
         apply: (paint, model) => {
           // Shown at once; the server's next update confirms it.
           car.sync({ ...car.state, paint, kind: (model ?? s.kind) as VehicleKind });
@@ -1268,13 +1275,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const info = VEHICLES[s.kind];
       const kmh = Math.round(Math.abs(controller.carSpeed) * 3.6);
       const fuel = s.fuel > 0 ? `Fuel ${Math.ceil(s.fuel)}/${info.tank}` : 'Out of fuel: get out and fill it with low grade fuel';
-      return { text: `${info.name}  ·  ${kmh} km/h  ·  ${fuel}  ·  E to get out  ·  P to paint`, health: s.hp / info.maxHp };
+      const height = info.flies ? `  ·  ${Math.max(0, Math.round(controller.position.y - info.seat.y - terrainHeight(world.seed, controller.position.x, controller.position.z)))} m up` : '';
+      return { text: `${info.name}  ·  ${kmh} km/h${height}  ·  ${fuel}  ·  E to get out  ·  P to paint`, health: s.hp / info.maxHp };
     }
     if (aimVehicle) {
       const s = aimVehicle.view.state;
       const info = VEHICLES[s.kind];
       const fuel = `fuel ${Math.ceil(s.fuel)}/${info.tank}`;
-      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? 'E to drive  ·  P to paint or swap model' : 'Get closer to get in';
+      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? (info.flies ? 'E to fly  ·  P to paint' : 'E to drive  ·  P to paint or swap model') : 'Get closer to get in';
       return { text: `${info.name} (${fuel})  ·  ${how}`, health: s.hp / info.maxHp };
     }
     if (item && isExplosive(item) && item !== 'beancan') {
@@ -1509,7 +1517,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (car && controller.car) {
       const { fx, fz, rx, rz } = axes(controller.yaw);
       const s = controller.car.seat;
-      car.carry(controller.position.x - fx * s.ahead + rx * s.left, controller.position.z - fz * s.ahead + rz * s.left, controller.yaw, controller.carSpeed);
+      const x = controller.position.x - fx * s.ahead + rx * s.left;
+      const z = controller.position.z - fz * s.ahead + rz * s.left;
+      car.carry(x, z, controller.yaw, controller.carSpeed, controller.car.flies ? controller.position.y - s.y : undefined);
     }
     // Your own mount goes where you steer it at once, rather than waiting on the server.
     const mount = riding === null ? undefined : creatures.views.get(riding);

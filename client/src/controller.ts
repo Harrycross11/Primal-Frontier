@@ -71,6 +71,7 @@ export class Controller {
   }
 
   update(dt: number) {
+    if (this.car?.flies) return this.fly(dt, this.car, this.car.flies);
     if (this.car) return this.drive(dt, this.car);
     this.camYaw = 0;
     let fx = 0;
@@ -139,7 +140,7 @@ export class Controller {
       return;
     }
     // Further back in the saddle or at the wheel, so the animal or car is in view.
-    const dist = (this.car ? 8 : this.mount ? 5.6 : 3.9) * (1 - 0.5 * zoom);
+    const dist = (this.car?.flies ? 12 : this.car ? 8 : this.mount ? 5.6 : 3.9) * (1 - 0.5 * zoom);
     const yaw = this.yaw + this.camYaw;
     const back = new THREE.Vector3(
       Math.sin(yaw) * Math.cos(this.pitch),
@@ -211,6 +212,99 @@ export class Controller {
     this.position.set(c.x + ax * car.seat.ahead - rx * car.seat.left, terrainHeight(this.world.seed, c.x, c.z) + car.seat.y, c.z + az * car.seat.ahead - rz * car.seat.left);
     this.vy = 0;
     this.onGround = true;
+  }
+
+  /** A minicopter's speed up (positive) or down, m/s. */
+  climbSpeed = 0;
+
+  /**
+   * Flying: Space climbs and Shift (or C) sinks, W and S fly forwards and back, A and D turn. With
+   * no input it hovers where it is. Out of fuel it comes down slowly as the rotor freewheels.
+   * It stops against walls, rocks and trees, and a hard landing is reported as a crash.
+   */
+  private fly(dt: number, car: VehicleInfo & { fuel: () => number }, flies: NonNullable<VehicleInfo['flies']>) {
+    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const lift = (this.keys.has('Space') ? 1 : 0) - (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyC') ? 1 : 0);
+    const fuel = car.fuel() > 0;
+    const { fx: sx, fz: sz, rx: srx, rz: srz } = axes(this.yaw);
+    const c = { x: this.position.x - sx * car.seat.ahead + srx * car.seat.left, z: this.position.z - sz * car.seat.ahead + srz * car.seat.left };
+    let alt = this.position.y - car.seat.y;
+    const ground = terrainHeight(this.world.seed, c.x, c.z);
+    const airborne = alt > ground + 0.05;
+    // Up and down eases towards what the controls ask for.
+    const wantVy = fuel ? lift * flies.climb : airborne ? -4 : 0;
+    this.climbSpeed += (wantVy - this.climbSpeed) * Math.min(1, dt * 2.5);
+    // Along: like a car in the air; on the ground it only creeps on its skids.
+    let v = this.carSpeed;
+    if (fuel && (airborne || lift > 0) && throttle !== 0) v = THREE.MathUtils.clamp(v + throttle * car.accel * dt, -car.reverse, car.top);
+    else v -= Math.sign(v) * Math.min(Math.abs(v), (airborne ? 2 : 10) * dt);
+    if (fuel || airborne) this.yaw += steer * car.turn * dt;
+    const colliders = this.nearbyColliders(10);
+    const { fx, fz } = axes(this.yaw);
+    const step = v * dt;
+    const steps = Math.max(1, Math.ceil(Math.abs(step) / 0.25));
+    for (let s = 0; s < steps; s++) {
+      const nx = THREE.MathUtils.clamp(c.x + (fx * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      const nz = THREE.MathUtils.clamp(c.z + (fz * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      if (this.heliBlocked(car, nx, alt, nz, colliders) && !this.heliBlocked(car, c.x, alt, c.z, colliders)) {
+        if (Math.abs(v) > 6) this.onCrash?.(Math.abs(v));
+        v = -v * 0.2;
+        break;
+      }
+      c.x = nx;
+      c.z = nz;
+    }
+    // Up and down, between the ground (or a roof) and the ceiling over it.
+    const floor = Math.max(terrainHeight(this.world.seed, c.x, c.z), this.roofUnder(c.x, alt, c.z, colliders));
+    alt += this.climbSpeed * dt;
+    if (alt <= floor) {
+      if (this.climbSpeed < -7) this.onLand?.(-this.climbSpeed);
+      alt = floor;
+      this.climbSpeed = Math.max(0, this.climbSpeed);
+    }
+    alt = Math.min(alt, terrainHeight(this.world.seed, c.x, c.z) + flies.ceiling);
+    this.carSpeed = v;
+    this.moving = Math.abs(v) > 0.3 || Math.abs(this.climbSpeed) > 0.3;
+    if (Math.abs(v) > 3) this.camYaw *= Math.exp(-dt * 1.2);
+    const { fx: ax, fz: az, rx, rz } = axes(this.yaw);
+    this.position.set(c.x + ax * car.seat.ahead - rx * car.seat.left, alt + car.seat.y, c.z + az * car.seat.ahead - rz * car.seat.left);
+    this.vy = 0;
+    this.onGround = true;
+  }
+
+  /** The top of whatever solid is under a minicopter at (x, z), up to its own height `alt`. */
+  private roofUnder(x: number, alt: number, z: number, colliders: Box[]): number {
+    let top = -Infinity;
+    for (const b of colliders) {
+      if (x < b.min[0] - 0.6 || x > b.max[0] + 0.6 || z < b.min[2] - 0.6 || z > b.max[2] + 0.6) continue;
+      if (b.max[1] <= alt + 0.6) top = Math.max(top, b.max[1]);
+    }
+    return top;
+  }
+
+  /** True if a minicopter with its middle at (x, z) and its skids at height `alt` overlaps something solid. */
+  private heliBlocked(car: VehicleInfo, x: number, alt: number, z: number, colliders: Box[]): boolean {
+    const { fx, fz } = axes(this.yaw);
+    const r = car.width / 2;
+    const reach = car.length / 2 - r;
+    for (const k of [-1, 0, 1]) {
+      const px = x + fx * k * reach;
+      const pz = z + fz * k * reach;
+      for (const b of colliders) {
+        if (b.max[1] < alt + 0.6 || b.min[1] > alt + car.height) continue;
+        const dx = Math.max(b.min[0] - px, 0, px - b.max[0]);
+        const dz = Math.max(b.min[2] - pz, 0, pz - b.max[2]);
+        if (dx * dx + dz * dz < r * r) return true;
+      }
+      // Low down, trees and rocks are in the way.
+      if (alt - terrainHeight(this.world.seed, px, pz) > 4) continue;
+      for (const n of this.resources()) {
+        if (n.amount <= 0 || n.kind === 'hemp' || n.kind === 'mushroom') continue;
+        if (Math.hypot(px - n.x, pz - n.z) < RESOURCE_INFO[n.kind].radius * n.scale + r) return true;
+      }
+    }
+    return false;
   }
 
   /** True if a car with its middle at (x, z) facing `yaw` overlaps something solid. */

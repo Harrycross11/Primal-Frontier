@@ -4,6 +4,7 @@
 import {
   BUILD_RANGE,
   GATHER_COOLDOWN,
+  GRAVITY,
   GATHER_RANGE,
   HALF_WORLD,
   MAX_PLAYERS,
@@ -104,7 +105,9 @@ import {
   axes,
   rayVehicle,
   seatAt,
+  HOVER_BURN,
   VEHICLE_KINDS,
+  heliSpots,
   spotKind,
   touchesVehicle,
   vehicleSpots,
@@ -215,6 +218,8 @@ export interface WorldSave {
 /** A car in the world, and which parking spot it came from. */
 interface Vehicle extends VehicleState {
   spot: number;
+  /** A minicopter's speed up (or, negative, down) in m/s: how fast it falls with nobody flying it. */
+  vy?: number;
 }
 
 /** A code lock's code, and everyone who has opened it with the code (its owner first). */
@@ -277,6 +282,9 @@ const CAR_BLAST_DAMAGE = 70;
 /** A car going at least this fast (m/s) hurts whoever it hits: this much per m/s. */
 const RUN_OVER_SPEED = 5;
 const RUN_OVER_DAMAGE = 4;
+/** A minicopter touching down slower than this (m/s) is fine; faster, it takes this much damage per m/s over. */
+const HELI_SAFE_LANDING = 7;
+const HELI_CRASH_DAMAGE = 30;
 /** Most survivors one team can hold. */
 export const MAX_TEAM = 6;
 /** Seconds a team invite stays open. */
@@ -606,7 +614,7 @@ export class Game {
 
   /** Every car, as players see it. */
   private vehicleStates(): VehicleState[] {
-    return [...this.vehicles.values()].map(({ spot: _, ...v }) => ({ ...v, x: round2(v.x), y: round2(v.y), z: round2(v.z), yaw: round2(v.yaw), hp: Math.round(v.hp), fuel: Math.round(v.fuel * 10) / 10 }));
+    return [...this.vehicles.values()].map(({ spot: _, vy: __, ...v }) => ({ ...v, x: round2(v.x), y: round2(v.y), z: round2(v.z), yaw: round2(v.yaw), hp: Math.round(v.hp), fuel: Math.round(v.fuel * 10) / 10 }));
   }
 
   /** The car a player is driving, if they are. */
@@ -623,7 +631,7 @@ export class Game {
     const v = this.vehicles.get(vehicle);
     if (!v) return [];
     if (v.driver !== undefined && v.driver !== id) return [notice(id, 'Someone is already driving it')];
-    if (!touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to get in')];
+    if (!touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2) || Math.abs(p.y - v.y) > 3) return [notice(id, 'Get closer to get in')];
     this.dismount(p);
     v.driver = id;
     p.driving = v.id;
@@ -642,7 +650,8 @@ export class Game {
     const side = VEHICLES[v.kind].width / 2 + 0.6;
     let [x, z] = [v.x - rx * side, v.z - rz * side];
     if (blocked(this.pieces.values(), x, terrainHeight(this.seed, x, z), z, 0.35)) [x, z] = [v.x + rx * side, v.z + rz * side];
-    const y = terrainHeight(this.seed, x, z);
+    // Out of a minicopter in the air, you drop from beside it (and it falls too).
+    const y = Math.max(terrainHeight(this.seed, x, z), VEHICLES[v.kind].flies ? v.y : -Infinity);
     if (p.dead) return [];
     Object.assign(p, { x, y, z });
     return [{ to: p.id, msg: { t: 'driving', id: null, x, y, z, yaw: p.yaw } }];
@@ -672,10 +681,11 @@ export class Game {
   customiseCar(id: number, vehicle: number, kind: VehicleKind, paint: number): Outgoing[] {
     const p = this.alive(id);
     const v = this.vehicles.get(vehicle);
-    if (!p || !v || !VEHICLE_KINDS.includes(kind)) return [];
+    // A car can become another car; a minicopter can only be repainted.
+    if (!p || !v || (kind !== v.kind && (!VEHICLE_KINDS.includes(kind) || !VEHICLE_KINDS.includes(v.kind)))) return [];
     const mine = v.driver === id && p.driving === v.id;
     if (!mine && v.driver !== undefined) return [notice(id, 'Someone is driving it')];
-    if (!mine && !touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to the car')];
+    if (!mine && (!touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2) || Math.abs(p.y - v.y) > 3)) return [notice(id, 'Get closer to the car')];
     const locked = this.lockedPaint(p, cleanPaint(paint));
     if (locked) return [locked];
     v.paint = cleanPaint(paint);
@@ -724,6 +734,23 @@ export class Game {
     return out;
   }
 
+  /** A minicopter with nobody at the controls drops to the ground, and is wrecked or dented if it lands hard. */
+  private fall(v: Vehicle, dt: number, now: number): Outgoing[] {
+    const ground = terrainHeight(this.seed, v.x, v.z);
+    if (v.y <= ground + 0.01) {
+      v.y = ground;
+      v.vy = 0;
+      return [];
+    }
+    v.vy = (v.vy ?? 0) - GRAVITY * dt;
+    v.y += v.vy * dt;
+    if (v.y > ground) return [];
+    const impact = -v.vy;
+    v.y = ground;
+    v.vy = 0;
+    return impact > HELI_SAFE_LANDING ? this.hurtVehicle(v, (impact - HELI_SAFE_LANDING) * HELI_CRASH_DAMAGE, null, now) : [];
+  }
+
   /**
    * Parks a car at every spot that has none (all of them, at first), carries each car along under
    * its driver, burns its fuel, and hurts anyone it runs into at speed.
@@ -732,33 +759,47 @@ export class Game {
     const out: Outgoing[] = [];
     if (this.cars) {
       const taken = new Set([...this.vehicles.values()].map((v) => v.spot));
-      vehicleSpots(this.seed).forEach((s, spot) => {
-        if (taken.has(spot) || (this.vehicleDue.get(spot) ?? 0) > now) return;
+      const spots = [...vehicleSpots(this.seed).map((s, spot) => ({ ...s, spot })), ...heliSpots(this.seed)];
+      for (const { spot, x, z, yaw } of spots) {
+        if (taken.has(spot) || (this.vehicleDue.get(spot) ?? 0) > now) continue;
         this.vehicleDue.delete(spot);
         const kind = spotKind(spot);
-        const v: Vehicle = { id: this.nextVehicleId++, kind, spot, x: s.x, y: terrainHeight(this.seed, s.x, s.z), z: s.z, yaw: s.yaw, hp: VEHICLES[kind].maxHp, fuel: START_FUEL, paint: 0 };
+        const v: Vehicle = { id: this.nextVehicleId++, kind, spot, x, y: terrainHeight(this.seed, x, z), z, yaw, hp: VEHICLES[kind].maxHp, fuel: START_FUEL, paint: 0 };
         this.vehicles.set(v.id, v);
-      });
+      }
     }
     for (const v of [...this.vehicles.values()]) {
-      if (v.driver === undefined) continue;
-      const p = this.players.get(v.driver);
-      if (!p || p.dead || p.driving !== v.id) {
+      const info = VEHICLES[v.kind];
+      const p = v.driver === undefined ? undefined : this.players.get(v.driver);
+      if (v.driver !== undefined && (!p || p.dead || p.driving !== v.id)) {
         delete v.driver;
         if (p && p.driving === v.id) delete p.driving;
+      }
+      if (v.driver === undefined || !p) {
+        // A minicopter left in the air falls, and smashes if it lands hard.
+        if (info.flies) out.push(...this.fall(v, dt, now));
         continue;
       }
       // The driver sits left of the middle: the car is where their seat puts it.
-      const info = VEHICLES[v.kind];
       const { fx, fz, rx, rz } = axes(p.yaw);
       const x = p.x - fx * info.seat.ahead + rx * info.seat.left;
       const z = p.z - fz * info.seat.ahead + rz * info.seat.left;
       const moved = Math.hypot(x - v.x, z - v.z);
       const speed = dt > 0 ? moved / dt : 0;
-      Object.assign(v, { x, z, y: terrainHeight(this.seed, x, z), yaw: p.yaw });
+      const ground = terrainHeight(this.seed, x, z);
+      const y = info.flies ? Math.max(ground, p.y - info.seat.y) : ground;
+      if (info.flies) {
+        // Coming down hard onto the ground breaks it, as a fall would.
+        const vy = dt > 0 ? (y - v.y) / dt : 0;
+        if (y - ground < 0.3 && vy < -HELI_SAFE_LANDING) out.push(...this.hurtVehicle(v, (-vy - HELI_SAFE_LANDING) * HELI_CRASH_DAMAGE, null, now));
+        if (!this.vehicles.has(v.id)) continue;
+        if (y - ground > 0.5) v.fuel = Math.max(0, v.fuel - HOVER_BURN * dt);
+      }
+      Object.assign(v, { x, z, y, yaw: p.yaw });
       v.fuel = Math.max(0, v.fuel - moved / info.range);
       out.push(...this.progress(p, 'drive', moved, now));
-      if (speed < RUN_OVER_SPEED) continue;
+      // Up in the air it runs nobody over.
+      if (speed < RUN_OVER_SPEED || y - ground > 1) continue;
       for (const other of this.players.values()) {
         if (other === p || other.dead || other.driving !== undefined) continue;
         if (!touchesVehicle(v, other.x, other.z, 0.35) || now - (this.runOverAt.get(other.id) ?? -1e9) < 1000) continue;

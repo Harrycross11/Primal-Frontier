@@ -1,15 +1,16 @@
 // Cars to drive: an old car parked just outside each landmark, which runs on low grade fuel, can be
 // shot or blown up, and turns up again where it was parked a while after it is wrecked. Anyone can
-// swap a parked car for another model and paint it.
+// swap a parked car for another model and paint it. Two landmarks also have a minicopter on a pad
+// beside them, which flies on the same fuel.
 // Shared so the server and the client agree on where they are, how big and how fast.
 
 import type { Box } from './building.ts';
 import { rayBox, type Vec3 } from './combat.ts';
 import { SITE_RADIUS, landmarkSites, terrainHeight } from './terrain.ts';
 
-export type VehicleKind = 'pickup' | 'sedan' | 'van' | 'jeep';
+export type VehicleKind = 'pickup' | 'sedan' | 'van' | 'jeep' | 'heli';
 
-/** Every model, in the order the garage menu lists them. */
+/** Every car model, in the order the garage menu lists them (the minicopter is not a car). */
 export const VEHICLE_KINDS: readonly VehicleKind[] = ['pickup', 'sedan', 'van', 'jeep'];
 
 export interface VehicleInfo {
@@ -34,6 +35,8 @@ export interface VehicleInfo {
   tank: number;
   /** Metres it goes on one unit of fuel. */
   range: number;
+  /** For something that flies: how fast it climbs and sinks (m/s), and how high above the ground it can go. */
+  flies?: { climb: number; ceiling: number };
 }
 
 export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
@@ -97,11 +100,33 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     tank: 80,
     range: 32,
   },
+  heli: {
+    name: 'Minicopter',
+    blurb: 'Flies',
+    maxHp: 300,
+    top: 24,
+    reverse: 8,
+    accel: 7,
+    turn: 1.5,
+    length: 7.6,
+    width: 1.5,
+    height: 1.7,
+    seat: { y: 0.95, left: 0.3, ahead: 1.3 },
+    tank: 60,
+    range: 22,
+    flies: { climb: 6, ceiling: 55 },
+  },
 };
+
+/** Spot numbers from here up are the minicopters' pads (below, the cars' parking spots). */
+export const HELI_SPOT = 100;
+
+/** Fuel a flying minicopter burns each second just to stay up, on top of what it uses to travel. */
+export const HOVER_BURN = 0.06;
 
 /** The model first parked at each spot, so every landmark has a different one. */
 export function spotKind(spot: number): VehicleKind {
-  return VEHICLE_KINDS[spot % VEHICLE_KINDS.length];
+  return spot >= HELI_SPOT ? 'heli' : VEHICLE_KINDS[spot % VEHICLE_KINDS.length];
 }
 
 /** How close you must be to get in or fill it up. */
@@ -141,6 +166,24 @@ export function vehicleSpots(seed: number): { x: number; z: number; yaw: number 
   });
 }
 
+/** Landmarks with a minicopter pad: the Ashlands' and Rust Mesa's. */
+const PADS = [0, 2];
+
+/**
+ * Where each minicopter stands: on the ground just outside its landmark, a quarter of the way
+ * round from where the car is parked. Numbered from HELI_SPOT, so they never share a car's spot.
+ */
+export function heliSpots(seed: number): { spot: number; x: number; z: number; yaw: number }[] {
+  const sites = landmarkSites(seed);
+  return PADS.map((n) => {
+    const s = sites[n];
+    const len = Math.hypot(s.x, s.z);
+    const [ux, uz] = len > 10 ? [-s.x / len, -s.z / len] : [0, 1];
+    const d = SITE_RADIUS + 6;
+    return { spot: HELI_SPOT + n, x: s.x - uz * d, z: s.z + ux * d, yaw: Math.atan2(ux, uz) };
+  });
+}
+
 /** Forward and right along the ground for a heading. */
 export function axes(yaw: number): { fx: number; fz: number; rx: number; rz: number } {
   const fx = -Math.sin(yaw);
@@ -149,12 +192,13 @@ export function axes(yaw: number): { fx: number; fz: number; rx: number; rz: num
 }
 
 /** Where the driver sits, in the world. */
-export function seatAt(v: Pick<VehicleState, 'kind' | 'x' | 'z' | 'yaw'>, seed: number): Vec3 {
-  const { seat } = VEHICLES[v.kind];
+export function seatAt(v: Pick<VehicleState, 'kind' | 'x' | 'y' | 'z' | 'yaw'>, seed: number): Vec3 {
+  const { seat, flies } = VEHICLES[v.kind];
   const { fx, fz, rx, rz } = axes(v.yaw);
   const x = v.x + fx * seat.ahead - rx * seat.left;
   const z = v.z + fz * seat.ahead - rz * seat.left;
-  return [x, terrainHeight(seed, v.x, v.z) + seat.y, z];
+  // A car sits on the ground; a minicopter may be up in the air.
+  return [x, (flies ? Math.max(v.y, terrainHeight(seed, v.x, v.z)) : terrainHeight(seed, v.x, v.z)) + seat.y, z];
 }
 
 /**

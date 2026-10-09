@@ -5,7 +5,7 @@ import { MAX_HEALTH } from '../shared/combat.ts';
 import { ITEMS, countItem } from '../shared/items.ts';
 import { atLandmark } from '../shared/landmarks.ts';
 import { terrainHeight } from '../shared/terrain.ts';
-import { START_FUEL, VEHICLES, VEHICLE_RESPAWN, axes, rayVehicle, seatAt, vehicleSpots } from '../shared/vehicles.ts';
+import { HOVER_BURN, START_FUEL, VEHICLES, VEHICLE_RESPAWN, axes, heliSpots, rayVehicle, seatAt, vehicleSpots } from '../shared/vehicles.ts';
 
 const SEED = 1234;
 const INFO = VEHICLES.pickup;
@@ -36,7 +36,7 @@ const told = (out: Outgoing[], text: string) => out.some((o) => o.msg.t === 'not
 test('a car is parked just outside every landmark', () => {
   const { game } = setup();
   const spots = vehicleSpots(SEED);
-  assert.equal(game.vehicles.size, spots.length);
+  assert.equal(game.vehicles.size, spots.length + heliSpots(SEED).length);
   for (const s of spots) assert.equal(atLandmark(SEED, s.x, s.z, 0), false, 'off the landmark pad');
   for (const v of game.vehicles.values()) assert.equal(v.fuel, START_FUEL);
 });
@@ -155,5 +155,84 @@ test('cars are saved with the world, where they were left', () => {
   assert.equal(again.x, car.x);
   assert.equal(again.fuel, 42);
   back.tick(0);
-  assert.equal(back.vehicles.size, vehicleSpots(SEED).length, 'no extra cars');
+  assert.equal(back.vehicles.size, vehicleSpots(SEED).length + heliSpots(SEED).length, 'no extra cars');
+});
+
+/** The minicopter, with its pilot in the seat. */
+function heliSetup() {
+  const { game, id, p } = setup();
+  const heli = [...game.vehicles.values()].find((v) => v.kind === 'heli')!;
+  const { rx, rz } = axes(heli.yaw);
+  standAt(game, id, heli.x - rx * 1.6, heli.z - rz * 1.6);
+  const inside = game.drive(id, heli.id);
+  assert.ok(inside.some((o) => o.msg.t === 'driving' && o.msg.id === heli.id), 'got in');
+  return { game, id, p, heli };
+}
+
+/** Moves the pilot straight up or down over a number of 100 ms steps. */
+function climb(game: Game, id: number, to: number, steps: number, t: number): number {
+  const p = game.players.get(id)!;
+  const from = p.y;
+  for (let n = 1; n <= steps; n++) {
+    t += 100;
+    game.move(id, p.x, from + ((to - from) * n) / steps, p.z, p.yaw, true, t);
+    game.tick(t);
+  }
+  return t;
+}
+
+test('a minicopter waits on a pad beside two landmarks, off the landmark itself', () => {
+  const { game } = setup();
+  const helis = [...game.vehicles.values()].filter((v) => v.kind === 'heli');
+  assert.equal(helis.length, heliSpots(SEED).length);
+  assert.ok(helis.length >= 2);
+  for (const s of heliSpots(SEED)) assert.equal(atLandmark(SEED, s.x, s.z, 0), false, 'off the landmark pad');
+  for (const s of heliSpots(SEED)) {
+    for (const c of vehicleSpots(SEED)) assert.ok(Math.hypot(s.x - c.x, s.z - c.z) > 8, 'clear of the parked car');
+  }
+});
+
+test('the minicopter flies up with its pilot, burns fuel to hover, and is only repainted', () => {
+  const { game, id, p, heli } = heliSetup();
+  const ground = terrainHeight(SEED, heli.x, heli.z);
+  let t = 1000;
+  game.move(id, p.x, p.y, p.z, p.yaw, false, t);
+  t = climb(game, id, p.y + 20, 40, t);
+  assert.ok(heli.y > ground + 19, 'up in the air with its pilot');
+  const before = heli.fuel;
+  t = climb(game, id, p.y, 50, t);
+  assert.ok(before - heli.fuel > HOVER_BURN * 4.5, 'hovering burns fuel');
+  // Asked for a different model, it keeps being a minicopter.
+  game.drive(id, null);
+  game.customiseCar(id, heli.id, 'sedan', 3);
+  assert.equal(heli.kind, 'heli');
+});
+
+test('a minicopter left in the air falls and is smashed by the landing', () => {
+  const { game, id, p, heli } = heliSetup();
+  let t = 1000;
+  game.move(id, p.x, p.y, p.z, p.yaw, false, t);
+  t = climb(game, id, p.y + 30, 60, t);
+  game.drive(id, null);
+  assert.ok(p.y > terrainHeight(SEED, p.x, p.z) + 20, 'the pilot gets out up in the air');
+  const hp = heli.hp;
+  for (let n = 0; n < 80 && game.vehicles.has(heli.id); n++) {
+    t += 100;
+    game.tick(t);
+  }
+  const ground = terrainHeight(SEED, heli.x, heli.z);
+  assert.ok(!game.vehicles.has(heli.id) || (heli.y - ground < 0.05 && heli.hp < hp), 'down, and broken or destroyed');
+});
+
+test('flying a minicopter into the ground hurts it, a gentle landing does not', () => {
+  const { game, id, p, heli } = heliSetup();
+  let t = 1000;
+  game.move(id, p.x, p.y, p.z, p.yaw, false, t);
+  const low = p.y;
+  t = climb(game, id, low + 5, 20, t);
+  t = climb(game, id, low, 20, t);
+  assert.equal(heli.hp, VEHICLES.heli.maxHp, 'a slow landing does no harm');
+  t = climb(game, id, low + 6, 20, t);
+  t = climb(game, id, low, 3, t);
+  assert.ok(heli.hp < VEHICLES.heli.maxHp, 'dropped onto the ground');
 });
