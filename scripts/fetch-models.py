@@ -41,8 +41,6 @@ MODELS = {
     'dead-branch': ('dead_quiver_branch_01', 1500),
     'stones': ('namaqualand_stones_01', 1500),
     'stump': ('tree_stump_01', 2000),
-    # Broad leaves round the pumpkin in a planter box.
-    'crop-leaves': ('calathea_orbifolia_01', 2500),
 }
 
 # Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
@@ -105,6 +103,8 @@ PROPS = {
     # Crops grown in the planter box.
     'crop-corn': '5fd3b104d8104519b061469c365d4974',
     'crop-hemp': '79fe78fd6c6a426b8584115e772a5818',
+    # A melon vine, its melons left out in the game: the leaves round a growing pumpkin.
+    'crop-vine': '806bf365ccf24fe498dced58695cad99',
     'tool-salvagedAxe': '30c5a2054fd9469796c0771dc52a0fa0',
     'tool-salvagedPickaxe': '83e334fc83ed4bb19592154e60e529c5',
     'gun-eoka': '1e83dccd8d6e43a183fe48410750dfb4',

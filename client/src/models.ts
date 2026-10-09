@@ -154,7 +154,7 @@ const FIT: Record<string, Fit> = {
   planter: { width: 1.7, turn: [0, Math.PI / 2, 0] },
   'crop-corn': { height: 1.9, foliage: true, ownAlpha: true },
   'crop-hemp': { height: 1.4, foliage: true, ownAlpha: true },
-  'crop-leaves': { height: 0.38, set: true, foliage: true },
+  'crop-vine': { width: 0.9, drop: /WATERMELON/, foliage: true, ownAlpha: true },
   'crop-pumpkin': { width: 0.3 },
   'food-corn': { width: 0.2 },
   // Lies at an angle in all three axes; found by lining the handle up with y and the head with z.
@@ -243,7 +243,8 @@ function foliage(m: THREE.MeshStandardMaterial, alpha?: THREE.Texture): THREE.Me
   out.side = THREE.DoubleSide;
   out.normalMap = null;
   if (alpha && m.transparent) out.alphaMap = alpha;
-  out.alphaTest = Math.max(out.alphaTest, 0.4);
+  // Some files cut out at 0.9 or more, which eats most of each leaf.
+  out.alphaTest = Math.min(0.5, Math.max(out.alphaTest, 0.4));
   out.transparent = false;
   // Back faces would flip the upward normal into the ground; keep it pointing up on both sides.
   out.onBeforeCompile = (shader) => {

@@ -16,7 +16,6 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
 - stones: https://polyhaven.com/a/namaqualand_stones_01
 - stump: https://polyhaven.com/a/tree_stump_01
-- crop-leaves: https://polyhaven.com/a/calathea_orbifolia_01
 - grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
@@ -49,6 +48,7 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - gun-semiRifle: "SKS Semi Automatic Rifle" by MaX3Dd (https://sketchfab.com/3d-models/sks-semi-automatic-rifle-ada722d492344cba8633be150eea7e85), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-corn: "Maize Corn Plant" by gilles.schaeck (https://sketchfab.com/3d-models/maize-corn-plant-5fd3b104d8104519b061469c365d4974), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-hemp: "Cannabis Plant" by 3D Crackhouse (https://sketchfab.com/3d-models/cannabis-plant-79fe78fd6c6a426b8584115e772a5818), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- crop-vine: "Watermelon Bush" by FixIK* (https://sketchfab.com/3d-models/watermelon-bush-806bf365ccf24fe498dced58695cad99), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedAxe: "Hatchet" by MaX3Dd (https://sketchfab.com/3d-models/hatchet-30c5a2054fd9469796c0771dc52a0fa0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedPickaxe: "Pickaxe" by Multipainkiller Studio (https://sketchfab.com/3d-models/pickaxe-83e334fc83ed4bb19592154e60e529c5), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-eoka: "Hand Made Pistol" by Lyndschoko (https://sketchfab.com/3d-models/hand-made-pistol-1e83dccd8d6e43a183fe48410750dfb4), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized

@@ -10,7 +10,7 @@ import { PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
 import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
-import { BOULDERS, model, soleMaterial, variants } from './models.ts';
+import { BOULDERS, model, soleMaterial } from './models.ts';
 import { lodIndex, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, soilSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
@@ -280,15 +280,16 @@ function scannedCrop(seed: ItemId, rand: () => number): THREE.Group | null {
     plant.scale.setScalar(0.85 + rand() * 0.25);
     return g.add(plant);
   }
-  const leaves = variants('crop-leaves');
+  // Pumpkins: a sprawling vine of leaves, the pumpkin sat among them once it is nearly ripe.
+  const leaves = model('crop-vine');
   const pumpkin = model('crop-pumpkin');
-  if (!leaves.length || !pumpkin) return null;
-  const vine = place(leaves[Math.floor(rand() * leaves.length)]);
+  if (!leaves || !pumpkin) return null;
+  const vine = place(leaves);
   vine.rotation.y = rand() * Math.PI * 2;
   g.add(vine);
   const fruit = place(pumpkin);
   fruit.userData.fruit = true;
-  fruit.position.set(0.08, 0, 0.06);
+  fruit.position.set((rand() - 0.5) * 0.12, 0, (rand() - 0.5) * 0.12);
   fruit.rotation.y = rand() * Math.PI * 2;
   g.add(fruit);
   return g;
