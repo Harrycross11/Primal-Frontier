@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Game } from '../server/game.ts';
 import { MAX_PLAYERS } from '../shared/constants.ts';
+import { TECH } from '../shared/techTree.ts';
 import { terrainHeight } from '../shared/terrain.ts';
 import { BARREL_DRINK, generateResources, RESOURCE_INFO } from '../shared/world.ts';
 import {
@@ -17,7 +18,7 @@ import {
   radZones,
   radiationAt,
 } from '../shared/survival.ts';
-import { addItem, countItem, ITEMS, recipeFor, type ItemId, type Slots } from '../shared/items.ts';
+import { addItem, countItem, ITEMS, RECIPES, recipeFor, type ItemId, type Slots } from '../shared/items.ts';
 import { FURNACE_FUEL, FURNACE_ORE_SLOTS, FURNACE_OUTPUT_SLOTS, LOOT_BAG_SECONDS } from '../shared/deployables.ts';
 import { EYE_HEIGHT, MAX_HEALTH } from '../shared/combat.ts';
 import {
@@ -332,6 +333,9 @@ test('salvaged tools need a workbench nearby', () => {
   game.deploy(id, slot, 6, terrainHeight(SEED, 6, 4), 4, 0);
   assert.equal(game.deployables.size, 1);
   game.craft(id, 'salvagedAxe', 1);
+  assert.equal(player.queue.length, 0, 'not learned yet');
+  game.learn(id, 'salvagedAxe');
+  game.craft(id, 'salvagedAxe', 1);
   assert.equal(player.queue.length, 1);
 });
 
@@ -418,15 +422,17 @@ test('better guns need higher workbench levels', () => {
   game.craft(id, 'revolver', 1);
   assert.equal(player.queue.length, 0, 'revolver needs a workbench');
   game.deploy(id, player.slots.findIndex((s) => s?.item === 'workbench'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  for (const item of ['crossbow', 'waterpipe', 'revolver', 'pumpShotgun', 'thompson'] as ItemId[]) game.learn(id, item);
   game.craft(id, 'revolver', 1);
   assert.equal(player.queue.length, 1);
-  game.craft(id, 'thompson', 1);
-  assert.equal(player.queue.length, 1, 'the Thompson needs level 2');
+  assert.ok(!player.learned.includes('thompson'), 'level 2 steps need a level 2 workbench to learn');
   game.craft(id, 'workbench2', 1);
   run(game, 0, 40);
   game.deploy(id, player.slots.findIndex((s) => s?.item === 'workbench2'), 2, terrainHeight(SEED, 2, 1.5), 1.5, 0);
+  game.learn(id, 'pumpShotgun');
+  game.learn(id, 'thompson');
   game.craft(id, 'thompson', 1);
-  assert.equal(player.queue.length, 1);
+  assert.deepEqual(player.queue.map((j) => j.item), ['thompson']);
 });
 
 /** A stretch of ground that stays level for 12 m along x, so test shots are not blocked by hills. */
@@ -729,4 +735,51 @@ test('high quality ore sits inside the craters', () => {
   const hot = nodes.filter((n) => n.kind === 'hqmOre' && radiationAt(SEED, n.x, n.z) > 0);
   assert.ok(hot.length >= 4);
   assert.ok(nodes.some((n) => n.kind === 'mushroom') && nodes.some((n) => n.kind === 'waterBarrel'));
+});
+
+test('the tech tree: every workbench recipe is on it, at its own level', () => {
+  for (const r of RECIPES) {
+    const node = TECH.get(r.item);
+    if (!r.workbench || r.item.startsWith('workbench')) assert.ok(!node, `${r.item} needs no learning`);
+    else assert.equal(node?.level, r.workbench, `${r.item} is learned at its workbench level`);
+  }
+});
+
+test('learning costs scrap, needs the step before it and a workbench, and survives death and a restart', () => {
+  const { game, id, player } = setup();
+  standAt(game, id, 4, 4);
+  give(game, id, 'scrap', 100);
+  game.learn(id, 'salvagedAxe');
+  assert.equal(player.learned.length, 0, 'no workbench in reach');
+  give(game, id, 'workbench', 1);
+  game.deploy(id, player.slots.findIndex((s) => s?.item === 'workbench'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  game.learn(id, 'salvagedPickaxe');
+  assert.equal(player.learned.length, 0, 'the axe comes first');
+  game.learn(id, 'salvagedAxe');
+  assert.deepEqual(player.learned, ['salvagedAxe']);
+  assert.equal(have(game, id, 'scrap'), 100 - TECH.get('salvagedAxe')!.scrap);
+  game.learn(id, 'salvagedAxe');
+  assert.equal(have(game, id, 'scrap'), 100 - TECH.get('salvagedAxe')!.scrap, 'not charged twice');
+  game.learn(id, 'semiPistol');
+  assert.ok(!player.learned.includes('semiPistol'), 'needs a level 2 workbench');
+  give(game, id, 'scrap', 10);
+  player.hp = 0;
+  player.dead = true;
+  game.respawn(id);
+  assert.deepEqual(game.players.get(id)!.learned, ['salvagedAxe'], 'kept through death');
+  game.craft(id, 'salvagedPickaxe', 1);
+  assert.equal(player.queue.length, 0, 'not learned, so not crafted');
+});
+
+test('what a survivor has learned comes back with them after a restart', () => {
+  const game = new Game(SEED);
+  game.wildlife = false;
+  const token = 'learned-token-0001';
+  const id = game.join('Learner', 0, null, token)!.id;
+  game.players.get(id)!.learned.push('salvagedAxe', 'salvagedPickaxe');
+  const back = Game.restore(JSON.parse(JSON.stringify(game.save(0))), 0);
+  const again = back.join('Learner', 0, null, token)!;
+  assert.deepEqual(back.players.get(again.id)!.learned, ['salvagedAxe', 'salvagedPickaxe']);
+  const welcome = again.out.find((o) => o.msg.t === 'welcome')!.msg;
+  assert.ok(welcome.t === 'welcome' && welcome.learned.includes('salvagedAxe'), 'and the client is told');
 });

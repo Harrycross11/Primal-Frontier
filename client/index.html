@@ -448,6 +448,34 @@
       .recipe .rcost { font-size: 12px; opacity: .8; }
       .recipe.cant .rname { opacity: .55; }
       .need { color: #ff9c86; }
+      #tech { width: 820px; max-height: 88vh; display: flex; flex-direction: column; }
+      #tech-tree { overflow: auto; min-height: 0; flex: 1; }
+      #tech[hidden] { display: none; }
+      .tech-head { display: flex; align-items: center; justify-content: space-between; }
+      #tech-scrap { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+      #tech-scrap svg, #tech-scrap .icon { width: 26px; height: 26px; }
+      .branch { display: flex; align-items: center; margin: 8px 0; }
+      .branch-name { width: 128px; flex: none; font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+      .tnode { width: 92px; flex: none; padding: 6px 4px; text-align: center; cursor: pointer; border: 1px solid rgba(235,230,218,.14); background: rgba(235,230,218,.03); }
+      .tnode svg, .tnode .icon { width: 40px; height: 40px; }
+      .tnode .tn { font-size: 11px; font-weight: 700; line-height: 1.15; min-height: 26px; }
+      .tnode .tc { font-size: 11px; opacity: .75; margin-top: 2px; }
+      .tnode.learned { border-color: rgba(235,230,218,.6); background: rgba(235,230,218,.1); }
+      .tnode.learned .tc { opacity: 1; }
+      .tnode.ready { border-color: var(--accent); }
+      .tnode.locked { opacity: .45; }
+      .tnode.on { outline: 2px solid var(--ink); outline-offset: 1px; }
+      .tnode:hover { background: rgba(235,230,218,.08); }
+      .branch .link { width: 14px; height: 2px; flex: none; background: rgba(235,230,218,.2); }
+      .branch .link.done { background: rgba(235,230,218,.7); }
+      #tech-detail { flex: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(235,230,218,.1); min-height: 112px; }
+      #tech-detail .dhead { display: flex; align-items: center; gap: 10px; }
+      #tech-detail .dhead svg, #tech-detail .dhead .icon { width: 44px; height: 44px; }
+      #tech-detail .dhead small { display: block; opacity: .75; }
+      #tech-detail .tdesc { margin: 6px 0 10px; font-size: 13px; opacity: .85; }
+      #tech-detail .actions { display: flex; align-items: center; gap: 12px; }
+      #tech-detail .actions .btn { background: var(--accent); color: #fff; border-radius: 0; }
+      #tech-detail .hint { font-size: 13px; opacity: .75; }
       .tag { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(79,179,255,.25); margin-left: 6px; }
       #recipe-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); font-size: 13px; }
       #recipe-detail .actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
@@ -769,6 +797,7 @@
         Guns: right click aim · <kbd>R</kbd> reload<br />
         Plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit<br />
         Bases: <kbd>E</kbd> doors, tool cupboard · explosives: left click<br />
+        <kbd>E</kbd> on a workbench: tech tree, learn new things for scrap<br />
         Team: <kbd>T</kbd> invite who you look at · <kbd>Y</kbd> join · <kbd>L</kbd> leave<br />
         <kbd>P</kbd> paint a car, wall or gun, or swap a car's model
       </div>
@@ -790,6 +819,12 @@
             <div id="furnace-status"></div>
             <div style="margin-top:10px"><button id="furnace-toggle">Light</button></div>
           </div>
+        </div>
+        <div class="panel" id="tech" hidden>
+          <div class="tech-head"><h2 id="tech-title">Workbench</h2><div id="tech-scrap"></div></div>
+          <div class="tabs" id="tech-tabs"></div>
+          <div id="tech-tree"></div>
+          <div id="tech-detail"></div>
         </div>
         <div class="panel" id="crafting">
           <h2>Crafting</h2>

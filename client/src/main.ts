@@ -376,9 +376,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       effects.uiSound('click');
       net.send({ t: 'furnace', id, on });
     },
+    learn: (item) => {
+      effects.uiSound('click');
+      net.send({ t: 'learn', item });
+    },
   });
   ui.slots = slots;
   ui.wear = welcome.wear;
+  ui.learned = new Set(welcome.learned ?? []);
   ui.render();
   const refreshPlayers = () =>
     hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
@@ -452,6 +457,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         break;
       case 'crafted':
         effects.craftedSound();
+        break;
+      case 'learned':
+        ui.learned = new Set(m.items);
+        effects.craftedSound();
+        ui.render();
         break;
       case 'vitals':
         vitals = m;
@@ -1202,6 +1212,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
       return net.send({ t: 'door', key: pieceKey(aim.piece) });
     }
+    if (aimDeployable && WORKBENCH_LEVEL[aimDeployable.kind]) {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the workbench');
+      return openScreen(aimDeployable);
+    }
     if (aimDeployable && aimDeployable.slots.length > 0) {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
       if (falling(aimDeployable)) return hud.notice("Wait for it to land");
@@ -1420,7 +1434,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         return { text, health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
       }
       const bench = WORKBENCH_LEVEL[d.kind];
-      const hints = [d.slots.length > 0 ? 'E to open' : bench ? `Unlocks level ${bench} recipes nearby` : '', 'Hit to pick up'];
+      const hints = [d.slots.length > 0 ? 'E to open' : bench ? 'E for the tech tree' : '', 'Hit to pick up'];
       const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
       return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
     }

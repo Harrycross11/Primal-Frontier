@@ -77,6 +77,7 @@ import {
   type Stack,
 } from '../shared/items.ts';
 import type { ArmourSlot } from '../shared/items.ts';
+import { TECH, learnBlock, needsLearning } from '../shared/techTree.ts';
 import {
   EYE_HEIGHT,
   FIST,
@@ -138,6 +139,8 @@ export type Outgoing =
 
 interface Player extends Omit<PlayerState, 'held' | 'wear'> {
   slots: Slots;
+  /** What they have learned at workbenches (see shared/techTree.ts). */
+  learned: ItemId[];
   /** Armour worn on the head, chest and legs. */
   wear: Slots;
   /** Belt slot in their hands. */
@@ -178,6 +181,8 @@ interface Sleeper {
   slots: Slots;
   wear: Slots;
   vitals: Vitals;
+  /** What they had learned; kept through death, lost with the world. */
+  learned?: ItemId[];
 }
 
 /** Everything needed to bring a world back after the server restarts. Times are kept as ms left. */
@@ -415,6 +420,7 @@ export class Game {
       speed: 0,
       dead: false,
       slots,
+      learned: (back?.learned ?? []).filter((item) => needsLearning(item)),
       wear: emptySlots(ARMOUR_SLOTS.length),
       active: 0,
       hp: MAX_HEALTH,
@@ -458,6 +464,7 @@ export class Game {
             hp: player.hp,
             vitals: { ...player.vitals },
             team: [...this.team(id)],
+            learned: [...player.learned],
             vehicles: this.vehicleStates(),
             ...(key && { account: this.accounts.view(key, now) }),
           },
@@ -1060,11 +1067,23 @@ export class Game {
     if (!p || !recipe || !Number.isInteger(count) || count < 1) return [];
     count = Math.min(count, MAX_QUEUE - p.queue.length);
     if (count <= 0) return [notice(id, 'Your crafting queue is full')];
+    if (needsLearning(item) && !p.learned.includes(item)) return [notice(id, `Learn the ${ITEMS[item].name} at a workbench first`)];
     if (recipe.workbench && this.workbenchLevel(p) < recipe.workbench) return [notice(id, `You need to be near a level ${recipe.workbench} workbench`)];
     if (!canAfford(p.slots, recipe, count)) return [notice(id, 'Not enough resources')];
     for (const [ingredient, n] of Object.entries(recipe.cost)) removeItem(p.slots, ingredient as ItemId, n! * count);
     for (let n = 0; n < count; n++) p.queue.push({ item, left: recipe.time, total: recipe.time });
     return [this.inventory(p), this.crafting(p)];
+  }
+
+  /** Learns an item from the tech tree of a workbench in reach, for scrap. */
+  learn(id: number, item: ItemId): Outgoing[] {
+    const p = this.alive(id);
+    if (!p || !TECH.has(item)) return [];
+    const block = learnBlock(item, new Set(p.learned), this.workbenchLevel(p), countItem(p.slots, 'scrap'));
+    if (block) return [notice(id, block)];
+    removeItem(p.slots, 'scrap', TECH.get(item)!.scrap);
+    p.learned.push(item);
+    return [this.inventory(p), { to: id, msg: { t: 'learned', items: [...p.learned], item } }, notice(id, `Learned the ${ITEMS[item].name}`)];
   }
 
   cancelCraft(id: number, index: number): Outgoing[] {
@@ -2641,7 +2660,7 @@ export function cleanToken(token: unknown): string | null {
 }
 
 function sleeper(p: Player): Sleeper {
-  return clone({ id: p.id, name: p.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, dead: p.dead, slots: p.slots, wear: p.wear, vitals: p.vitals });
+  return clone({ id: p.id, name: p.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, dead: p.dead, slots: p.slots, wear: p.wear, vitals: p.vitals, learned: p.learned });
 }
 
 function cleanName(name: unknown): string {
