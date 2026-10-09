@@ -763,6 +763,18 @@ export class World {
     });
   }
 
+  /** The nearest standing resource of this kind within `range` of a spot, or null. */
+  nearest(kind: ResourceNode['kind'], at: THREE.Vector3, range: number): THREE.Vector3 | null {
+    let best: THREE.Vector3 | null = null;
+    let bestD = range * range;
+    for (const g of this.resourceMeshes.values()) {
+      if (g.userData.kind !== kind || !g.visible) continue;
+      const d = g.position.distanceToSquared(at);
+      if (d < bestD) [best, bestD] = [g.position, d];
+    }
+    return best;
+  }
+
   addResources(nodes: ResourceNode[]) {
     for (const node of nodes) {
       const rand = mulberry32(node.id * 7 + 3);
@@ -786,6 +798,7 @@ export class World {
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);
       g.userData.baseScale = node.scale;
+      g.userData.kind = node.kind;
       g.traverse((o) => {
         o.userData.resourceId = node.id;
         if ((o as THREE.Mesh).isMesh) {
