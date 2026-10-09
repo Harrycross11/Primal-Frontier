@@ -2,7 +2,7 @@
 // inventory grid, an open furnace or box, and the crafting menu. Items move by dragging
 // between slots, or by right-clicking to send a stack to the other side.
 
-import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, slotAccepts, type Deployable } from '../../shared/deployables.ts';
+import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, WORKBENCH_LEVEL, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
   ARMOUR_SLOTS,
   BELT_SIZE,
@@ -19,6 +19,7 @@ import {
 } from '../../shared/items.ts';
 import type { CraftJob, SlotRef } from '../../shared/protocol.ts';
 import { PAINTS } from '../../shared/paint.ts';
+import { TECH, TECH_BRANCHES, learnBlock, needsLearning } from '../../shared/techTree.ts';
 import { iconSvg } from './icons.ts';
 import { swatch } from './paint.ts';
 
@@ -31,6 +32,7 @@ export interface InventoryActions {
   craft(item: ItemId, count: number): void;
   cancel(index: number): void;
   furnace(id: number, on: boolean): void;
+  learn(item: ItemId): void;
 }
 
 export class InventoryUi {
@@ -41,6 +43,10 @@ export class InventoryUi {
   container: Deployable | null = null;
   /** Level of the best workbench in reach, or 0. */
   workbench = 0;
+  /** What you have learned at workbenches. */
+  learned = new Set<ItemId>();
+  private techLevel: 1 | 2 | 3 = 1;
+  private techSelected: ItemId | null = null;
   private queue: CraftJob[] = [];
   private queueAt = 0;
   private category: Recipe['category'] | 'All' = 'All';
@@ -84,6 +90,11 @@ export class InventoryUi {
 
   show(container: Deployable | null = null) {
     this.container = container;
+    const bench = container ? WORKBENCH_LEVEL[container.kind] : undefined;
+    if (bench) {
+      this.techLevel = bench;
+      this.techSelected = null;
+    }
     $('screen').hidden = false;
     this.render();
   }
@@ -110,6 +121,7 @@ export class InventoryUi {
     this.renderWear();
     this.renderContainer();
     this.renderCrafting();
+    this.renderTech();
   }
 
   /** Called every frame to move the crafting progress bar. */
@@ -202,6 +214,76 @@ export class InventoryUi {
     }
   }
 
+  /** A workbench's tech tree, in place of the crafting list while one is open. */
+  private renderTech() {
+    const bench = this.container ? WORKBENCH_LEVEL[this.container.kind] : undefined;
+    $('tech').hidden = !bench;
+    $('crafting').hidden = !!bench;
+    if (!bench) return;
+    const scrap = countItem(this.slots, 'scrap');
+    $('tech-title').textContent = `Workbench level ${bench}`;
+    $('tech-scrap').innerHTML = `${iconSvg('scrap')}<span>${scrap} scrap</span>`;
+    const tabs = $('tech-tabs');
+    tabs.innerHTML = '';
+    for (const level of [1, 2, 3] as const) {
+      const b = document.createElement('button');
+      b.textContent = `Level ${level}`;
+      b.classList.toggle('on', level === this.techLevel);
+      b.onclick = () => {
+        this.techLevel = level;
+        this.techSelected = null;
+        this.render();
+      };
+      tabs.appendChild(b);
+    }
+    const tree = $('tech-tree');
+    const scroll = tree.scrollTop;
+    tree.innerHTML = '';
+    for (const branch of TECH_BRANCHES.filter((b) => b.level === this.techLevel)) {
+      const row = document.createElement('div');
+      row.className = 'branch';
+      row.innerHTML = `<div class="branch-name">${branch.name}</div>`;
+      branch.steps.forEach(([item, cost], i) => {
+        const learned = this.learned.has(item);
+        const ready = !learned && !learnBlock(item, this.learned, this.workbench, Infinity);
+        if (i > 0) row.insertAdjacentHTML('beforeend', `<i class="link${learned ? ' done' : ''}"></i>`);
+        const node = document.createElement('div');
+        node.className = `tnode${learned ? ' learned' : ready ? ' ready' : ' locked'}${item === this.techSelected ? ' on' : ''}`;
+        node.innerHTML = `${iconSvg(item)}<div class="tn">${ITEMS[item].name}</div><div class="tc">${learned ? 'Learned' : `${cost} scrap`}</div>`;
+        node.onclick = () => {
+          this.techSelected = item;
+          this.render();
+        };
+        row.appendChild(node);
+      });
+      tree.appendChild(row);
+    }
+    tree.scrollTop = scroll;
+    const detail = $('tech-detail');
+    const item = this.techSelected;
+    if (!item) {
+      detail.innerHTML = '<div class="hint">Pick a step to see what it unlocks. Each one needs the step before it, and costs scrap to learn. What you learn stays with you until the wipe, even if you die.</div>';
+      return;
+    }
+    const node = TECH.get(item)!;
+    const block = this.learned.has(item) ? null : learnBlock(item, this.learned, this.workbench, scrap);
+    const recipe = RECIPES.find((r) => r.item === item);
+    const makes = recipe ? `<small>Then craft it at a level ${node.level} workbench for ${this.costText(recipe)}</small>` : '';
+    detail.innerHTML = `<div class="dhead">${iconSvg(item)}<div><b>${ITEMS[item].name}</b>${makes}</div></div><div class="tdesc">${ITEMS[item].description}</div><div class="actions"></div>`;
+    const actions = detail.querySelector('.actions')!;
+    if (this.learned.has(item)) {
+      actions.innerHTML = '<span class="can">Learned. You can craft it.</span>';
+      return;
+    }
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = `Learn for ${node.scrap} scrap`;
+    b.disabled = !!block;
+    b.onclick = () => this.actions.learn(item);
+    actions.appendChild(b);
+    if (block) actions.insertAdjacentHTML('beforeend', `<span class="can">${block}</span>`);
+  }
+
   private renderCrafting() {
     const tabs = $('tabs');
     tabs.innerHTML = '';
@@ -222,10 +304,15 @@ export class InventoryUi {
     list.innerHTML = '';
     for (const r of RECIPES) {
       if (this.category !== 'All' && r.category !== this.category) continue;
-      const ok = canAfford(this.slots, r) && (r.workbench ?? 0) <= this.workbench;
+      const known = !needsLearning(r.item) || this.learned.has(r.item);
+      const ok = known && canAfford(this.slots, r) && (r.workbench ?? 0) <= this.workbench;
       const row = document.createElement('div');
       row.className = `recipe${ok ? '' : ' cant'}${r.item === this.selected ? ' on' : ''}`;
-      const tag = r.workbench ? `<span class="tag${r.workbench > this.workbench ? ' locked' : ''}">Workbench ${r.workbench}</span>` : '';
+      const tag = !known
+        ? '<span class="tag locked">Not learned</span>'
+        : r.workbench
+          ? `<span class="tag${r.workbench > this.workbench ? ' locked' : ''}">Workbench ${r.workbench}</span>`
+          : '';
       const count = r.count > 1 ? ` ×${r.count}` : '';
       row.innerHTML = `${iconSvg(r.item)}<div><div class="rname">${ITEMS[r.item].name}${count}${tag}</div><div class="rcost">${this.costText(r)}</div></div>`;
       row.onclick = () => {
@@ -236,7 +323,8 @@ export class InventoryUi {
     }
     list.scrollTop = this.listScroll;
     const r = RECIPES.find((x) => x.item === this.selected)!;
-    const benchOk = (r.workbench ?? 0) <= this.workbench;
+    const known = !needsLearning(r.item) || this.learned.has(r.item);
+    const benchOk = (r.workbench ?? 0) <= this.workbench && known;
     const ok = canAfford(this.slots, r) && benchOk;
     const detail = $('recipe-detail');
     // What it takes, against what you carry.
@@ -249,7 +337,11 @@ export class InventoryUi {
     const most = benchOk ? maxCraftable(this.slots, r) : 0;
     const yields = r.count > 1 ? ` · makes ${r.count}` : '';
     detail.innerHTML = `<div class="dhead">${iconSvg(r.item)}<div><b>${ITEMS[r.item].name}</b><small>${r.time}s each${yields}</small></div></div>${ITEMS[r.item].description}${statsText(r.item)}<div class="ings">${parts}</div>${
-      benchOk ? '' : `<div class="need">Stand near a level ${r.workbench} workbench to craft this.</div>`
+      !known
+        ? `<div class="need">Learn this first: press E on a level ${r.workbench} workbench to open its tech tree.</div>`
+        : benchOk
+          ? ''
+          : `<div class="need">Stand near a level ${r.workbench} workbench to craft this.</div>`
     }<div class="actions"></div>`;
     const actions = detail.querySelector('.actions')!;
     const counts: [number, string][] = [

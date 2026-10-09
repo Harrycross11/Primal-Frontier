@@ -244,6 +244,9 @@ wss.on('connection', (ws) => {
       case 'craft':
         deliver(game.craft(id, msg.item, msg.count));
         break;
+      case 'learn':
+        deliver(game.learn(id, msg.item));
+        break;
       case 'cancelCraft':
         deliver(game.cancelCraft(id, msg.index));
         break;

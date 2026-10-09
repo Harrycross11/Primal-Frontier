@@ -21,6 +21,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 - Gathering: hit trees for wood, wrecks for scrap, boulders for stone, metal ore, sulfur ore and rare high quality metal ore, and press E on hemp for cloth. Trees never regrow; the rest respawn after a few minutes. You spawn with a rock and a building plan.
 - Rust-style inventory: a 6-slot belt and a 24-slot backpack. Drag stacks between slots, shift-drag to split, right click to quick-move.
 - Crafting (Tab): a queue that crafts over time and refunds when cancelled. Stone hatchets and pickaxes gather much faster than the rock; salvaged tools are faster again but need a workbench nearby. Tools wear out and break.
+- Tech tree: anything that needs a workbench has to be learned first. Press **E** on a workbench to open its tree: branches of tools, blades, guns, ammo, explosives and armour for each level, where each step costs scrap and needs the one before it. What you learn stays through death and is wiped with the world.
 - Deployables: workbenches (levels 1, 2 and 3), a furnace that burns wood into charcoal while smelting metal, sulfur and high quality ore, and a 12-slot storage box. Hit one to pick it back up.
 - Weapons, Rust-style: spears, a machete and a salvaged sword; the hunting bow and crossbow; the Eoka, waterpipe, revolver and double barrel; the semi-auto pistol, pump shotgun, Thompson, custom SMG and semi-auto rifle (workbench 2); the MP5, assault rifle, LR-300, bolt action rifle, L96 and M249 (workbench 3). Five ammo types are crafted from gunpowder (charcoal and sulfur). Guns have magazines, reloads, recoil, spread, damage falloff and headshots; scoped rifles zoom right in.
 - Armour: burlap (cloth), road sign (workbench 1) and welded metal (workbench 2) pieces for the head, chest and legs. Each blocks a share of the damage on the part it covers (10%, 30% and 45-50%), wears down as it takes hits and shows on your survivor. Wear it from the Armour row in the inventory, by right clicking it, or by left clicking it on your belt. Worn armour goes in your loot bag when you die.
@@ -112,4 +113,4 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-The first roadmap is done. Clans and cars are in too. Ideas for next: a minicopter, a Rust-style tech tree, farming, more lands and creatures, and moving to Unity if the prototype proves fun.
+The first roadmap is done, along with clans, cars, a minicopter and a tech tree. Ideas for next: farming, more lands and creatures, and moving to Unity if the prototype proves fun.

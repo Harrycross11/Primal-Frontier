@@ -77,6 +77,8 @@ export type ClientMessage =
   | { t: 'hitDeployable'; id: number }
   | { t: 'edit'; key: string; edit: WallEdit }
   | { t: 'craft'; item: ItemId; count: number }
+  /** Learn an item from the tech tree of a workbench in reach. */
+  | { t: 'learn'; item: ItemId }
   | { t: 'cancelCraft'; index: number }
   /** Move a stack (or `count` of it) between slots; stacks merge or swap. */
   | { t: 'moveItem'; from: SlotRef; to: SlotRef; count?: number }
@@ -135,6 +137,8 @@ export type ServerMessage =
       vitals: Vitals;
       /** Everyone on your team (you included), or just you. */
       team: number[];
+      /** What you have learned at workbenches. */
+      learned: ItemId[];
       vehicles: VehicleState[];
       /** Coins, packs and objectives; none without a token. */
       account?: AccountView;
@@ -154,6 +158,8 @@ export type ServerMessage =
   | { t: 'crafting'; queue: CraftJob[] }
   /** A craft finished and went into your inventory. */
   | { t: 'crafted'; item: ItemId; count: number }
+  /** Everything you have learned, after learning `item`. */
+  | { t: 'learned'; items: ItemId[]; item: ItemId }
   /** A piece was placed, changed or damaged (piece set), or destroyed (piece null). */
   | { t: 'piece'; key: string; piece: Piece | null; by: number }
   /** A deployable was placed or changed (set), or destroyed (null). */
