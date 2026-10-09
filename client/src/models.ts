@@ -44,6 +44,8 @@ const FIT: Record<string, Fit> = {
   log: { width: 3.2 },
   // Worn on the survivor's back: turned so the straps face +z, against the body.
   'gear-backpack': { height: 0.62, turn: [0, Math.PI, 0] },
+  // An English leather saddle with its stirrups hanging, front along +z; creatures.ts sizes it.
+  'gear-saddle': { length: 1 },
   barrel: { height: 0.9 },
   // The tyre is scanned standing up; lay it flat.
   tyre: { width: 0.84, turn: [Math.PI / 2, 0, 0] },

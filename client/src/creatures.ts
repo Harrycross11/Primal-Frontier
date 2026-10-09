@@ -8,7 +8,10 @@ import { SPECIES, rayCreature, type CreatureAnim, type CreatureState, type Speci
 import type { Vec3 } from '../../shared/combat.ts';
 import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
-import { character, characterClips } from './models.ts';
+import { character, characterClips, model, soleMaterial } from './models.ts';
+
+/** The scanned saddle's fitted length (models.ts FIT). */
+const SADDLE_LENGTH = 1;
 
 type Clips = Partial<Record<CreatureAnim, [string, number]>>;
 
@@ -156,6 +159,8 @@ class HoundView {
   private info: (typeof SPECIES)[Species];
   /** Where its saddle sits on its back, in its own frame, for those that can be ridden. */
   private saddle: THREE.Group | null = null;
+  /** The top of its back where the saddle goes, and the half width of its barrel below that. */
+  private back: { top: number; half: number } | null = null;
   private lastAt = new THREE.Vector3();
   private pace = 0;
 
@@ -192,6 +197,7 @@ class HoundView {
     const centre = box.getCenter(new THREE.Vector3());
     holder.scale.multiplyScalar(s);
     holder.position.set(-centre.x * s, -box.min.y * s, -centre.z * s);
+    if (this.info.ride) this.back = measureBack(this.species, holder);
     if (this.species === 'ashhound') {
       ashMaterial ??= new Map();
       body.traverse((o) => {
@@ -265,7 +271,7 @@ class HoundView {
         this.collar.castShadow = true;
         this.root.add(this.collar);
       } else if (this.info.ride) {
-        this.saddle = buildSaddle(this.info.width, this.info.ride.seat);
+        this.saddle = buildSaddle(this.back ?? { top: this.info.ride.seat - 0.08, half: this.info.width / 2 });
         this.root.add(this.saddle);
       }
       this.tag = nameTag(name, 0x8a2a1e);
@@ -409,6 +415,47 @@ function findBone(root: THREE.Object3D, name: RegExp): THREE.Object3D | null {
   return found;
 }
 
+/**
+ * The top of a ridden animal's back over its middle, and how wide its barrel is a hand below
+ * that, measured from its skinned vertices in the rest pose (the scans differ too much for one
+ * rule). Kept per species.
+ */
+const backs = new Map<Species, { top: number; half: number }>();
+function measureBack(species: Species, holder: THREE.Object3D): { top: number; half: number } {
+  const known = backs.get(species);
+  if (known) return known;
+  // Not yet added to the animal, so world space here is the animal's own frame.
+  holder.updateMatrixWorld(true);
+  const pts: THREE.Vector3[] = [];
+  const v = new THREE.Vector3();
+  holder.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh;
+    if (!mesh.isMesh) return;
+    mesh.skeleton?.update();
+    const n = mesh.geometry.attributes.position.count;
+    for (let i = 0; i < n; i += 2) {
+      mesh.getVertexPosition(i, v).applyMatrix4(mesh.matrixWorld);
+      if (Math.abs(v.z) < 0.18) pts.push(v.clone());
+    }
+  });
+  let top = -Infinity;
+  for (const p of pts) if (Math.abs(p.x) < 0.08 && p.y > top) top = p.y;
+  let half = 0;
+  for (const p of pts) if (p.y < top - 0.08 && p.y > top - 0.3) half = Math.max(half, Math.abs(p.x));
+  if (!Number.isFinite(top)) return { top: SPECIES[species].ride!.seat - 0.08, half: SPECIES[species].width / 2 };
+  const out = { top, half: half || SPECIES[species].width / 2 };
+  backs.set(species, out);
+  return out;
+}
+
+/** The scan's leather is very dark in the game's light; lifted and taken off its red toward brown. */
+let saddleLeather: THREE.Material | null = null;
+function lighter(base: THREE.MeshStandardMaterial): THREE.Material {
+  const m = base.clone();
+  m.color = new THREE.Color(1.3, 1.35, 1.45);
+  return m;
+}
+
 /** Woven wool for the saddle blanket: dark red with a pale stripe near each edge. */
 let blanketMap: THREE.CanvasTexture | null = null;
 function blanketTexture(): THREE.CanvasTexture {
@@ -436,63 +483,40 @@ function blanketTexture(): THREE.CanvasTexture {
 }
 
 /**
- * A worn leather saddle on a woven blanket, sat on an animal's back: a dished seat with a raised
- * cantle behind and a horn in front, a girth strap down both flanks and stirrups hanging.
+ * The scanned leather saddle (see models.ts) on a woven blanket, sat on an animal's back, sized
+ * to the animal and widened a little on the broad ones so the flaps and stirrups hang clear of
+ * its flanks. Falls back to a plain leather seat if the scan didn't load.
  */
-function buildSaddle(width: number, seat: number): THREE.Group {
+function buildSaddle({ top, half }: { top: number; half: number }): THREE.Group {
   const g = new THREE.Group();
-  const leather = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.55 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x24160d, roughness: 0.6 });
-  const iron = new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 0.45, metalness: 0.8 });
   const blanket = new THREE.MeshStandardMaterial({ map: blanketTexture(), roughness: 1, side: THREE.DoubleSide });
-  const w = Math.max(0.5, width * 0.95);
-  const r = w * 0.62;
-  // The back's curve: the blanket and straps follow a circle of radius r centred below the seat.
-  const cy = seat - 0.08 - r;
-  const span = Math.PI * 0.8;
-  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.62, 20, 1, true, -span / 2, span), blanket);
-  // Laid along the back, draped over the top and down both flanks.
+  // The saddle's length, front to back: a real one is about 0.6 m, a little longer on the big
+  // animals. Its tree rests on the back at 0.6 of that above the stirrups' feet, and its flaps
+  // spread a third of it each side, widened to wrap a broad animal.
+  const length = Math.max(0.6, half * 1.6);
+  const spread = Math.min(1.3, Math.max(1, (half * 1.08) / (length * 0.36)));
+  // The blanket: a curve of cloth over the back, draped down both flanks.
+  const r = half * 1.1;
+  const span = Math.PI * 0.72;
+  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(r, r, length * 0.9, 20, 1, true, -span / 2, span), blanket);
   cloth.rotation.x = -Math.PI / 2;
-  cloth.position.y = cy;
+  // Flattened to the back's oval rather than a round tube.
+  cloth.scale.z = 0.7;
+  cloth.position.set(0, top + 0.005 - r * 0.7, -0.02);
   g.add(cloth);
-  // The seat: a dished leather shell.
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), leather);
-  shell.scale.set(w * 0.34, 0.07, 0.3);
-  shell.position.y = seat - 0.05;
-  g.add(shell);
-  // The cantle rising behind the rider, and the swell and horn in front.
-  const cantle = new THREE.Mesh(new THREE.TorusGeometry(w * 0.2, 0.035, 8, 16, Math.PI), leather);
-  cantle.rotation.x = -0.35;
-  cantle.position.set(0, seat - 0.02, -0.24);
-  g.add(cantle);
-  const swell = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), leather);
-  swell.scale.set(w * 0.2, 0.09, 0.08);
-  swell.position.set(0, seat - 0.02, 0.24);
-  g.add(swell);
-  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.1, 10), dark);
-  horn.position.set(0, seat + 0.1, 0.25);
-  g.add(horn);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 12), dark);
-  cap.position.set(0, seat + 0.15, 0.25);
-  g.add(cap);
-  // The girth: a strap lying over the blanket and down both flanks.
-  const girth = new THREE.Mesh(new THREE.TorusGeometry(r + 0.012, 0.012, 4, 24, span), dark);
-  girth.scale.z = 3;
-  girth.rotation.z = Math.PI / 2 - span / 2;
-  girth.position.set(0, cy, 0.02);
-  g.add(girth);
-  // Stirrups on short leathers, hanging from the blanket's edges.
-  for (const side of [-1, 1]) {
-    const a = Math.PI / 2 - side * (span / 2);
-    const x = Math.cos(a) * (r + 0.02);
-    const y = cy + Math.sin(a) * (r + 0.02);
-    const leatherStrap = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.3, 0.035), dark);
-    leatherStrap.position.set(x, y - 0.15, -0.02);
-    g.add(leatherStrap);
-    const stirrup = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.01, 6, 14), iron);
-    stirrup.rotation.y = Math.PI / 2;
-    stirrup.position.set(x, y - 0.33, -0.02);
-    g.add(stirrup);
+  const scan = model('gear-saddle');
+  if (scan) {
+    saddleLeather ??= lighter(soleMaterial(scan));
+    const saddle = new THREE.Mesh(scan.geometry, saddleLeather);
+    const k = length / SADDLE_LENGTH;
+    saddle.scale.set(k * spread, k, k);
+    saddle.position.y = top - 0.03 - length * 0.6;
+    g.add(saddle);
+  } else {
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.55 }));
+    shell.scale.set(half * 0.7, 0.07, 0.3);
+    shell.position.y = top;
+    g.add(shell);
   }
   g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
   return g;

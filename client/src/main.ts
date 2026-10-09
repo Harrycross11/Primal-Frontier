@@ -241,7 +241,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const creatures = new Creatures(world.scene, effects);
   const vehicles = new Vehicles(world.scene, effects, welcome.seed);
   vehicles.sync(welcome.vehicles);
-  const map = new WorldMap(welcome.seed, generateDecor(welcome.seed));
+  const map = new WorldMap(welcome.seed, generateDecor(welcome.seed), () => world.aerial(gfx.renderer, [gfx.sky]));
   const mapMarks = () => ({
     x: controller.position.x,
     z: controller.position.z,

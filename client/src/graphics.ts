@@ -227,7 +227,7 @@ export class Graphics {
   private bloom: UnrealBloomPass;
   private shafts: ShaderPass;
   private grade: ShaderPass;
-  private sky: THREE.Mesh;
+  readonly sky: THREE.Mesh;
   private photo: PhotoSky;
   private time = { value: 0 };
   /** How bright the scene's light is (see setSky), so the shafts fade with the sun. */

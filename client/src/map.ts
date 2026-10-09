@@ -55,6 +55,8 @@ export class WorldMap {
   constructor(
     private seed: number,
     private decor: Decor[],
+    /** The world photographed from above, to draw the map on; without it the lands are painted flat. */
+    private aerial?: () => HTMLCanvasElement | null,
   ) {}
 
   get open(): boolean {
@@ -157,6 +159,24 @@ export class WorldMap {
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(land, 0, 0, OUT, OUT);
+    let photo: HTMLCanvasElement | null = null;
+    try {
+      photo = this.aerial?.() ?? null;
+    } catch (e) {
+      console.warn('aerial map failed', e);
+    }
+    if (photo) {
+      ctx.drawImage(photo, 0, 0, OUT, OUT);
+      // A touch darker and cooler, so the marks and names read on bright sand and snow.
+      ctx.fillStyle = 'rgba(18, 20, 24, 0.16)';
+      ctx.fillRect(0, 0, OUT, OUT);
+      // The land's far corners, past where anyone can walk, fade into the dark of the frame.
+      const edge = ctx.createRadialGradient(OUT / 2, OUT / 2, OUT * 0.58, OUT / 2, OUT / 2, OUT * 0.71);
+      edge.addColorStop(0, 'rgba(20, 18, 16, 0)');
+      edge.addColorStop(1, 'rgba(20, 18, 16, 0.92)');
+      ctx.fillStyle = edge;
+      ctx.fillRect(0, 0, OUT, OUT);
+    }
     const font = (size: number, weight = 600) => `${weight} ${size}px 'Barlow Condensed', 'Barlow', sans-serif`;
     const label = (text: string, x: number, y: number, size: number, colour: string, spacing: number) => {
       ctx.font = font(size);
@@ -173,7 +193,7 @@ export class WorldMap {
     // A lettered grid, like a survey sheet: A to H across, 1 to 8 down.
     const cells = 8;
     const cell = OUT / cells;
-    ctx.strokeStyle = 'rgba(12, 11, 10, 0.28)';
+    ctx.strokeStyle = photo ? 'rgba(255, 255, 255, 0.16)' : 'rgba(12, 11, 10, 0.28)';
     ctx.lineWidth = 1;
     for (let n = 1; n < cells; n++) {
       ctx.beginPath();
@@ -193,7 +213,8 @@ export class WorldMap {
 
     // The old road along the power line.
     const poles = this.decor.filter((d) => d.kind === 'pole');
-    if (poles.length > 1) {
+    // On the photograph the road and ruins can be seen as they are.
+    if (poles.length > 1 && !photo) {
       ctx.strokeStyle = 'rgba(30, 27, 24, 0.45)';
       ctx.lineWidth = 2;
       ctx.setLineDash([10, 6]);
@@ -204,7 +225,7 @@ export class WorldMap {
       ctx.setLineDash([]);
     }
     ctx.fillStyle = 'rgba(28, 26, 24, 0.75)';
-    for (const d of this.decor) {
+    for (const d of photo ? [] : this.decor) {
       if (d.kind !== 'ruin') continue;
       const [px, py] = this.toPx(d.x, d.z);
       ctx.fillRect(px - 4, py - 4, 8, 8);

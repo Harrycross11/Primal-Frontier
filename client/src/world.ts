@@ -1114,6 +1114,89 @@ export class World {
   }
 
   /** Keeps shadows sharp around the player, drifts the ash and animates hit bounces. */
+  /**
+   * The whole world photographed from straight above in daylight, as a square canvas `size`
+   * pixels across with +x to the right and +z down: the picture the map is drawn on. Rendered
+   * in tiles through the game's own canvas, so it gets the same lighting and tone mapping.
+   */
+  aerial(renderer: THREE.WebGLRenderer, hide: THREE.Object3D[] = [], size = 1000): HTMLCanvasElement {
+    const tiles = 4;
+    const px = Math.ceil(size / tiles);
+    const out = document.createElement('canvas');
+    out.width = out.height = px * tiles;
+    const ctx = out.getContext('2d')!;
+    const canvas = renderer.domElement;
+    const ratio = renderer.getPixelRatio();
+    // Everything shown, nothing in the air, no haze, and a high, even sun with no shadow map.
+    const hidden: THREE.Object3D[] = [];
+    this.scene.traverse((o) => {
+      const loose = (o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite;
+      if (loose && o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    });
+    const shown: THREE.Object3D[] = [];
+    for (const o of [...this.cells.values(), ...this.grassCells, ...this.patches.map((p) => p.mesh)]) {
+      if (!o.visible) {
+        o.visible = true;
+        shown.push(o);
+      }
+    }
+    // The sky goes too, so any ground past the land's edge reads as dark earth rather than haze.
+    for (const o of hide) {
+      if (o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    }
+    const background = this.scene.background;
+    this.scene.background = new THREE.Color(0x3a332b);
+    const fog = this.scene.fog;
+    this.scene.fog = null;
+    const sunWas = this.sun.visible;
+    this.sun.visible = false;
+    const hemiWas = this.hemi.intensity;
+    this.hemi.intensity = 0.9;
+    const fires = this.fires.map((f) => f.intensity);
+    for (const f of this.fires) f.intensity = 0;
+    const exposure = renderer.toneMappingExposure;
+    renderer.toneMappingExposure = 1.05;
+    const light = new THREE.DirectionalLight(0xfff0dc, 2.7);
+    light.position.set(-0.55, 1, -0.35);
+    this.scene.add(light);
+    const tile = WORLD_SIZE / tiles;
+    const cam = new THREE.OrthographicCamera(-tile / 2, tile / 2, tile / 2, -tile / 2, 1, 900);
+    cam.up.set(0, 0, -1);
+    renderer.setScissorTest(true);
+    renderer.setViewport(0, 0, px, px);
+    renderer.setScissor(0, 0, px, px);
+    for (let ty = 0; ty < tiles; ty++) {
+      for (let tx = 0; tx < tiles; tx++) {
+        const cx = -WORLD_SIZE / 2 + (tx + 0.5) * tile;
+        const cz = -WORLD_SIZE / 2 + (ty + 0.5) * tile;
+        cam.position.set(cx, 400, cz);
+        cam.lookAt(cx, 0, cz);
+        cam.updateMatrixWorld();
+        renderer.render(this.scene, cam);
+        ctx.drawImage(canvas, 0, canvas.height - px * ratio, px * ratio, px * ratio, tx * px, ty * px, px, px);
+      }
+    }
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, Math.floor(canvas.width / ratio), Math.floor(canvas.height / ratio));
+    this.scene.remove(light);
+    light.dispose();
+    renderer.toneMappingExposure = exposure;
+    this.fires.forEach((f, n) => (f.intensity = fires[n]));
+    this.hemi.intensity = hemiWas;
+    this.sun.visible = sunWas;
+    this.scene.fog = fog;
+    this.scene.background = background;
+    for (const o of shown) o.visible = false;
+    for (const o of hidden) o.visible = true;
+    return out;
+  }
+
   update(dt: number, focus: THREE.Vector3, time: number) {
     this.windTime.value = time;
     this.sun.position.copy(focus).addScaledVector(SUN_DIRECTION, 80);

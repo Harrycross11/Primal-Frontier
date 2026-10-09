@@ -159,6 +159,7 @@ LANDMARK_PROPS = {
     # Its material comes as specular-glossiness, which three.js no longer reads: after fetching,
     # convert it with gltf-transform's metalRough() and drop the leftover specular extensions.
     'gear-backpack': ('dce182b7965546118df059f90df497dc', 1024),
+    'gear-saddle': ('b1eda76f8a50480d917e43d69f72f57d', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.
