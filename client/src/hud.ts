@@ -68,12 +68,12 @@ export class Hud {
     $('quality').textContent = q[0].toUpperCase() + q.slice(1);
   }
 
-  notice(text: string) {
+  notice(text: string, seconds = 2.2) {
     const el = $('notice');
     el.textContent = text;
     el.classList.add('show');
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = window.setTimeout(() => el.classList.remove('show'), 2200);
+    this.noticeTimer = window.setTimeout(() => el.classList.remove('show'), seconds * 1000);
   }
 
   toggleHelp() {

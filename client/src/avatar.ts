@@ -304,12 +304,20 @@ export class Avatar {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });
 
-    if (name) {
-      const tag = nameTag(name, color);
-      tag.position.y = 2.1;
-      this.root.add(tag);
-      this.tag = tag;
+    if (name) this.setTag(name, color, false);
+  }
+
+  /** Their name above their head, in green when they are on your team. */
+  setTag(name: string, color: number, team: boolean) {
+    if (this.tag) {
+      this.root.remove(this.tag);
+      this.tag.material.map?.dispose();
+      this.tag.material.dispose();
     }
+    const tag = nameTag(team ? `${name} (team)` : name, color, team);
+    tag.position.y = 2.1;
+    this.root.add(tag);
+    this.tag = tag;
   }
 
   /** Shows the item in their right hand. */
@@ -659,21 +667,21 @@ export class Avatar {
   }
 }
 
-export function nameTag(text: string, color: number): THREE.Sprite {
+export function nameTag(text: string, color: number, team = false): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 64;
   const ctx = canvas.getContext('2d')!;
   ctx.font = '600 28px system-ui, sans-serif';
   const w = Math.min(ctx.measureText(text).width + 34, 256);
-  ctx.fillStyle = 'rgba(20,18,15,0.6)';
+  ctx.fillStyle = team ? 'rgba(24,70,32,0.7)' : 'rgba(20,18,15,0.6)';
   ctx.beginPath();
   ctx.roundRect((256 - w) / 2, 12, w, 40, 8);
   ctx.fill();
   // A thin stripe in the player's colour, so names stay easy to tell apart.
   ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
   ctx.fillRect((256 - w) / 2 + 8, 46, w - 16, 3);
-  ctx.fillStyle = '#ece4d6';
+  ctx.fillStyle = team ? '#d8f5da' : '#ece4d6';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 128, 31);

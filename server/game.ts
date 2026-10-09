@@ -187,6 +187,8 @@ export interface WorldSave {
   bagCooldowns?: [number, number][];
   /** Landmark crate spots waiting to refill: ms until each does. */
   crates?: [string, number][];
+  /** Teams by id: their members' player ids, leader first. */
+  teams?: [number, number[]][];
 }
 
 /** A code lock's code, and everyone who has opened it with the code (its owner first). */
@@ -243,6 +245,12 @@ export const BAG_COOLDOWN = 60;
 const CODE_DELAY = 1;
 /** Health a wrong code costs: the lock shocks you. */
 const CODE_SHOCK = 5;
+/** Most survivors one team can hold. */
+export const MAX_TEAM = 6;
+/** Seconds a team invite stays open. */
+export const INVITE_SECONDS = 60;
+/** How close you must be to invite someone. */
+const INVITE_RANGE = 8;
 
 export class Game {
   readonly seed: number;
@@ -282,6 +290,11 @@ export class Game {
   /** Separate again, so the hounds' wandering never changes loot or spawns. */
   private houndRand: () => number;
   private locks = new Map<string, Lock>();
+  /** Teams by id: their members' player ids, leader first. */
+  private teams = new Map<number, number[]>();
+  private nextTeam = 1;
+  /** Open team invites, by who was invited. */
+  private invites = new Map<number, { from: number; at: number }>();
   private fuses = new Map<number, Fuse>();
   /** When each sleeping bag can next be woken up in (ms). */
   private bagReady = new Map<number, number>();
@@ -398,6 +411,7 @@ export class Game {
         },
         { to: 'others', except: id, msg: { t: 'joined', player: pub } },
         { to: 'all', msg: { t: 'notice', text: `${player.name} joined the wasteland` } },
+        ...(this.teamOf(id) === undefined ? [] : [{ to: id, msg: { t: 'team' as const, members: [...this.team(id)] } }]),
       ],
     };
   }
@@ -651,7 +665,7 @@ export class Game {
   }
 
   private blockedAt(p: Player, b: Box): boolean {
-    return privilege(this.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, p.id) === 'blocked';
+    return privilege(this.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, this.team(p.id)) === 'blocked';
   }
 
   /**
@@ -805,7 +819,7 @@ export class Game {
     if (!p || !d || d.kind !== 'toolCupboard') return [];
     if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Get closer to the tool cupboard')];
     d.auth ??= [];
-    if (d.auth.includes(id)) return [notice(id, 'You are already authorised here')];
+    if (this.trusts(d.auth, id)) return [notice(id, d.auth.includes(id) ? 'You are already authorised here' : 'Your team is authorised here')];
     d.auth.push(id);
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, notice(id, 'Authorised: you can build round this tool cupboard')];
   }
@@ -819,6 +833,79 @@ export class Game {
     if (!d.auth?.includes(id)) return [notice(id, 'Only someone authorised can clear the list')];
     d.auth = [id];
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, notice(id, 'Cleared: only you are authorised now')];
+  }
+
+  /** The team this player is in, if any. */
+  teamOf(id: number): number | undefined {
+    for (const [team, members] of this.teams) if (members.includes(id)) return team;
+    return undefined;
+  }
+
+  /** This player and their teammates. */
+  team(id: number): number[] {
+    const t = this.teamOf(id);
+    return t === undefined ? [id] : this.teams.get(t)!;
+  }
+
+  /** True when this player, or one of their teammates, is on the list. */
+  private trusts(list: readonly number[], id: number): boolean {
+    return this.team(id).some((m) => list.includes(m));
+  }
+
+  /** Tells every teammate something, and who is on the team now. */
+  private toTeam(team: number, text: string): Outgoing[] {
+    const members = this.teams.get(team) ?? [];
+    return members.flatMap((m) => [notice(m, text), { to: m, msg: { t: 'team' as const, members: [...members] } }]);
+  }
+
+  /** Asks another survivor to join your team. They have a minute to say yes. */
+  invite(id: number, target: number, now: number): Outgoing[] {
+    const p = this.alive(id);
+    const other = this.alive(target);
+    if (!p || !other || other === p) return [];
+    if (Math.hypot(other.x - p.x, other.z - p.z) > INVITE_RANGE) return [notice(id, 'Get closer to invite them')];
+    const mine = this.teamOf(id);
+    if (mine !== undefined && mine === this.teamOf(target)) return [notice(id, `${other.name} is already on your team`)];
+    if (this.teamOf(target) !== undefined) return [notice(id, `${other.name} is already on a team`)];
+    if (this.team(id).length >= MAX_TEAM) return [notice(id, `A team can have at most ${MAX_TEAM} survivors`)];
+    this.invites.set(target, { from: id, at: now });
+    return [notice(id, `Invited ${other.name} to your team`), { to: target, msg: { t: 'invited', from: p.name } }];
+  }
+
+  /** Says yes to the last team invite you got. */
+  acceptInvite(id: number, now: number): Outgoing[] {
+    const p = this.alive(id);
+    const invite = this.invites.get(id);
+    this.invites.delete(id);
+    if (!p) return [];
+    if (!invite || now - invite.at > INVITE_SECONDS * 1000) return [notice(id, 'No team invite to answer')];
+    const from = this.players.get(invite.from);
+    if (!from) return [notice(id, 'They have left')];
+    if (this.teamOf(id) !== undefined) return [notice(id, 'Leave your team first (L)')];
+    let team = this.teamOf(from.id);
+    if (team === undefined) {
+      team = this.nextTeam++;
+      this.teams.set(team, [from.id]);
+    }
+    const members = this.teams.get(team)!;
+    if (members.length >= MAX_TEAM) return [notice(id, 'That team is full')];
+    members.push(id);
+    return this.toTeam(team, `${p.name} joined the team`);
+  }
+
+  /** Leaves your team. A team of one is no team at all. */
+  leaveTeam(id: number): Outgoing[] {
+    const p = this.players.get(id);
+    const team = this.teamOf(id);
+    if (!p || team === undefined) return [notice(id, "You aren't on a team")];
+    const members = this.teams.get(team)!;
+    members.splice(members.indexOf(id), 1);
+    const out: Outgoing[] = [notice(id, 'You left the team'), { to: id, msg: { t: 'team', members: [] } }];
+    if (members.length < 2) {
+      this.teams.delete(team);
+      for (const m of members) out.push(notice(m, `${p.name} left, so the team is no more`), { to: m, msg: { t: 'team', members: [] } });
+    } else out.push(...this.toTeam(team, `${p.name} left the team`));
+    return out;
   }
 
   /** Hangs the door in a belt slot in a doorway, closed (or open if someone is standing in it). */
@@ -846,7 +933,7 @@ export class Game {
     if (!p || !piece?.door) return [];
     if (!this.inReach(p, doorBox(piece))) return [notice(id, 'Too far away')];
     const lock = this.locks.get(key);
-    if (piece.door.locked && lock && !lock.auth.includes(id)) return [{ to: id, msg: { t: 'codeNeeded', key } }];
+    if (piece.door.locked && lock && !this.trusts(lock.auth, id)) return [{ to: id, msg: { t: 'codeNeeded', key } }];
     if (piece.door.open && this.doorwayBusy(piece)) return [notice(id, 'Someone is standing in the doorway')];
     piece.door.open = !piece.door.open;
     return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }];
@@ -1315,6 +1402,7 @@ export class Game {
 
   /** Applies damage (already reduced by armour) and wears down the armour on each part hit. */
   private damage(victim: Player, amount: number, by: Player, item: ItemId | null, head: boolean, zones: Set<ArmourSlot>): Outgoing[] {
+    if (victim !== by && this.teamOf(victim.id) !== undefined && this.teamOf(victim.id) === this.teamOf(by.id)) return [];
     const now = Math.max(0, this.lastTick);
     this.hurtBy.set(victim.id, { prey: { kind: 'player', id: by.id }, at: now });
     this.hurt.set(by.id, { prey: { kind: 'player', id: victim.id }, at: now });
@@ -1423,6 +1511,7 @@ export class Game {
         .filter((h) => h.owner !== null && !h.deadAt)
         .map((h) => ({ x: h.x, y: h.y, z: h.z, yaw: h.yaw, hp: h.hp, owner: h.owner!, name: h.name ?? SPECIES[h.species].name, species: h.species })),
       locks: [...this.locks],
+      teams: [...this.teams],
       fuses: [...this.fuses].map(([id, f]) => [id, { in: Math.max(0, f.at - now), key: f.key, door: f.door }]),
       bagCooldowns: [...this.bagReady].filter(([, at]) => at > now).map(([id, at]) => [id, at - now]),
       crates: [...this.crateDue].map(([key, at]) => [key, Math.max(0, at - now)]),
@@ -1445,6 +1534,8 @@ export class Game {
     game.bagExpiry = new Map(save.bags);
     game.sleepers = new Map(save.survivors);
     game.locks = new Map(save.locks ?? []);
+    game.teams = new Map(save.teams ?? []);
+    game.nextTeam = Math.max(0, ...game.teams.keys()) + 1;
     game.fuses = new Map((save.fuses ?? []).map(([id, f]) => [id, { at: now + f.in, key: f.key, door: f.door }]));
     game.bagReady = new Map((save.bagCooldowns ?? []).map(([id, ms]) => [id, now + ms]));
     game.crateDue = new Map((save.crates ?? []).map(([key, ms]) => [key, now + ms]));

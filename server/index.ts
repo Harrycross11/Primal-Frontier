@@ -177,6 +177,15 @@ wss.on('connection', (ws) => {
       case 'gather':
         deliver(game.gather(id, msg.id, now, msg.slot));
         break;
+      case 'invite':
+        deliver(game.invite(id, msg.id, now));
+        break;
+      case 'acceptInvite':
+        deliver(game.acceptInvite(id, now));
+        break;
+      case 'leaveTeam':
+        deliver(game.leaveTeam(id));
+        break;
       case 'place':
         deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
         break;

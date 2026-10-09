@@ -80,12 +80,14 @@ export const TC_RANGE = 18;
 /**
  * Whether a player may build at a spot: 'none' outside every tool cupboard's reach,
  * 'authorised' inside only cupboards that trust them, 'blocked' inside any that doesn't.
+ * `player` can be them and their teammates: a cupboard that trusts one of the team trusts all.
  */
-export function privilege(deployables: Iterable<Deployable>, x: number, z: number, player: number): 'none' | 'authorised' | 'blocked' {
+export function privilege(deployables: Iterable<Deployable>, x: number, z: number, player: number | readonly number[]): 'none' | 'authorised' | 'blocked' {
+  const us = typeof player === 'number' ? [player] : player;
   let result: 'none' | 'authorised' = 'none';
   for (const d of deployables) {
     if (d.kind !== 'toolCupboard' || Math.hypot(d.x - x, d.z - z) > TC_RANGE) continue;
-    if (!d.auth?.includes(player)) return 'blocked';
+    if (!us.some((m) => d.auth?.includes(m))) return 'blocked';
     result = 'authorised';
   }
   return result;

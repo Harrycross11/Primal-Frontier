@@ -44,6 +44,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
   - **Code locks** (100 metal, workbench 1): fit one to a door and pick a 4-digit code. Only you, and whoever you tell the code, can open it. A wrong code shocks you.
   - **Sleeping bags** (30 cloth): lay one down and you can wake up in it when you die, once a minute.
   - **Explosives**: beancan grenades you throw (60 gunpowder, 20 metal, workbench 1), satchel charges you stick to a wall or door (4 beancans, 10 cloth, workbench 1), and timed explosive charges, C4 (5 explosives and 5 cloth at workbench 3; explosives are 50 gunpowder, 10 sulfur and 10 metal at workbench 2). Two satchels blow open a wooden wall or door and three a stone or scrap wall; one C4 takes out any wall or a wooden door, two a metal door. Blasts hurt anyone nearby who isn't behind a wall.
+- Teams (clans) of up to 6: look at someone and press **T** to invite them, and they press **Y** to join. Teammates can't hurt each other, and they share tool cupboards and code locks: if one of you is trusted, the whole team is. Teammates have green name tags and show on the map, and **L** leaves the team. Teams are saved with the world.
 - Places worth looting:
   - **A landmark in each land**, built from scanned models on levelled ground and marked on the map (M): Smith's Garage in the Ashlands, a Logging Camp in Deadwood, a Mining Outpost on Rust Mesa, an Oil Field on the Sulfur Flats and a Radio Station up in the Frostpeaks. Nobody can build there.
   - **Crates** at every landmark: wooden crates hold the basics (scrap, metal, ammo, bandages, early guns and armour), military crates better guns, ammo, syringes and armour. Each land's crates add what it is known for. Press **E** to open one; once emptied it fills up again 8 minutes later.
@@ -68,6 +69,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 | Building plan: foundation, wall, floor, stairs, ramp or roof | Right click |
 | Building plan: wood, stone or scrap | R |
 | Edit the wall you look at (window, door, half wall, solid) | G |
+| Invite who you look at to your team / join a team you were invited to / leave your team | T / Y / L |
 | Map | M |
 | Graphics high or low | O |
 | Hide help | H |
@@ -104,4 +106,4 @@ Checks: `npm run typecheck`, `npm test`, and `npm run build && npm run smoke`.
 
 ## Next milestones
 
-The first roadmap is done. Ideas for after it: more lands and creatures, vehicles, clans, and moving to Unity if the prototype proves fun.
+The first roadmap is done. Clans are in too. Ideas for next: vehicles, a Rust-style tech tree, farming, more lands and creatures, and moving to Unity if the prototype proves fun.

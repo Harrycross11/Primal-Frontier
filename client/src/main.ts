@@ -180,6 +180,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     yaw: controller.yaw,
     hounds: [...creatures.views.values()].filter((v) => v.state.owner === welcome.you.id && v.state.anim !== 'dead').map((v) => v.root.position),
     drops: [...world.deployables.values()].filter((d) => d.kind === 'supplyDrop'),
+    mates: mates().map((r) => ({ x: r.avatar.root.position.x, z: r.avatar.root.position.z, name: r.state.name })),
   });
   creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
@@ -203,6 +204,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   }
 
   const remotes = new Map<number, Remote>();
+  /** Everyone on your team (you too, online or not), and who on it is online. */
+  let teamIds: number[] = [welcome.id];
+  const mates = () => [...remotes.values()].filter((r) => teamIds.includes(r.state.id));
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
     const avatar = new Avatar(p.color, p.name, p.look);
@@ -210,8 +214,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
+    if (teamIds.includes(p.id)) avatar.setTag(p.name, p.color, true);
   };
   welcome.players.forEach(addRemote);
+  /** Who last asked you onto their team. */
+  let invitedBy: string | null = null;
 
   // Health and combat.
   let hp = welcome.hp;
@@ -255,7 +262,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   ui.slots = slots;
   ui.wear = welcome.wear;
   ui.render();
-  const refreshPlayers = () => hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => r.state.name)]);
+  const refreshPlayers = () =>
+    hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
   refreshPlayers();
 
   const sendMove = () => {
@@ -451,6 +459,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         effects.explosion(at, m.item, terrainHeight(world.seed, at.x, at.z));
         break;
       }
+      case 'team': {
+        const was = teamIds;
+        teamIds = m.members.length ? m.members : [welcome.id];
+        for (const r of remotes.values()) {
+          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id));
+        }
+        refreshPlayers();
+        break;
+      }
+      case 'invited':
+        invitedBy = m.from;
+        hud.notice(`${m.from} invited you to their team. Press Y to join`, 8);
+        break;
       case 'codeNeeded':
         hud.askCode('This door is locked. Enter its code', (code) => {
           if (code) net.send({ t: 'code', key: m.key, code });
@@ -572,6 +593,20 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyT') {
+      if (!aimPlayer) hud.notice('Look at someone to invite them to your team');
+      else if (teamIds.includes(aimPlayer.state.id)) hud.notice(`${aimPlayer.state.name} is on your team`);
+      else net.send({ t: 'invite', id: aimPlayer.state.id });
+    }
+    if (e.code === 'KeyY') {
+      if (!invitedBy) hud.notice('No team invite to answer');
+      else net.send({ t: 'acceptInvite' });
+      invitedBy = null;
+    }
+    if (e.code === 'KeyL') {
+      if (teamIds.length < 2) hud.notice("You aren't on a team");
+      else net.send({ t: 'leaveTeam' });
+    }
     if (e.code === 'KeyO') {
       gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
@@ -1000,7 +1035,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   /** True inside the range of a tool cupboard that doesn't trust you, or on a landmark's ground. */
   function blockedAt(b: { min: number[]; max: number[] }): boolean {
     if (atLandmark(world.seed, (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, 4)) return true;
-    return privilege(world.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, welcome.id) === 'blocked';
+    return privilege(world.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, teamIds) === 'blocked';
   }
 
   /** A supply drop still under its parachute. */
@@ -1028,7 +1063,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const how = info.tool === 'pickup' ? 'E to pick' : 'Left click to gather';
       return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
-    if (aimPlayer) return { text: aimPlayer.state.name };
+    if (aimPlayer) {
+      const s = aimPlayer.state;
+      return { text: teamIds.includes(s.id) ? `${s.name} (your team)` : `${s.name}  ·  T to invite to your team` };
+    }
     if (aimHound) {
       const s = aimHound.view.state;
       const text = creatures.describe(aimHound.view, welcome.id, item, houndInReach(aimHound.view.root.position));

@@ -73,6 +73,9 @@ export type ClientMessage =
   | { t: 'use'; slot: number }
   /** Climb on your own tame animal, or (id null) get off the one you are riding. */
   | { t: 'ride'; id: number | null }
+  | { t: 'invite'; id: number }
+  | { t: 'acceptInvite' }
+  | { t: 'leaveTeam' }
   /** Wake up somewhere random, or in one of your sleeping bags. */
   | { t: 'respawn'; bag?: number }
   /** Ask a tool cupboard to trust you, or make it forget everyone else. */
@@ -125,6 +128,9 @@ export type ServerMessage =
   | { t: 'deployable'; id: number; d: Deployable | null; by: number }
   | { t: 'correct'; x: number; y: number; z: number }
   /** You climbed on an animal (id), or got off one (id null) at this spot. */
+  | { t: 'invited'; from: string }
+  /** Your team's members (you included), or none when you're on no team. */
+  | { t: 'team'; members: number[] }
   | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }
   /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
