@@ -191,9 +191,10 @@ export class Hud {
     el.classList.toggle('empty', a.loaded === 0 && !a.reloading);
   }
 
-  setScope(on: boolean) {
+  /** The scope overlay; `sights` hides the crosshair too, as you look down the gun's own sights. */
+  setScope(on: boolean, sights = false) {
     $('scope').hidden = !on;
-    $('crosshair').hidden = on;
+    $('crosshair').hidden = on || sights;
   }
 
   /**

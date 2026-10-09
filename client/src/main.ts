@@ -53,6 +53,7 @@ import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.t
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
+import { ViewModel } from './viewModel.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -68,6 +69,8 @@ const RESOURCE_NAMES = {
 } as const;
 const PIECE_NAMES: Record<PieceKind, string> = { foundation: 'Foundation', wall: 'Wall', floor: 'Floor', stairs: 'Stairs', ramp: 'Ramp', roof: 'Roof' };
 const SCOPED: ItemId[] = ['boltRifle', 'l96', 'svd', 'm82'];
+/** Guns that keep their spent cases (or have none to throw out): revolvers, break-actions, pipe guns and bows. */
+const NO_CASES: ItemId[] = ['revolver', 'eoka', 'waterpipe', 'doubleBarrel', 'crossbow'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
 /** What each resource sounds like and sheds when hit. */
@@ -306,6 +309,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   /** When each of your sleeping bags can next be woken up in (performance.now ms). */
   const bagReadyAt = new Map<number, number>();
   const baseFov = camera.fov;
+  /** Looking out of your own eyes, with your hands and gun in view, rather than over the shoulder. V switches. */
+  let firstPerson = (() => {
+    try {
+      return localStorage.getItem('pf-view') !== 'third';
+    } catch {
+      return true;
+    }
+  })();
+  const view = new ViewModel();
+  camera.add(view.root);
+  if (!camera.parent) world.scene.add(camera);
+  /** Extra upward tilt from recoil that settles back by itself, on top of the climb you pull down. */
+  let viewKick = 0;
+  /** Whether the view is first person this frame (never in a car, in the saddle or dead). */
+  let inFirst = false;
 
   // Inventory and what is in your hands.
   let slots: Slots = welcome.slots;
@@ -504,8 +522,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       }
       case 'shot': {
         const shooter = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
-        const muzzle = shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
-        effects.shot(muzzle, m.ends.map((e) => new THREE.Vector3(...e)), m.item);
+        const muzzle = shooter === me && inFirst ? view.muzzleWorld() : shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
+        const ends = m.ends.map((e) => new THREE.Vector3(...e));
+        effects.shot(muzzle, ends, m.item);
+        if (ITEMS[m.item].weapon?.class === 'gun') for (const end of ends) bulletImpact(muzzle, end);
         if (shooter && shooter !== me) {
           shooter.recoil();
           effects.muzzle(muzzle, m.item);
@@ -731,6 +751,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyV') {
+      firstPerson = !firstPerson;
+      try {
+        localStorage.setItem('pf-view', firstPerson ? 'first' : 'third');
+      } catch {
+        // Not remembered; it still switches.
+      }
+    }
     if (e.code === 'KeyP') openPaint();
     if (e.code === 'KeyT') {
       if (!aimPlayer) hud.notice('Look at someone to invite them to your team');
@@ -786,6 +814,51 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     return w && w.class !== 'melee' ? w : null;
   }
 
+  /** How far it is from your eyes to whatever is straight ahead, up to a metre and a half. */
+  const roomRay = new THREE.Raycaster();
+  function roomAhead(): number {
+    roomRay.set(camera.position, camera.getWorldDirection(new THREE.Vector3()));
+    roomRay.far = 1.5;
+    return roomRay.intersectObjects(world.cameraBlockers, true)[0]?.distance ?? 1.5;
+  }
+
+  /** What a bullet struck at `end`, fired from `from`: a hole, dust and chips, or a spray of blood. */
+  const impactRay = new THREE.Raycaster();
+  function bulletImpact(from: THREE.Vector3, end: THREE.Vector3) {
+    if (end.distanceTo(camera.position) > 140) return;
+    const body = [...remotes.values()].some((r) => !r.state.dead && r.avatar.root.position.distanceTo(end) < 1.3 && end.y > r.avatar.root.position.y - 0.1) || creatures.near(end, 1.4);
+    const dir = end.clone().sub(from);
+    const length = dir.length();
+    impactRay.set(from, dir.normalize());
+    impactRay.near = Math.max(0, length - 1.5);
+    impactRay.far = length + 0.4;
+    const hit = impactRay.intersectObjects(world.pickables, true).find((h) => isVisible(h.object));
+    if (!hit) {
+      if (body) effects.blood(end);
+      return;
+    }
+    if (body && hit.distance > length + 0.2) return effects.blood(end);
+    const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
+    if (normal.dot(dir) > 0) normal.negate();
+    effects.impact(hit.point, normal, surfaceOf(hit.object), terrainHeight(world.seed, hit.point.x, hit.point.z));
+  }
+
+  /** What something in the world is made of, for bullet holes and chips. */
+  function surfaceOf(o: THREE.Object3D): Surface {
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+      const u = p.userData;
+      if (u.resourceId !== undefined) {
+        const node = resources.find((r) => r.id === u.resourceId);
+        if (node) return RESOURCE_SURFACE[node.kind];
+      }
+      if (u.pieceKey !== undefined) return world.pieces.get(u.pieceKey)?.material ?? 'stone';
+      if (u.door) return 'wood';
+      if (p === world.terrain) return 'dirt';
+    }
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    return m && !Array.isArray(m) && (m.metalness ?? 0) > 0.4 ? 'scrap' : 'stone';
+  }
+
   /** Where the crosshair points, out to `range` metres: the first thing hit, or empty air. */
   function aimTarget(range: number): THREE.Vector3 {
     const ray = new THREE.Raycaster();
@@ -837,12 +910,20 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     stack.ammo -= 1;
     ui.render();
     net.send({ t: 'fire', slot: ui.active, d: dirTo(aimTarget(w.range)), aim: aiming });
-    // Kick the view up and a little to the side.
+    // Kick the view up and a little to the side: part of it stays (pull down to hold on target),
+    // and part springs back by itself.
     const kick = (w.recoil ?? 0) * (aiming ? 0.6 : 1);
-    controller.pitch = Math.min(1.1, controller.pitch + kick);
+    controller.pitch = Math.min(1.1, controller.pitch + kick * 0.6);
+    viewKick += kick * 0.4;
     controller.yaw += (Math.random() - 0.5) * kick * 0.6;
     me.recoil();
-    effects.muzzle(me.muzzlePosition(), item);
+    view.fire();
+    effects.muzzle(inFirst ? view.muzzleWorld() : me.muzzlePosition(), item, inFirst ? 0.5 : 1);
+    if (w.class === 'gun' && !NO_CASES.includes(item)) {
+      const from = inFirst ? view.ejectWorld() : me.muzzlePosition();
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+      effects.shell(from, right, controller.position.y, w.damage > 45);
+    }
     effects.sound(item, 0);
     if (!w.auto) triggerHeld = false;
   }
@@ -856,6 +937,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     net.send({ t: 'reload', slot: ui.active });
     reloadingUntil = performance.now() + (w.reload ?? 1) * 1000;
     me.reloadAnim(w.reload ?? 1);
+    view.reload(w.reload ?? 1);
     if (w.class === 'gun') effects.reloadSound(w.reload ?? 1);
   }
 
@@ -868,6 +950,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     lastAttack = now;
     net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
     me.swing();
+    view.swing();
     effects.swingSound(w.damage > 40, item);
   }
 
@@ -1432,6 +1515,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     hounds: () => [...creatures.views.values()].map((v) => v.state),
     respawn: () => net.send({ t: 'respawn' }),
     aim: (on: boolean) => (aiming = on),
+    fire: () => fire(),
+    firstPerson: (on: boolean) => (firstPerson = on),
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
@@ -1532,16 +1617,24 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     const gun = heldGun();
     const ads = aiming && !!gun && !dead;
     const scoped = ads && SCOPED.includes(held()!);
-    const fov = ads ? baseFov / (scoped ? 4 : 1.4) : baseFov;
+    inFirst = firstPerson && !dead && riding === null && driving === null && !portrait && !fixedView && !watched;
+    const fov = ads ? baseFov / (scoped ? 4 : inFirst ? 1.25 : 1.4) : baseFov;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 14);
       camera.updateProjectionMatrix();
     }
     controller.sensitivity = camera.fov / baseFov;
     const throughScope = scoped && camera.fov < baseFov * 0.5;
-    hud.setScope(throughScope);
-    me.root.visible = !throughScope;
-    controller.updateCamera(camera, ads ? 1 : 0, throughScope);
+    hud.setScope(throughScope, inFirst && ads && camera.fov < baseFov * 0.9);
+    me.root.visible = !throughScope && !inFirst;
+    controller.updateCamera(camera, ads ? 1 : 0, throughScope || inFirst);
+    viewKick *= Math.exp(-dt * 9);
+    if (inFirst) camera.rotateX(viewKick);
+    view.root.visible = inFirst && !throughScope;
+    if (view.root.visible) {
+      view.set(held(), slots[ui.active]?.paint ?? 0);
+      view.update(dt, { aiming: ads, moving: controller.moving, sprinting: controller.sprinting, yaw: controller.yaw, pitch: controller.pitch, room: roomAhead() });
+    }
     if (triggerHeld && gun?.auto && !ui.open) fire();
     if (portrait) {
       const a = controller.yaw + Math.PI + portrait.angle;

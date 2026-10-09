@@ -66,6 +66,11 @@ export class Controller {
   /** Mouse look speed multiplier, lowered while aiming down sights. */
   sensitivity = 1;
 
+  /** Running: Shift held while moving on foot. */
+  get sprinting(): boolean {
+    return this.moving && !this.car && this.keys.has('ShiftLeft');
+  }
+
   get eye(): THREE.Vector3 {
     return this.position.clone().add(new THREE.Vector3(0, PLAYER_HEIGHT * 0.9, 0));
   }

@@ -375,6 +375,17 @@ export class Creatures {
     }
   }
 
+  /** Whether a live animal's body is within `reach` of a point (its middle, not its feet). */
+  near(at: THREE.Vector3, reach: number): boolean {
+    for (const view of this.views.values()) {
+      if (view.state.anim === 'dead') continue;
+      const info = SPECIES[view.species];
+      const mid = view.root.position.clone().setY(view.root.position.y + info.height / 2);
+      if (mid.distanceTo(at) < reach + info.width / 2) return true;
+    }
+    return false;
+  }
+
   /** The nearest live hound along a ray, if any, within `max`. */
   ray(o: Vec3, d: Vec3, max: number): { view: HoundView; t: number; head: boolean } | null {
     let best: { view: HoundView; t: number; head: boolean } | null = null;
