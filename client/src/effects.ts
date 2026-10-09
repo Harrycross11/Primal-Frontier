@@ -3,6 +3,7 @@
 // layered noise and tones shaped per weapon, tool, material and footstep).
 
 import * as THREE from 'three';
+import type { BiomeId } from '../../shared/biomes.ts';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 
 interface Tracer {
@@ -28,6 +29,18 @@ interface Chip {
 /** What a hit or footstep sounds like. */
 export type Surface = 'wood' | 'stone' | 'scrap' | 'ore' | 'hemp' | 'dirt';
 const CHIP_GEO = new THREE.BoxGeometry(1, 1, 1);
+/** The recorded footsteps in client/public/sounds, six of each (step-gravel-0 to -5 and so on). */
+type StepKind = 'gravel' | 'grass' | 'stone' | 'sand' | 'snow' | 'wood' | 'concrete' | 'metal';
+const STEP_VARIANTS = 6;
+/** How loud each kind plays, evening out how loud they were recorded. */
+const STEP_LEVEL: Record<StepKind, number> = { gravel: 0.32, grass: 0.3, stone: 0.3, sand: 0.3, snow: 0.34, wood: 0.34, concrete: 0.28, metal: 0.26 };
+/** What bare ground sounds like underfoot in each land. */
+const GROUND_STEP: Record<BiomeId, StepKind> = { ashlands: 'gravel', deadwood: 'grass', mesa: 'stone', flats: 'sand', frost: 'snow' };
+
+function stepKind(surface: Surface, land: BiomeId): StepKind {
+  return surface === 'wood' ? 'wood' : surface === 'stone' ? 'concrete' : surface === 'scrap' ? 'metal' : GROUND_STEP[land];
+}
+
 const CHIP_COLORS: Record<Surface, number[]> = {
   wood: [0x8a6a44, 0xb08a5a, 0x5e4630],
   stone: [0x9a958c, 0x7d7870, 0xb5afa4],
@@ -263,17 +276,34 @@ export class Effects {
     this.play(name, pan, 0.08, near * level * 0.9, 0.84 + Math.random() * 0.12, 18000 - Math.min(15000, distance * 300));
   }
 
-  /** One footstep on dirt, a wood, stone or metal floor; quieter for others further away. */
-  footstep(surface: Surface, at: THREE.Vector3 | null, sprint = false) {
+  /** The last recorded step played of each kind, so the same one never plays twice running. */
+  private lastStep = new Map<StepKind, number>();
+
+  /** Plays a recorded step of this kind, if they have loaded; false if not. */
+  private recordedStep(kind: StepKind, pan: number, level: number, rate: number, bright = 18000): boolean {
+    let i = Math.floor(Math.random() * STEP_VARIANTS);
+    if (i === this.lastStep.get(kind)) i = (i + 1) % STEP_VARIANTS;
+    this.lastStep.set(kind, i);
+    return this.play(`step-${kind}-${i}`, pan, 0.03, level * STEP_LEVEL[kind], rate, bright);
+  }
+
+  /**
+   * One footstep: on bare ground it sounds of the land underfoot (gravel in the Ashlands, leaf
+   * litter in the forest, rock on the mesa, sand on the flats, snow up in the peaks); on a floor,
+   * of wood, concrete or sheet metal. Quieter for others further away.
+   */
+  footstep(surface: Surface, at: THREE.Vector3 | null, sprint = false, land: BiomeId = 'ashlands') {
     const a = this.context();
     if (!a) return;
-    const { near, pan } = this.placed(at, 3);
+    const { near, pan, distance } = this.placed(at, 3);
     if (near < 0.08) return;
+    const v = near * (sprint ? 1.2 : 0.85) * (0.8 + Math.random() * 0.4);
+    const tune = 0.9 + Math.random() * 0.2;
+    const rate = (sprint ? 1.04 : 0.97) * (0.94 + Math.random() * 0.12);
+    if (this.recordedStep(stepKind(surface, land), pan, v, rate, 18000 - Math.min(14000, distance * 400))) return;
     const { ctx, noise } = a;
     const now = ctx.currentTime + 0.005;
     const bus = this.voiceBus(pan, 0.015);
-    const v = near * (sprint ? 1.2 : 0.85) * (0.8 + Math.random() * 0.4);
-    const tune = 0.9 + Math.random() * 0.2;
     if (surface === 'wood') {
       this.thud(bus, now, 135 * tune, 0.32 * v);
       this.noiseHit(bus, noise, now, 'bandpass', 1000 * tune, 1.8, 0.16 * v, 0.05);
@@ -293,9 +323,11 @@ export class Effects {
   }
 
   /** Feet hitting the ground after a jump or fall. */
-  landSound(surface: Surface, hard: number) {
+  landSound(surface: Surface, hard: number, land: BiomeId = 'ashlands') {
     const a = this.context();
     if (!a) return;
+    // Both feet coming down: a recorded step, heavier and a touch slower, over a body thud.
+    this.recordedStep(stepKind(surface, land), 0, Math.min(1.6, 0.9 + hard * 0.06), 0.9);
     const bus = this.voiceBus(0, 0.02);
     const now = a.ctx.currentTime + 0.005;
     this.thud(bus, now, surface === 'wood' ? 120 : 80, Math.min(0.7, 0.3 + hard * 0.05));
@@ -407,11 +439,78 @@ export class Effects {
     whistle.start();
   }
 
+  /** How stormy it is, 0 to 1: storms drown out the crickets and birds. */
+  private storm = 0;
+  /** Recorded loops under the wind, by name, once they have started. */
+  private beds = new Map<string, GainNode>();
+  /** When the next creak may sound, in audio-clock seconds. */
+  private nextCreak = 0;
+
+  /** Starts a recorded loop, silent, if it has loaded; its level, or null until then. */
+  private bed(name: string): GainNode | null {
+    let level = this.beds.get(name);
+    if (level) return level;
+    const buffer = this.samples.get(name);
+    if (!buffer || !this.audio) return null;
+    const { ctx } = this.audio;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    level = ctx.createGain();
+    level.gain.value = 0;
+    // Like the wind, straight to the output so gunfire does not pump it.
+    src.connect(level).connect(ctx.destination);
+    // Start somewhere in the loop, so it is never heard from the same point.
+    src.start(0, Math.random() * buffer.duration);
+    this.beds.set(name, level);
+    return level;
+  }
+
+  /**
+   * The land's own sounds round the listener, set every second or so: crickets at night,
+   * birds by day in the forest, wind harder up in the peaks and out on the flats, and now and
+   * then a groan of old metal from a wreck close by or a tree creaking in the forest.
+   * `land` is how much each land claims the spot (as biomeWeights), `light` the daylight from 0
+   * (night) to 1, and `wreck` the nearest wreck if one is in earshot.
+   */
+  surroundings(land: readonly number[], light: number, wreck: THREE.Vector3 | null) {
+    const a = this.context();
+    if (!a) return;
+    const { ctx } = a;
+    const now = ctx.currentTime;
+    const [ash, forest, mesa, flats, frost] = land;
+    const calm = 1 - this.storm * 0.85;
+    const night = 1 - THREE.MathUtils.smoothstep(light, 0.15, 0.6);
+    const day = THREE.MathUtils.smoothstep(light, 0.4, 0.8);
+    const crickets = this.bed('amb-crickets');
+    crickets?.gain.setTargetAtTime(0.11 * night * calm * (ash * 0.55 + forest + mesa * 0.5 + flats * 0.35), now, 2);
+    const birds = this.bed('amb-birds');
+    birds?.gain.setTargetAtTime(0.09 * day * calm * (forest + ash * 0.12 + mesa * 0.15), now, 2);
+    this.wind?.gain.setTargetAtTime(0.05 * (1 + frost * 0.7 + flats * 0.35 + mesa * 0.3 - forest * 0.25), now, 3);
+
+    if (now < this.nextCreak || !this.listener) return;
+    this.nextCreak = now + 5 + Math.random() * 9;
+    if (wreck && this.listener.position.distanceTo(wreck) < 28) {
+      // A rusted panel shifting in the wind: the creak pitched up and darkened, over a low ring.
+      const { near, pan } = this.placed(wreck, 8);
+      if (this.play('amb-creak', pan, 0.3, near * 0.42, 1.5 + Math.random() * 0.6, 5200)) {
+        const bus = this.voiceBus(pan, 0.25, 0.4);
+        const hz = 70 + Math.random() * 40;
+        this.ping(bus, now + 0.05 + Math.random() * 0.4, [hz, hz * 2.76, hz * 5.4], 0.012 * near, 1.4);
+      }
+    } else if (forest > 0.5 && Math.random() < 0.6) {
+      // A dead trunk swaying somewhere off in the trees.
+      const pan = Math.random() * 1.4 - 0.7;
+      this.play('amb-creak', pan, 0.35, (0.12 + Math.random() * 0.1) * forest * (0.6 + this.storm * 0.8), 0.75 + Math.random() * 0.3, 3500);
+    }
+  }
+
   /** Brings the storm's sounds up and down with the weather, each 0 to 1. */
   setWeather(rain: number, dust: number, snow: number) {
     const a = this.context();
     if (!a || !this.rainLevel || !this.stormLevel) return;
     const now = a.ctx.currentTime;
+    this.storm = Math.min(1, rain + dust + snow);
     this.rainLevel.gain.setTargetAtTime(rain * 0.16, now, 1.5);
     this.stormLevel.gain.setTargetAtTime(Math.min(1, dust + snow + rain * 0.4) * 0.09, now, 1.5);
   }
@@ -1011,8 +1110,8 @@ export class Effects {
   /** Fetches the recordings now and decodes them once there is an audio context to decode into. */
   private loadSamples() {
     if (this.loading) return;
-    this.loading = fetch('/sounds/index.json')
-      .then((r) => r.json() as Promise<string[]>)
+    this.loading = Promise.all(['/sounds/index.json', '/sounds/world.json'].map((list) => fetch(list).then((r) => r.json() as Promise<string[]>).catch(() => [] as string[])))
+      .then((lists) => lists.flat())
       .then((names) =>
         Promise.all(
           names.map(async (name) => {

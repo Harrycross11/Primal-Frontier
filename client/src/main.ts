@@ -20,7 +20,7 @@ import {
 } from '../../shared/building.ts';
 import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
-import { BIOMES, biomeAt } from '../../shared/biomes.ts';
+import { BIOMES, biomeAt, biomeWeights } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ASHHOUND, MOUNT_RANGE, SPECIES } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
@@ -54,6 +54,7 @@ import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
 import { ViewModel } from './viewModel.ts';
+import { daylight } from '../../shared/sky.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -260,12 +261,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const canvas = gfx.renderer.domElement;
   const controller = new Controller(world, () => resources, canvas);
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
-  me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint);
-  controller.onLand = (speed) => effects.landSound(surfaceUnder(controller.position), speed);
+  me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint, landUnder(controller.position));
+  controller.onLand = (speed) => effects.landSound(surfaceUnder(controller.position), speed, landUnder(controller.position));
   controller.onCrash = (speed) => effects.crash(controller.position.clone(), speed);
   controller.vehicles = () => vehicles.solid();
 
   /** What a survivor is standing on: a floor or stairs of some material, or the bare ground. */
+  const landUnder = (p: THREE.Vector3) => biomeAt(world.seed, p.x, p.z);
   function surfaceUnder(p: THREE.Vector3): Surface {
     if (p.y - terrainHeight(world.seed, p.x, p.z) < 0.15) return 'dirt';
     let best: Piece | null = null;
@@ -285,7 +287,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (remotes.has(p.id) || p.id === welcome.id) return;
     const avatar = new Avatar(p.color, p.name, p.look);
     avatar.root.position.set(p.x, p.y, p.z);
-    avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
+    avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
     if (teamIds.includes(p.id)) avatar.setTag(p.name, p.color, true);
@@ -1475,6 +1477,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let fixedView: { from: number[]; to: number[] } | null = null;
   let watched: { id: number; offset: number[] } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
+    effects,
     state: () => ({
       id: welcome.id,
       others: remotes.size,
@@ -1796,6 +1799,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       clock.textContent = dayNight.label();
       const w = dayNight.storm;
       effects.setWeather(w.rain, w.dust, w.snow);
+      const p = controller.position;
+      effects.surroundings(biomeWeights(world.seed, p.x, p.z), daylight(dayNight.now), world.nearest('scrap', p, 28));
     }
     map.update(dt, mapMarks());
     gfx.render();
