@@ -547,7 +547,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         me.setDead(true);
         ui.hide();
         document.exitPointerLock?.();
-        const how = m.item ? ` with a ${ITEMS[m.item].name}` : '';
+        const how = m.item ? ` with their ${ITEMS[m.item].name}` : '';
         const bags = [...world.deployables.values()]
           .filter((d) => d.kind === 'sleepingBag' && d.owner === welcome.id)
           .map((d, n) => ({
