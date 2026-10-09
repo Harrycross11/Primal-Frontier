@@ -237,6 +237,11 @@ export class Graphics {
   private baked = [1, 0];
   private clock = new THREE.Clock();
   quality: Quality;
+  /** Hears when the game lowers the quality by itself because frames are coming too slowly. */
+  onAutoQuality: (q: Quality) => void = () => {};
+  /** Whether the player chose a quality themselves; if not, it is lowered to keep frames smooth. */
+  private chosen = false;
+  private watch = { last: 0, since: 0, frames: [] as number[], done: false };
 
   constructor(
     container: HTMLElement,
@@ -328,13 +333,19 @@ export class Graphics {
     } catch {
       /* storage unavailable */
     }
+    try {
+      this.chosen = localStorage.getItem('pf-quality-chosen') === '1';
+    } catch {
+      /* storage unavailable */
+    }
     this.quality = 'high';
-    this.setQuality(QUALITIES.includes(saved as Quality) ? (saved as Quality) : 'high');
+    this.setQuality(QUALITIES.includes(saved as Quality) ? (saved as Quality) : 'high', true);
 
     addEventListener('resize', () => this.resize());
   }
 
-  setQuality(q: Quality) {
+  /** Sets the quality; `auto` marks a change the game made rather than the player. */
+  setQuality(q: Quality, auto = false) {
     this.quality = q;
     // Ambient occlusion is the costliest pass, and high-density screens draw up to three times
     // the pixels; the lower settings drop both.
@@ -345,11 +356,57 @@ export class Graphics {
       this.composer.setPixelRatio(ratio);
       this.resize();
     }
+    // The sun's shadow map is the other big cost: 4096 square on high, less below.
+    const shadowSize = q === 'high' ? 4096 : q === 'medium' ? 2048 : 1024;
+    this.scene.traverse((o) => {
+      const light = o as THREE.DirectionalLight;
+      if (!light.isDirectionalLight || !light.castShadow || light.shadow.mapSize.x === shadowSize) return;
+      light.shadow.mapSize.set(shadowSize, shadowSize);
+      light.shadow.map?.dispose();
+      light.shadow.map = null;
+    });
+    if (!auto) this.chosen = true;
     try {
       localStorage.setItem('pf-quality', q);
+      if (!auto) localStorage.setItem('pf-quality-chosen', '1');
     } catch {
       /* storage unavailable */
     }
+  }
+
+  /**
+   * Until the player picks a quality, watches how fast frames come and drops a level whenever
+   * they average slower than about 40 a second, so a first game on a plain laptop stays smooth.
+   */
+  private watchFrames() {
+    const w = this.watch;
+    if (this.chosen || w.done || this.quality === 'low') return;
+    const now = performance.now();
+    const dt = now - w.last;
+    w.last = now;
+    // Long gaps are the tab hidden or something loading, not the frame rate.
+    if (dt <= 0 || dt > 250) {
+      w.since = now;
+      w.frames.length = 0;
+      return;
+    }
+    // Give a level a couple of seconds to settle (shaders compiling) before judging it.
+    if (now - w.since < 2500) return;
+    w.frames.push(dt);
+    if (w.frames.length < 150) return;
+    const sorted = [...w.frames].sort((a, b) => a - b);
+    // The slowest tenth is hitches (loading, garbage collection) rather than the steady rate.
+    const kept = sorted.slice(0, Math.floor(sorted.length * 0.9));
+    const average = kept.reduce((a, b) => a + b, 0) / kept.length;
+    w.frames.length = 0;
+    w.since = now;
+    if (average < 25) {
+      w.done = true;
+      return;
+    }
+    const lower = QUALITIES[QUALITIES.indexOf(this.quality) + 1];
+    this.setQuality(lower, true);
+    this.onAutoQuality(lower);
   }
 
   private resize() {
@@ -391,6 +448,7 @@ export class Graphics {
   private forward = new THREE.Vector3();
 
   render() {
+    this.watchFrames();
     this.time.value += this.clock.getDelta();
     this.sky.position.copy(this.camera.position);
     if (this.quality !== 'low') {

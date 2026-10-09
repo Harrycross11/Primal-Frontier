@@ -349,6 +349,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     gfx.setQuality(q);
     hud.setQuality(gfx.quality);
   };
+  gfx.onAutoQuality = (q) => {
+    hud.setQuality(q);
+    pause.quality = q;
+  };
   // Letting go of the mouse (Esc) in the middle of play brings up the menu.
   document.addEventListener('pointerlockchange', () => {
     if (document.pointerLockElement === canvas) return pause.hide();
@@ -1470,6 +1474,72 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       position: controller.position.toArray(),
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
+    perf: (frames = 5) => {
+      const r = gfx.renderer;
+      const seen = (o: THREE.Object3D) => {
+        for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
+        return true;
+      };
+      let meshes = 0, casters = 0, tris = 0, casterTris = 0, instanced = 0, skinned = 0;
+      const tex = new Map<THREE.Texture, string>();
+      const geos = new Set<THREE.BufferGeometry>();
+      const byName = new Map<string, number>();
+      const counts = new Map<string, number>();
+      world.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !seen(m)) return;
+        meshes++;
+        const g = m.geometry;
+        geos.add(g);
+        const n = ((g.index ? g.index.count : (g.getAttribute('position')?.count ?? 0)) / 3) * ((m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1);
+        tris += n;
+        if ((m as THREE.InstancedMesh).isInstancedMesh) instanced++;
+        if ((m as THREE.SkinnedMesh).isSkinnedMesh) skinned++;
+        if (m.castShadow) { casters++; casterTris += n; }
+        const mat0 = ([] as THREE.Material[]).concat(m.material)[0];
+        const key = `${g.name || m.name || m.parent?.name || '?'}/${mat0?.name || mat0?.type}/${Math.round(n)}`;
+        byName.set(key, (byName.get(key) ?? 0) + n);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        for (const mat of ([] as THREE.Material[]).concat(m.material)) {
+          for (const v of Object.values(mat)) {
+            const t = v as THREE.Texture;
+            if (t && t.isTexture && t.image) {
+              const img = t.image as { width?: number; height?: number };
+              tex.set(t, `${img.width}x${img.height}`);
+            }
+          }
+        }
+      });
+      let texMB = 0;
+      const sizes = new Map<string, number>();
+      for (const s of tex.values()) {
+        const [w, h] = s.split('x').map(Number);
+        if (w && h) texMB += (w * h * 4 * 1.33) / 1e6;
+        sizes.set(s, (sizes.get(s) ?? 0) + 1);
+      }
+      r.info.autoReset = false;
+      r.info.reset();
+      const t0 = performance.now();
+      for (let i = 0; i < frames; i++) gfx.render();
+      r.getContext().finish();
+      const ms = (performance.now() - t0) / frames;
+      r.info.autoReset = true;
+      return {
+        ms: +ms.toFixed(1),
+        calls: Math.round(r.info.render.calls / frames),
+        drawnTris: Math.round(r.info.render.triangles / frames),
+        memory: { ...r.info.memory },
+        programs: r.info.programs?.length,
+        meshes, instanced, skinned, casters, tris: Math.round(tris), casterTris: Math.round(casterTris),
+        geos: geos.size, textures: tex.size, texMB: Math.round(texMB),
+        texSizes: [...sizes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
+        heaviest: [...byName.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, v]) => `${k} x${counts.get(k)} =${Math.round(v)}`),
+        most: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${k} x${v}`),
+        shadow: gfx.renderer.shadowMap.enabled,
+        ratio: r.getPixelRatio(),
+        quality: gfx.quality,
+      };
+    },
     paint: () => openPaint(),
     pause: () => pause.showMenu(),
     look: (yaw: number, pitch: number) => {

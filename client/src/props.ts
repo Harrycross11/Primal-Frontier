@@ -3,11 +3,13 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DOORWAY, type DoorKind } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { BOULDERS, model, soleMaterial } from './models.ts';
+import { lodIndex, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -134,14 +136,20 @@ const scannedMats = new Map<string, THREE.MeshStandardMaterial>();
  * A photo-scanned boulder, picked by `rand`. Its own colour comes from the scan; vertex colours
  * tint it per kind and paint the ore veins across it. Undefined if the scans didn't load.
  */
-export function scannedRock(rand: () => number, base: THREE.Color, vein?: { color: THREE.Color; count: number; width: number }): THREE.Mesh | undefined {
+export function scannedRock(
+  rand: () => number,
+  base: THREE.Color,
+  vein?: { color: THREE.Color; count: number; width: number },
+  small = false,
+): THREE.Mesh | THREE.LOD | undefined {
   const m = model(BOULDERS[Math.floor(rand() * BOULDERS.length)]);
   if (!m) return undefined;
-  const geo = m.geometry.clone();
+  // Every copy of a scan shares its shape; only the colours painted on it are its own.
   // paintRock expects a rock about 1 m in radius centred on the origin.
-  geo.translate(0, -0.5, 0);
-  paintRock(geo, new Float32Array(geo.attributes.position.count), base, rand, vein);
-  geo.translate(0, 0.5, 0);
+  const paint = new THREE.BufferGeometry();
+  paint.setAttribute('position', m.geometry.getAttribute('position').clone());
+  paint.translate(0, -0.5, 0);
+  paintRock(paint, new Float32Array(paint.attributes.position.count), base, rand, vein);
   const source = soleMaterial(m);
   let mat = scannedMats.get(source.uuid);
   if (!mat) {
@@ -149,10 +157,30 @@ export function scannedRock(rand: () => number, base: THREE.Color, vein?: { colo
     mat.vertexColors = true;
     scannedMats.set(source.uuid, mat);
   }
-  const out = new THREE.Mesh(geo, mat);
-  out.castShadow = true;
-  out.receiveShadow = true;
-  return out;
+  const painted = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(m.geometry.attributes)) painted.setAttribute(name, attr);
+  painted.setAttribute('color', paint.getAttribute('color'));
+  painted.setIndex(m.geometry.index);
+  painted.boundingBox = m.geometry.boundingBox!.clone();
+  if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+  painted.boundingSphere = m.geometry.boundingSphere!.clone();
+  const level = (geo: THREE.BufferGeometry) => {
+    const out = new THREE.Mesh(geo, mat);
+    out.castShadow = true;
+    out.receiveShadow = true;
+    return out;
+  };
+  // A stone at the foot of a boulder is a few centimetres across: a twentieth of the scan is plenty.
+  const tiny = lodIndex(m.geometry, 0.05);
+  if (small) return level(tiny ? withIndex(painted, tiny) : painted);
+  const mid = lodIndex(m.geometry, 0.2);
+  if (!mid || !tiny) return level(painted);
+  // Full detail up close, a fifth of it a little way off, and a twentieth in the distance.
+  const lod = new THREE.LOD();
+  lod.addLevel(level(painted), 0);
+  lod.addLevel(level(withIndex(painted, mid)), 25);
+  lod.addLevel(level(withIndex(painted, tiny)), 70);
+  return lod;
 }
 
 function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | undefined {
@@ -166,14 +194,25 @@ function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | un
   const g = new THREE.Group();
   body.position.y = -0.05;
   g.add(body);
-  // A few smaller stones broken off around the base.
+  // A few smaller stones broken off around the base, drawn together as one.
+  const stones: THREE.BufferGeometry[] = [];
+  let stoneMat: THREE.Material | undefined;
   for (let n = 0; n < 3; n++) {
-    const small = scannedRock(rand, base)!;
+    const small = scannedRock(rand, base, undefined, true) as THREE.Mesh;
     const a = rand() * Math.PI * 2;
     small.scale.setScalar(0.12 + rand() * 0.08);
     small.position.set(Math.cos(a) * 1.2, -0.02, Math.sin(a) * 1.1);
     small.rotation.y = rand() * 6;
-    g.add(small);
+    small.updateMatrix();
+    stones.push(small.geometry.toNonIndexed().applyMatrix4(small.matrix));
+    stoneMat = small.material as THREE.Material;
+  }
+  const merged = mergeGeometries(stones);
+  if (merged && stoneMat) {
+    const rubble = new THREE.Mesh(merged, stoneMat);
+    rubble.castShadow = true;
+    rubble.receiveShadow = true;
+    g.add(rubble);
   }
   return g;
 }

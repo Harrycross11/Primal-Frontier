@@ -3,6 +3,7 @@
 // build in code. If a file fails to load the game falls back to those shapes.
 
 import * as THREE from 'three';
+import { lodReady } from './lod.ts';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -259,6 +260,7 @@ async function load(loader: GLTFLoader, name: string) {
     alpha.flipY = false;
   }
   const out = roots.map((r) => build(r, fit, alpha)).filter((m): m is Model => !!m);
+  for (const m of out) m.geometry.name = name;
   if (out.length) models.set(name, out);
 }
 
@@ -293,7 +295,7 @@ export async function loadModels(progress?: (done: number, total: number) => voi
   // from /draco.
   const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
   const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
-  const jobs = [...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
+  const jobs = [lodReady, ...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
   let done = 0;
   progress?.(0, jobs.length);
   await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));

@@ -1,6 +1,7 @@
 // The 3D world: lit terrain, scenery, resources, player-built pieces and floating ash.
 
 import * as THREE from 'three';
+import { scanMesh } from './lod.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD_SIZE } from '../../shared/constants.ts';
 import { DOORWAY, MAX_HP, ROOF_RISE, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
@@ -39,6 +40,12 @@ import {
 /** Size of the map's squares, metres, and how far off they still show. */
 const CELL = 50;
 const VIEW = 240;
+/**
+ * How far off smaller things still show: a clump of hemp or a barrel is a speck in the haze
+ * long before the view ends, and drawing thousands of specks is what slows a frame down.
+ */
+const VIEW_SMALL = 90;
+const VIEW_MEDIUM = 170;
 const GRASS_CELL = 24;
 const GRASS_VIEW = 95;
 
@@ -464,15 +471,16 @@ export class World {
     }
   }
 
-  /** The square of the map a spot is in, made on first use. */
-  private cellAt(x: number, z: number): THREE.Group {
+  /** The square of the map a spot is in, for things that show out to `view` metres, made on first use. */
+  private cellAt(x: number, z: number, view = VIEW): THREE.Group {
     const i = Math.floor(x / CELL);
     const j = Math.floor(z / CELL);
-    const key = `${i},${j}`;
+    const key = `${i},${j},${view}`;
     let cell = this.cells.get(key);
     if (!cell) {
       cell = new THREE.Group();
       cell.userData.centre = new THREE.Vector3((i + 0.5) * CELL, 0, (j + 0.5) * CELL);
+      cell.userData.view = view;
       this.cells.set(key, cell);
       this.scene.add(cell);
     }
@@ -482,9 +490,14 @@ export class World {
   /** Hides the squares too far off to see through the haze, and the grass beyond a short way. */
   private cull(focus: THREE.Vector3) {
     const flat = (v: THREE.Vector3) => Math.hypot(v.x - focus.x, v.z - focus.z);
-    for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < VIEW + CELL * 0.71;
+    for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < cell.userData.view + CELL * 0.71;
     for (const g of this.grassCells) g.visible = flat(g.userData.centre) < GRASS_VIEW + GRASS_CELL * 0.71;
-    for (const p of this.patches) p.mesh.visible = flat(p.centre) < p.view;
+    for (const p of this.patches) {
+      const far = flat(p.centre);
+      p.mesh.visible = far < p.view;
+      // Batches of scanned logs, stumps and bushes a good way off draw a lighter shape.
+      if (p.low && p.mesh.visible) (p.mesh as THREE.Mesh).geometry = far > p.lowFrom! ? p.low : p.full!;
+    }
   }
 
   private buildAsh(): THREE.Points {
@@ -508,7 +521,7 @@ export class World {
     g.position.set(d.x, d.y, d.z);
     g.rotation.y = d.rot;
     const rand = mulberry32(d.variant + 1);
-    const solid = (mesh: THREE.Mesh, collide: boolean) => {
+    const solid = <T extends THREE.Object3D>(mesh: T, collide: boolean) => {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       g.add(mesh);
@@ -598,7 +611,8 @@ export class World {
         if (tipped) barrel.rotation.z = Math.PI / 2;
       }
     }
-    this.scene.add(g);
+    const view = d.kind === 'ruin' ? VIEW : d.kind === 'pole' || (d.kind === 'rock' && d.scale > 1) ? VIEW_MEDIUM : VIEW_SMALL;
+    this.cellAt(d.x, d.z, view).add(g);
   }
 
   /**
@@ -608,8 +622,8 @@ export class World {
    */
   private scannedRuin(g: THREE.Group, d: Decor, rand: () => number) {
     g.rotation.y = Math.round(d.rot / (Math.PI / 2)) * (Math.PI / 2);
-    const place = (m: Model, x: number, z: number, turn = 0, scale = 1, collide = true) => {
-      const mesh = new THREE.Mesh(m.geometry, m.material);
+    const place = (m: Model, x: number, z: number, turn = 0, scale = 1, collide = true, detail = true) => {
+      const mesh = detail ? scanMesh(m.geometry, m.material) : new THREE.Mesh(m.geometry, m.material);
       mesh.position.set(x, -0.15 * scale, z);
       mesh.rotation.y = turn;
       mesh.scale.setScalar(scale);
@@ -661,7 +675,7 @@ export class World {
     for (let n = 0; n < 14 && chunks.length; n++) {
       const a = rand() * Math.PI * 2;
       const r = 5 + rand() * 6;
-      const chunk = place(chunks[n % chunks.length], Math.cos(a) * r, Math.sin(a) * r, rand() * 6, 0.6 + rand() * 1.4, false);
+      const chunk = place(chunks[n % chunks.length], Math.cos(a) * r, Math.sin(a) * r, rand() * 6, 0.6 + rand() * 1.4, false, false);
       chunk.position.y = -0.05;
     }
   }
@@ -760,9 +774,9 @@ export class World {
             : node.kind === 'scrap'
               ? this.wreck(rand)
               : node.kind === 'hemp'
-                ? buildHemp(rand)
+                ? this.smallShape('hemp', node.id, buildHemp)
                 : node.kind === 'mushroom'
-                  ? buildMushrooms(rand)
+                  ? this.smallShape('mushroom', node.id, buildMushrooms)
                   : node.kind === 'waterBarrel'
                     ? buildWaterBarrel()
                     : buildBoulder(rand, node.kind);
@@ -779,7 +793,13 @@ export class World {
           o.receiveShadow = true;
         }
       });
-      this.cellAt(node.x, node.z).add(g);
+      const view =
+        node.kind === 'tree' || node.kind === 'deadTree'
+          ? VIEW
+          : node.kind === 'hemp' || node.kind === 'mushroom' || node.kind === 'waterBarrel'
+            ? VIEW_SMALL
+            : VIEW_MEDIUM;
+      this.cellAt(node.x, node.z, view).add(g);
       this.resourceMeshes.set(node.id, g);
       this.pickables.push(g);
       this.setResourceAmount(node.id, node.amount);
@@ -810,6 +830,20 @@ export class World {
         const rand = mulberry32(n * 7 + 3 + (kind === 'tree' ? 0 : 500));
         shapes.push(mergeByMaterial(kind === 'tree' ? this.livingTree(rand) : this.deadTree(rand)));
       }
+      this.treeShapes.set(kind, shapes);
+    }
+    return shapes[id % shapes.length].clone();
+  }
+
+  /**
+   * A copy of one of a dozen hemp clumps or mushroom patches, merged to a mesh per material:
+   * built leaf by leaf, each clump would be dozens of draw calls.
+   */
+  private smallShape(kind: 'hemp' | 'mushroom', id: number, make: (rand: () => number) => THREE.Group): THREE.Group {
+    let shapes = this.treeShapes.get(kind);
+    if (!shapes) {
+      shapes = [];
+      for (let n = 0; n < 12; n++) shapes.push(mergeByMaterial(make(mulberry32(n * 13 + (kind === 'hemp' ? 900 : 1300)))));
       this.treeShapes.set(kind, shapes);
     }
     return shapes[id % shapes.length].clone();
@@ -946,7 +980,7 @@ export class World {
     let g: THREE.Group;
     if (scan) {
       g = new THREE.Group();
-      const car = new THREE.Mesh(scan.geometry, scan.material);
+      const car = scanMesh(scan.geometry, scan.material);
       // Settled into the dirt, sometimes facing the other way.
       car.position.y = -0.05;
       if (rand() < 0.5) car.rotation.y = Math.PI;

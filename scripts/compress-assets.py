@@ -55,3 +55,5 @@ def textures():
 if __name__ == '__main__':
     models()
     textures()
+    # Then cap the texture sizes in man-made models (see shrink-textures.py).
+    subprocess.run(['python3', os.path.join(os.path.dirname(__file__), 'shrink-textures.py')], check=True)

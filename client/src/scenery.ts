@@ -8,6 +8,7 @@ import { biomeAt, type BiomeId } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
 import { asphaltSurface, barkSurface, concreteSurface } from './textures.ts';
+import { lighter } from './lod.ts';
 import { model, variants, type Model } from './models.ts';
 import { rockGeometry, rockMaterial } from './rocks.ts';
 
@@ -16,6 +17,10 @@ export interface Patch {
   mesh: THREE.Object3D;
   centre: THREE.Vector3;
   view: number;
+  /** For a batch of scanned models: their full shape, and a lighter one for past `lowFrom` metres. */
+  full?: THREE.BufferGeometry;
+  low?: THREE.BufferGeometry;
+  lowFrom?: number;
 }
 
 /** Builds the scenery; returns the scattered patches, for the world to hide when far off. */
@@ -155,7 +160,9 @@ function buildScatter(scene: THREE.Scene, seed: number): Patch[] {
       mesh.computeBoundingSphere();
       scene.add(mesh);
       const [i, j] = key.split(',').map(Number);
-      patches.push({ mesh, centre: new THREE.Vector3((i + 0.5) * size, 0, (j + 0.5) * size), view: far ? 240 : 75 });
+      // Every copy in the square is past 50 m once its centre is this far off.
+      const low = far ? lighter(geo, 0.2) : null;
+      patches.push({ mesh, centre: new THREE.Vector3((i + 0.5) * size, 0, (j + 0.5) * size), view: far ? 240 : 75, ...(low && { full: geo, low, lowFrom: size * 0.71 + 50 }) });
       meshes.push(mesh);
     }
     return meshes;
