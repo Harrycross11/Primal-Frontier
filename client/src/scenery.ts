@@ -71,7 +71,10 @@ function buildRoad(scene: THREE.Scene, seed: number, decor: Decor[]) {
   const mat = new THREE.MeshStandardMaterial({
     ...s,
     roughness: 0.92,
-    alphaTest: 0.5,
+    // Blended rather than cut out, so its crumbling edges and holes fade into the ground.
+    transparent: true,
+    depthWrite: false,
+    alphaTest: 0.02,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,

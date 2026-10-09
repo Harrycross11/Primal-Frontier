@@ -128,7 +128,9 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
           // Low down the photo fades into the haze, so it meets the fogged land without a seam.
           vec3 photo = photoSky(d);
           photo = mix(horizon, photo, smoothstep(-0.02, 0.14, d.y));
-          col = mix(col, photo, photoMix);
+          // High up the photo's pixels are stretched into streaks toward the pole; hand over to
+          // the drawn sky there.
+          col = mix(col, photo, photoMix * (1.0 - smoothstep(0.35, 0.7, d.y)));
         }
         // Storm cloud closing over the sky, darkest overhead.
         col = mix(col, stormColor * mix(1.0, 0.7, h), storm * 0.9);

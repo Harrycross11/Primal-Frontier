@@ -320,9 +320,12 @@ export function asphaltSurface(): Surface {
       };
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fillStyle = '#000';
+      // Feathered, so the road fades into the dirt instead of ending in a hard cut.
+      ctx.filter = `blur(${(size / 256) * 1.5}px)`;
       edge(-1);
       edge(1);
       holeShape(0);
+      ctx.filter = 'none';
       ctx.restore();
     },
   });
