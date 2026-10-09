@@ -39,6 +39,13 @@ export class Hud {
     ($('loading-fill') as HTMLElement).style.width = `${Math.round((done / total) * 100)}%`;
   }
 
+  /** While the guns and tools finish loading after Play is pressed, says so on the button. */
+  setPlayWaiting(waiting: boolean) {
+    const play = $('play') as HTMLButtonElement;
+    play.dataset.label ??= play.textContent ?? '';
+    play.textContent = waiting ? 'Loading weapons' : play.dataset.label;
+  }
+
   showJoinError(text: string) {
     $('join-error').textContent = text;
     ($('play') as HTMLButtonElement).disabled = false;

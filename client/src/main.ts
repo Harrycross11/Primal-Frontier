@@ -44,7 +44,7 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { loadModels } from './models.ts';
+import { lateLoaded, lateModels, loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
@@ -176,6 +176,13 @@ hud.onPlay(async (name) => {
       hud.showJoinError((e as Error).message);
       return;
     }
+  }
+  // Join only with everything loaded, so you never stand in the world unable to act.
+  await modelsReady;
+  if (!lateLoaded()) {
+    hud.setPlayWaiting(true);
+    await lateModels;
+    hud.setPlayWaiting(false);
   }
   net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
