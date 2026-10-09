@@ -205,7 +205,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   const remotes = new Map<number, Remote>();
   /** Everyone on your team (you too, online or not), and who on it is online. */
-  let teamIds: number[] = [welcome.id];
+  let teamIds: number[] = welcome.team;
   const mates = () => [...remotes.values()].filter((r) => teamIds.includes(r.state.id));
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;

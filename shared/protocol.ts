@@ -111,6 +111,8 @@ export type ServerMessage =
       wear: Slots;
       hp: number;
       vitals: Vitals;
+      /** Everyone on your team (you included), or just you. */
+      team: number[];
     }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[] }
   | { t: 'joined'; player: PlayerState }

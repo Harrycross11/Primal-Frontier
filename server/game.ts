@@ -407,11 +407,11 @@ export class Game {
             wear: clone(player.wear),
             hp: player.hp,
             vitals: { ...player.vitals },
+            team: [...this.team(id)],
           },
         },
         { to: 'others', except: id, msg: { t: 'joined', player: pub } },
         { to: 'all', msg: { t: 'notice', text: `${player.name} joined the wasteland` } },
-        ...(this.teamOf(id) === undefined ? [] : [{ to: id, msg: { t: 'team' as const, members: [...this.team(id)] } }]),
       ],
     };
   }
