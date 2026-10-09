@@ -70,7 +70,6 @@ export class Lobby {
     this.renderBundles();
     this.renderStore();
     this.renderGarage();
-    $('news-card').addEventListener('click', () => this.show('store'));
     // Settings: graphics quality (used by the menu's world and the game) and full screen.
     const settings = $('lobby-settings');
     const quality = () => {

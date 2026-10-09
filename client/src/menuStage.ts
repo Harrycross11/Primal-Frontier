@@ -50,8 +50,8 @@ const PACK_SHOTS: Record<string, { kind: VehicleKind; paint: number }> = {
   neon: { kind: 'pickup', paint: 21 },
   camo: { kind: 'jeep', paint: 24 },
   legend: { kind: 'van', paint: 31 },
-  /** The news card's picture: an old pickup as found. */
-  news: { kind: 'pickup', paint: 0 },
+  /** The news card's picture: the minicopter. */
+  news: { kind: 'heli', paint: 0 },
 };
 
 export class MenuStage {

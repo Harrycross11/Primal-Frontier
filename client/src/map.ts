@@ -10,8 +10,26 @@ import { terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
-/** Pixels across the drawn map. */
+/** Pixels across the land's shading, worked out from the terrain. */
 const SIZE = 360;
+/** Pixels across the map as drawn, so the marks and names stay sharp. */
+const OUT = 1000;
+
+/** The radiation hazard sign: three blades round a dot. */
+function hazard(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string) {
+  ctx.fillStyle = colour;
+  for (let n = 0; n < 3; n++) {
+    const a = -Math.PI / 2 + (n * Math.PI * 2) / 3;
+    ctx.beginPath();
+    ctx.arc(x, y, r, a - Math.PI / 6, a + Math.PI / 6);
+    ctx.arc(x, y, r * 0.34, a + Math.PI / 6, a - Math.PI / 6, true);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+}
 
 export interface MapMarks {
   x: number;
@@ -71,22 +89,33 @@ export class WorldMap {
   }
 
   private toPx(x: number, z: number): [number, number] {
-    return [((x + HALF_WORLD) / WORLD_SIZE) * SIZE, ((z + HALF_WORLD) / WORLD_SIZE) * SIZE];
+    return [((x + HALF_WORLD) / WORLD_SIZE) * OUT, ((z + HALF_WORLD) / WORLD_SIZE) * OUT];
   }
 
-  /** The lands, hill shading, craters, ruins and the names, drawn once. */
+  /**
+   * The lands as a survey map: muted colours, hill shading and contour lines, a lettered grid,
+   * the radiation zones, ruins, road and landmarks, and the lands' names. Drawn once.
+   */
   private drawBase(): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = c.height = SIZE;
-    const ctx = c.getContext('2d')!;
-    const img = ctx.createImageData(SIZE, SIZE);
+    const land = document.createElement('canvas');
+    land.width = land.height = SIZE;
+    const lctx = land.getContext('2d')!;
+    const img = lctx.createImageData(SIZE, SIZE);
     const step = WORLD_SIZE / SIZE;
+    // Each land's colour pulled toward a dusty grey, so the map reads as one printed sheet.
     const rgb = BIOME_IDS.map((id) => {
       const n = parseInt(BIOMES[id].color.slice(1), 16);
-      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      const l = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+      return c.map((v) => (v * 0.55 + l * 0.45) * 0.78);
     });
     const w = [0, 0, 0, 0, 0];
     const centres = BIOME_IDS.map(() => ({ x: 0, z: 0, n: 0 }));
+    const heights = new Float32Array(SIZE * SIZE);
+    for (let j = 0; j < SIZE; j++) {
+      for (let i = 0; i < SIZE; i++) heights[j * SIZE + i] = terrainHeight(this.seed, -HALF_WORLD + (i + 0.5) * step, -HALF_WORLD + (j + 0.5) * step);
+    }
+    const height = (i: number, j: number) => heights[Math.max(0, Math.min(SIZE - 1, j)) * SIZE + Math.max(0, Math.min(SIZE - 1, i))];
     for (let j = 0; j < SIZE; j++) {
       for (let i = 0; i < SIZE; i++) {
         const x = -HALF_WORLD + (i + 0.5) * step;
@@ -108,9 +137,12 @@ export class WorldMap {
           centres[top].n++;
         }
         // Light from the top left, so hills and mesas stand out.
-        const h = terrainHeight(this.seed, x, z);
-        const slope = (terrainHeight(this.seed, x - step, z - step) - h) / step;
-        const shade = Math.max(0.55, Math.min(1.35, 1 + slope * 0.9 + (h - 6) * 0.008));
+        const h = height(i, j);
+        const slope = (height(i - 1, j - 1) - h) / step;
+        let shade = Math.max(0.6, Math.min(1.3, 1 + slope * 0.7 + (h - 6) * 0.006));
+        // A contour line every 5 m of height.
+        const band = Math.floor(h / 5);
+        if (band !== Math.floor(height(i + 1, j) / 5) || band !== Math.floor(height(i, j + 1) / 5)) shade *= 0.82;
         const at = (j * SIZE + i) * 4;
         img.data[at] = Math.min(255, r * shade);
         img.data[at + 1] = Math.min(255, g * shade);
@@ -118,74 +150,101 @@ export class WorldMap {
         img.data[at + 3] = 255;
       }
     }
-    ctx.putImageData(img, 0, 0);
+    lctx.putImageData(img, 0, 0);
+
+    const c = document.createElement('canvas');
+    c.width = c.height = OUT;
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(land, 0, 0, OUT, OUT);
+    const font = (size: number, weight = 600) => `${weight} ${size}px 'Barlow Condensed', 'Barlow', sans-serif`;
+    const label = (text: string, x: number, y: number, size: number, colour: string, spacing: number) => {
+      ctx.font = font(size);
+      ctx.letterSpacing = `${spacing}px`;
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = colour;
+      ctx.fillText(text, x, y);
+      ctx.shadowBlur = 0;
+      ctx.letterSpacing = '0px';
+    };
+
+    // A lettered grid, like a survey sheet: A to H across, 1 to 8 down.
+    const cells = 8;
+    const cell = OUT / cells;
+    ctx.strokeStyle = 'rgba(12, 11, 10, 0.28)';
+    ctx.lineWidth = 1;
+    for (let n = 1; n < cells; n++) {
+      ctx.beginPath();
+      ctx.moveTo(n * cell + 0.5, 0);
+      ctx.lineTo(n * cell + 0.5, OUT);
+      ctx.moveTo(0, n * cell + 0.5);
+      ctx.lineTo(OUT, n * cell + 0.5);
+      ctx.stroke();
+    }
+    ctx.font = font(13);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(235, 230, 218, 0.5)';
+    for (let a = 0; a < cells; a++) {
+      for (let b = 0; b < cells; b++) ctx.fillText(`${String.fromCharCode(65 + a)}${b + 1}`, a * cell + 6, b * cell + 5);
+    }
 
     // The old road along the power line.
     const poles = this.decor.filter((d) => d.kind === 'pole');
     if (poles.length > 1) {
-      ctx.strokeStyle = 'rgba(40, 36, 32, 0.55)';
+      ctx.strokeStyle = 'rgba(30, 27, 24, 0.45)';
       ctx.lineWidth = 2;
+      ctx.setLineDash([10, 6]);
       ctx.beginPath();
       ctx.moveTo(...this.toPx(poles[0].x, poles[0].z));
       ctx.lineTo(...this.toPx(poles[poles.length - 1].x, poles[poles.length - 1].z));
       ctx.stroke();
+      ctx.setLineDash([]);
     }
-    ctx.fillStyle = 'rgba(50, 46, 42, 0.8)';
+    ctx.fillStyle = 'rgba(28, 26, 24, 0.75)';
     for (const d of this.decor) {
       if (d.kind !== 'ruin') continue;
       const [px, py] = this.toPx(d.x, d.z);
-      ctx.fillRect(px - 2.5, py - 2.5, 5, 5);
+      ctx.fillRect(px - 4, py - 4, 8, 8);
     }
+    // Radiation: a dashed amber ring with the hazard sign in the middle.
     for (const zone of radZones(this.seed)) {
       const [px, py] = this.toPx(zone.x, zone.z);
-      const r = (zone.radius / WORLD_SIZE) * SIZE;
-      ctx.fillStyle = 'rgba(200, 190, 40, 0.28)';
-      ctx.strokeStyle = 'rgba(120, 110, 20, 0.8)';
+      const r = (zone.radius / WORLD_SIZE) * OUT;
+      ctx.fillStyle = 'rgba(214, 176, 60, 0.12)';
+      ctx.strokeStyle = 'rgba(232, 190, 70, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 5]);
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#2a2610';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('☢', px, py);
+      ctx.setLineDash([]);
+      hazard(ctx, px, py, 9, 'rgba(232, 190, 70, 0.95)');
     }
-    // The landmarks: a crate symbol and the name, so you know where the loot is.
+    // The landmarks: a crate mark and the name, so you know where the loot is.
     for (const { site, landmark } of landmarks(this.seed)) {
       const [px, py] = this.toPx(site.x, site.z);
-      ctx.fillStyle = '#e8b04a';
-      ctx.strokeStyle = '#1c1a18';
-      ctx.lineWidth = 1.5;
+      ctx.fillStyle = '#ebe6da';
+      ctx.strokeStyle = 'rgba(12, 11, 10, 0.9)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.rect(px - 4.5, py - 4.5, 9, 9);
+      ctx.rect(px - 6, py - 6, 12, 12);
       ctx.fill();
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(px - 4.5, py);
-      ctx.lineTo(px + 4.5, py);
-      ctx.stroke();
-      ctx.font = '600 10px system-ui, sans-serif';
-      ctx.textAlign = 'center';
+      ctx.fillStyle = '#c9562a';
+      ctx.fillRect(px - 3, py - 3, 6, 6);
       ctx.textBaseline = 'top';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(20, 18, 16, 0.8)';
-      ctx.strokeText(landmark.name, px, py + 7);
-      ctx.fillStyle = '#f6d690';
-      ctx.fillText(landmark.name, px, py + 7);
+      label(landmark.name.toUpperCase(), px, py + 11, 14, '#ebe6da', 1.5);
     }
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.textAlign = 'center';
     BIOME_IDS.forEach((id, k) => {
-      const c = centres[k];
-      if (!c.n) return;
-      const [px, py] = this.toPx(c.x / c.n, c.z / c.n);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(20, 18, 16, 0.75)';
-      ctx.strokeText(BIOMES[id].name, px, py);
-      ctx.fillStyle = '#f2ece2';
-      ctx.fillText(BIOMES[id].name, px, py);
+      const ce = centres[k];
+      if (!ce.n) return;
+      const [px, py] = this.toPx(ce.x / ce.n, ce.z / ce.n);
+      label(BIOMES[id].name.toUpperCase(), px, py - 26, 24, 'rgba(250, 246, 236, 0.92)', 5);
     });
     return c;
   }
@@ -193,14 +252,15 @@ export class WorldMap {
   private draw(marks: MapMarks) {
     this.base ??= this.drawBase();
     const c = this.canvas;
-    c.width = c.height = SIZE;
+    c.width = c.height = OUT;
     const ctx = c.getContext('2d')!;
     ctx.drawImage(this.base, 0, 0);
+    ctx.lineJoin = 'round';
     ctx.fillStyle = '#c0502e';
     ctx.strokeStyle = '#1c1a18';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     // Supply drops: a red parachute crate, pulsing so it catches the eye.
-    const pulse = 4 + Math.sin(performance.now() / 180) * 1.2;
+    const pulse = 9 + Math.sin(performance.now() / 180) * 2.5;
     for (const d of marks.drops) {
       const [px, py] = this.toPx(d.x, d.z);
       ctx.fillStyle = '#d23a2c';
@@ -210,47 +270,51 @@ export class WorldMap {
       ctx.stroke();
     }
     // Cars: small dark blocks.
-    ctx.fillStyle = '#3c5e66';
+    ctx.fillStyle = '#4c7480';
     for (const car of marks.cars) {
       const [px, py] = this.toPx(car.x, car.z);
-      ctx.fillRect(px - 4, py - 2.5, 8, 5);
-      ctx.strokeRect(px - 4, py - 2.5, 8, 5);
+      ctx.fillRect(px - 8, py - 5, 16, 10);
+      ctx.strokeRect(px - 8, py - 5, 16, 10);
     }
     // Teammates: green dots with their names.
-    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.font = "600 17px 'Barlow Condensed', 'Barlow', sans-serif";
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     for (const m of marks.mates) {
       const [px, py] = this.toPx(m.x, m.z);
       ctx.fillStyle = '#5fd06a';
       ctx.beginPath();
-      ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.lineWidth = 3;
-      ctx.strokeText(m.name, px, py - 6);
+      ctx.lineWidth = 4;
+      ctx.strokeText(m.name, px, py - 11);
       ctx.fillStyle = '#d8f5da';
-      ctx.fillText(m.name, px, py - 6);
-      ctx.lineWidth = 1.5;
+      ctx.fillText(m.name, px, py - 11);
+      ctx.lineWidth = 2;
     }
     ctx.fillStyle = '#c0502e';
     for (const h of marks.hounds) {
       const [px, py] = this.toPx(h.x, h.z);
       ctx.beginPath();
-      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 6.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
-    // You: an arrow pointing the way you face.
+    // You: an arrow pointing the way you face, and the grid square you are in.
     const [px, py] = this.toPx(marks.x, marks.z);
+    const cell = OUT / 8;
+    const grid = `Grid ${String.fromCharCode(65 + Math.min(7, Math.max(0, Math.floor(px / cell))))}${Math.min(8, Math.max(1, Math.floor(py / cell) + 1))}`;
+    if ($('map-grid').textContent !== grid) $('map-grid').textContent = grid;
     const fx = -Math.sin(marks.yaw);
     const fz = -Math.cos(marks.yaw);
     ctx.fillStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(px + fx * 9, py + fz * 9);
-    ctx.lineTo(px - fx * 5 - fz * 5.5, py - fz * 5 + fx * 5.5);
-    ctx.lineTo(px - fx * 2, py - fz * 2);
-    ctx.lineTo(px - fx * 5 + fz * 5.5, py - fz * 5 - fx * 5.5);
+    ctx.moveTo(px + fx * 17, py + fz * 17);
+    ctx.lineTo(px - fx * 9 - fz * 10, py - fz * 9 + fx * 10);
+    ctx.lineTo(px - fx * 3.5, py - fz * 3.5);
+    ctx.lineTo(px - fx * 9 + fz * 10, py - fz * 9 - fx * 10);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();

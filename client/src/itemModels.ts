@@ -272,6 +272,11 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
     return { model: wrap(armour), view: 'front' };
   }
   const held = buildHeldItem(item);
+  // The blueprint is seen face on, a little turned, so its drawing shows.
+  if (held && item === 'buildingPlan') {
+    held.rotation.set(-0.2, 0.3, -0.35);
+    return { model: wrap(held), view: 'front' };
+  }
   if (held) {
     // Tools point along +y from the grip; tip them so the head sits top right.
     held.rotation.x = 0.7;

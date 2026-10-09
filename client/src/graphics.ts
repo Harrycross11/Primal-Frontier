@@ -166,7 +166,10 @@ const SunShaftShader = {
       vec4 base = texture2D(tDiffuse, vUv);
       if (strength <= 0.0) { gl_FragColor = base; return; }
       vec2 delta = (vUv - sunUv) / 40.0 * 0.85;
-      vec2 p = vUv;
+      // Start each pixel's march a random part of a step in, so the 40 samples blur into soft
+      // rays instead of hard bands fanning out from the sun.
+      float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      vec2 p = vUv + delta * jitter;
       float decay = 1.0;
       vec3 rays = vec3(0.0);
       for (int i = 0; i < 40; i++) {
@@ -293,11 +296,12 @@ export class Graphics {
     this.gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.5, scale: 1.1 });
     this.gtao.blendIntensity = 0.85;
     // The occlusion pass draws everything with one plain material, so cut-out leaf cards would
-    // shade as solid squares. Leave anything marked noAO out of it.
+    // shade as solid squares. Leave anything marked noAO out of it, with lines, points and sprites
+    // (name tags, smoke).
     const gtao = this.gtao as unknown as { _overrideVisibility(): void; _visibilityCache: THREE.Object3D[] };
     gtao._overrideVisibility = () => {
       scene.traverse((o) => {
-        const line = (o as THREE.Points).isPoints || (o as THREE.Line).isLine;
+        const line = (o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite;
         if ((line || o.userData.noAO) && o.visible) {
           o.visible = false;
           gtao._visibilityCache.push(o);
@@ -394,7 +398,7 @@ export class Graphics {
       this.sunScreen.copy(this.camera.position).addScaledVector(SUN_DIRECTION, 500).project(this.camera);
       const u = this.shafts.uniforms;
       u.sunUv.value.set(this.sunScreen.x * 0.5 + 0.5, this.sunScreen.y * 0.5 + 0.5);
-      u.strength.value = THREE.MathUtils.smoothstep(facing, 0.2, 0.7) * 1.4 * this.sunlight;
+      u.strength.value = THREE.MathUtils.smoothstep(facing, 0.3, 0.75) * 0.8 * this.sunlight;
       u.aspect.value = this.camera.aspect;
       this.shafts.enabled = u.strength.value > 0;
       this.grade.uniforms.time.value = this.time.value;

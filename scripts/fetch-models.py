@@ -156,6 +156,9 @@ LANDMARK_PROPS = {
     'vehicle-jeep': ('70c8691c6fb64b859fbfc16babfa2c5f', 1024),
     # The minicopter.
     'vehicle-heli': ('7677d87826f449ebadb6cccba2af38ca', 1024),
+    # Its material comes as specular-glossiness, which three.js no longer reads: after fetching,
+    # convert it with gltf-transform's metalRough() and drop the leftover specular extensions.
+    'gear-backpack': ('dce182b7965546118df059f90df497dc', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.

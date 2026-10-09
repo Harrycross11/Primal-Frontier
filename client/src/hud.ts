@@ -90,6 +90,7 @@ export class Hud {
 
   toggleHelp() {
     $('help').hidden = !$('help').hidden;
+    $('help-mini').hidden = !$('help').hidden;
   }
 
   setHealth(hp: number) {
@@ -111,7 +112,7 @@ export class Hud {
     $('rads').hidden = v.rads < 1 && v.level <= 0;
     const warn = $('rad-warning');
     warn.hidden = v.level <= 0;
-    if (v.level > 0) warn.textContent = `☢ Radiation ${v.level.toFixed(1)}/s`;
+    if (v.level > 0) warn.textContent = `Radiation ${v.level.toFixed(1)}/s`;
     ($('rad-tint') as HTMLElement).style.opacity = String(Math.min(0.55, v.level * 0.08 + v.rads * 0.002));
   }
 

@@ -42,6 +42,8 @@ interface Fit {
 const FIT: Record<string, Fit> = {
   ...Object.fromEntries(BOULDERS.map((b) => [b, { width: 2.3 }])),
   log: { width: 3.2 },
+  // Worn on the survivor's back: turned so the straps face +z, against the body.
+  'gear-backpack': { height: 0.62, turn: [0, Math.PI, 0] },
   barrel: { height: 0.9 },
   // The tyre is scanned standing up; lay it flat.
   tyre: { width: 0.84, turn: [Math.PI / 2, 0, 0] },

@@ -25,9 +25,66 @@ const handleMat = () => mat('handle', () => new THREE.MeshStandardMaterial({ ...
 const ropeMat = () => mat('rope', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0xb8a27a, roughness: 1 }));
 const tapeMat = () => mat('tape', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x2e2f30, roughness: 0.85 }));
 const steelMat = () => mat('tool-steel', () => new THREE.MeshStandardMaterial({ ...gunMetalSurface(), color: 0x8a8e94, roughness: 0.4, metalness: 0.85 }));
-const flintMat = () => mat('flint', () => new THREE.MeshStandardMaterial({ ...concreteSurface(), color: 0x7d776e, roughness: 0.75, flatShading: true }));
+const flintMat = () => mat('flint', () => new THREE.MeshStandardMaterial({ ...concreteSurface(), color: 0x625c55, roughness: 0.85, flatShading: true }));
 const plain = (color: number, roughness = 0.9, metalness = 0) =>
   mat(`plain-${color}-${roughness}-${metalness}`, () => new THREE.MeshStandardMaterial({ color, roughness, metalness }));
+
+/** Blueprint paper: white lines of a hut's front and floor plan on blue, on both faces. */
+const blueprintMat = () =>
+  mat('blueprint', () => {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 384;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#245089';
+    ctx.fillRect(0, 0, 256, 384);
+    ctx.strokeStyle = 'rgba(200, 222, 255, 0.18)';
+    ctx.lineWidth = 1;
+    for (let n = 16; n < 384; n += 16) {
+      ctx.beginPath();
+      ctx.moveTo(0, n);
+      ctx.lineTo(256, n);
+      ctx.stroke();
+      if (n < 256) {
+        ctx.beginPath();
+        ctx.moveTo(n, 0);
+        ctx.lineTo(n, 384);
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = '#e8f0ff';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(14, 14, 228, 356);
+    // The front of a hut: walls, roof and a door.
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(52, 190);
+    ctx.lineTo(52, 110);
+    ctx.lineTo(128, 52);
+    ctx.lineTo(204, 110);
+    ctx.lineTo(204, 190);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.strokeRect(108, 132, 40, 58);
+    // Its floor plan below, with a doorway.
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(108, 330);
+    ctx.lineTo(52, 330);
+    ctx.lineTo(52, 226);
+    ctx.lineTo(204, 226);
+    ctx.lineTo(204, 330);
+    ctx.lineTo(148, 330);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(128, 226);
+    ctx.lineTo(128, 300);
+    ctx.stroke();
+    const map = new THREE.CanvasTexture(c);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.anisotropy = 4;
+    return new THREE.MeshStandardMaterial({ map, roughness: 0.85, side: THREE.DoubleSide });
+  });
 
 function mesh(geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
   const out = new THREE.Mesh(geo, m);
@@ -598,10 +655,18 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       return g;
     }
     case 'buildingPlan': {
-      // A rolled blueprint tied with string.
-      g.add(mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.3, 16).rotateX(Math.PI / 2), plain(0x335f94, 0.85), 0, 0.02, 0.05));
-      g.add(mesh(new THREE.CircleGeometry(0.0275, 16).rotateY(0), plain(0xd8e4f0, 0.9), 0, 0.02, 0.201));
-      for (const z of [-0.04, 0.14]) g.add(mesh(new THREE.TorusGeometry(0.029, 0.003, 4, 16), ropeMat(), 0, 0.02, z));
+      // A blueprint sheet, half unrolled, with the plan of a hut drawn on it.
+      const sheet = new THREE.PlaneGeometry(0.17, 0.26, 12, 1);
+      const p = sheet.attributes.position;
+      // A gentle curl across the sheet, as paper that has been rolled up.
+      for (let i = 0; i < p.count; i++) p.setZ(i, Math.pow((p.getX(i) + 0.085) / 0.17, 2) * 0.03);
+      sheet.computeVertexNormals();
+      const paper = blueprintMat();
+      const face = mesh(sheet, paper, 0, 0.08, 0.02);
+      g.add(face);
+      // The rest of the sheet still rolled up along its edge.
+      g.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.26, 18), plain(0x2b5585, 0.8), 0.095, 0.08, 0.05));
+      g.add(mesh(new THREE.CircleGeometry(0.0195, 18).rotateX(-Math.PI / 2), plain(0xd9e3ee, 0.9), 0.095, 0.211, 0.05));
       return g;
     }
     default: {

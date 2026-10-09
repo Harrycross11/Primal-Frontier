@@ -277,15 +277,52 @@ export function asphaltSurface(): Surface {
       const s = 256;
       ctx.fillStyle = 'rgba(176,150,80,0.5)';
       for (let y = 0; y < s; y += s / 2) ctx.fillRect(s / 2 - 3, y + s * 0.08, 6, s * 0.28);
-      // Crumbled edges and pot holes.
+      // Pot holes: ragged clusters rather than neat circles, with a darker broken rim first.
+      const holes: [number, number, number][] = [];
+      for (let n = 0; n < 4; n++) holes.push([40 + rand() * 176, rand() * s, 7 + rand() * 7]);
+      const holeShape = (grow: number) => {
+        for (const [hx, hy, hr] of holes) {
+          const r2 = mulberry32(Math.round(hx * 97 + hy));
+          for (let k = 0; k < 9; k++) {
+            const a = r2() * Math.PI * 2;
+            const d = r2() * hr * 0.7;
+            for (const oy of [-s, 0, s]) {
+              ctx.beginPath();
+              ctx.ellipse(hx + Math.cos(a) * d, hy + oy + Math.sin(a) * d, hr * (0.35 + r2() * 0.3) + grow, hr * (0.3 + r2() * 0.3) + grow, r2() * 3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+      };
+      ctx.fillStyle = 'rgba(20,18,16,0.45)';
+      holeShape(2.5);
+      // Crumbled edges: a smooth, wandering line down each side, the same at top and bottom so
+      // it tiles along the road.
+      const edge = (side: number) => {
+        const pts = 32;
+        const off: number[] = [];
+        for (let n = 0; n < pts; n++) off.push(rand());
+        const at = (y: number) => {
+          const f = (y / s) * pts;
+          const i = Math.floor(f);
+          const t = f - i;
+          const a = off[((i % pts) + pts) % pts];
+          const b = off[(i + 1) % pts];
+          const w = a + (b - a) * (t * t * (3 - 2 * t));
+          return 4 + w * 14 + Math.sin((y / s) * Math.PI * 6) * 3 + Math.sin((y / s) * Math.PI * 22) * 1.2;
+        };
+        ctx.beginPath();
+        ctx.moveTo(side < 0 ? -1 : s + 1, 0);
+        for (let y = 0; y <= s; y += 2) ctx.lineTo(side < 0 ? at(y) : s - at(y), y);
+        ctx.lineTo(side < 0 ? -1 : s + 1, s);
+        ctx.closePath();
+        ctx.fill();
+      };
       ctx.globalCompositeOperation = 'destination-out';
-      for (let y = 0; y < s; y += 2) {
-        const l = Math.max(0, 6 + Math.sin(y * 0.07) * 6 + rand() * 10);
-        const r = Math.max(0, 6 + Math.cos(y * 0.05) * 6 + rand() * 10);
-        ctx.fillRect(0, y, l, 2);
-        ctx.fillRect(s - r, y, r, 2);
-      }
-      blotches(ctx, s, rand, 7, ['#000'], 5, 16, 1);
+      ctx.fillStyle = '#000';
+      edge(-1);
+      edge(1);
+      holeShape(0);
       ctx.restore();
     },
   });

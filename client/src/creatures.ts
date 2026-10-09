@@ -409,31 +409,90 @@ function findBone(root: THREE.Object3D, name: RegExp): THREE.Object3D | null {
   return found;
 }
 
-/** A worn leather saddle on a blanket, with a horn at the front, sat on an animal's back. */
+/** Woven wool for the saddle blanket: dark red with a pale stripe near each edge. */
+let blanketMap: THREE.CanvasTexture | null = null;
+function blanketTexture(): THREE.CanvasTexture {
+  if (blanketMap) return blanketMap;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#5a2a1c';
+  ctx.fillRect(0, 0, 128, 128);
+  // Fine weave.
+  for (let y = 0; y < 128; y += 2) {
+    ctx.fillStyle = y % 4 ? 'rgba(0,0,0,0.12)' : 'rgba(255,220,180,0.05)';
+    ctx.fillRect(0, y, 128, 1);
+  }
+  // Stripes running along the animal near each edge of the cloth.
+  for (const x of [8, 112]) {
+    ctx.fillStyle = '#b89a6a';
+    ctx.fillRect(x, 0, 6, 128);
+    ctx.fillStyle = '#2a1610';
+    ctx.fillRect(x + 8, 0, 3, 128);
+  }
+  blanketMap = new THREE.CanvasTexture(c);
+  blanketMap.colorSpace = THREE.SRGBColorSpace;
+  return blanketMap;
+}
+
+/**
+ * A worn leather saddle on a woven blanket, sat on an animal's back: a dished seat with a raised
+ * cantle behind and a horn in front, a girth strap down both flanks and stirrups hanging.
+ */
 function buildSaddle(width: number, seat: number): THREE.Group {
   const g = new THREE.Group();
-  const leather = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.7 });
-  const blanket = new THREE.MeshStandardMaterial({ color: 0x7a3a22, roughness: 1 });
+  const leather = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.55 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x24160d, roughness: 0.6 });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x6b6660, roughness: 0.45, metalness: 0.8 });
+  const blanket = new THREE.MeshStandardMaterial({ map: blanketTexture(), roughness: 1, side: THREE.DoubleSide });
   const w = Math.max(0.5, width * 0.95);
-  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.62, w * 0.62, 0.7, 16, 1, true, -Math.PI * 0.42, Math.PI * 0.84), blanket);
+  const r = w * 0.62;
+  // The back's curve: the blanket and straps follow a circle of radius r centred below the seat.
+  const cy = seat - 0.08 - r;
+  const span = Math.PI * 0.8;
+  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.62, 20, 1, true, -span / 2, span), blanket);
   // Laid along the back, draped over the top and down both flanks.
   cloth.rotation.x = -Math.PI / 2;
-  cloth.position.y = seat - 0.08 - w * 0.62;
-  cloth.material.side = THREE.DoubleSide;
+  cloth.position.y = cy;
   g.add(cloth);
-  const pad = new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, 0.08, 0.5), leather);
-  pad.position.y = seat - 0.04;
-  g.add(pad);
-  const cantle = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, 0.14, 0.06), leather);
-  cantle.position.set(0, seat + 0.04, -0.24);
+  // The seat: a dished leather shell.
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), leather);
+  shell.scale.set(w * 0.34, 0.07, 0.3);
+  shell.position.y = seat - 0.05;
+  g.add(shell);
+  // The cantle rising behind the rider, and the swell and horn in front.
+  const cantle = new THREE.Mesh(new THREE.TorusGeometry(w * 0.2, 0.035, 8, 16, Math.PI), leather);
+  cantle.rotation.x = -0.35;
+  cantle.position.set(0, seat - 0.02, -0.24);
   g.add(cantle);
-  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 0.14, 8), leather);
-  horn.position.set(0, seat + 0.06, 0.24);
+  const swell = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), leather);
+  swell.scale.set(w * 0.2, 0.09, 0.08);
+  swell.position.set(0, seat - 0.02, 0.24);
+  g.add(swell);
+  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.1, 10), dark);
+  horn.position.set(0, seat + 0.1, 0.25);
   g.add(horn);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 12), dark);
+  cap.position.set(0, seat + 0.15, 0.25);
+  g.add(cap);
+  // The girth: a strap lying over the blanket and down both flanks.
+  const girth = new THREE.Mesh(new THREE.TorusGeometry(r + 0.012, 0.012, 4, 24, span), dark);
+  girth.scale.z = 3;
+  girth.rotation.z = Math.PI / 2 - span / 2;
+  girth.position.set(0, cy, 0.02);
+  g.add(girth);
+  // Stirrups on short leathers, hanging from the blanket's edges.
   for (const side of [-1, 1]) {
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.55, 0.05), leather);
-    strap.position.set(side * w * 0.45, seat - 0.35, 0.05);
-    g.add(strap);
+    const a = Math.PI / 2 - side * (span / 2);
+    const x = Math.cos(a) * (r + 0.02);
+    const y = cy + Math.sin(a) * (r + 0.02);
+    const leatherStrap = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.3, 0.035), dark);
+    leatherStrap.position.set(x, y - 0.15, -0.02);
+    g.add(leatherStrap);
+    const stirrup = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.01, 6, 14), iron);
+    stirrup.rotation.y = Math.PI / 2;
+    stirrup.position.set(x, y - 0.33, -0.02);
+    g.add(stirrup);
   }
   g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
   return g;

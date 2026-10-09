@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { type Look, defaultLook, lookColor } from '../../shared/look.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
-import { character } from './models.ts';
+import { character, model, soleMaterial } from './models.ts';
 import { PISTOLS, gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
 import { paintModel } from './paint.ts';
@@ -235,12 +235,19 @@ export class Avatar {
     // Backpack with a rolled bedroll and a canteen, unless they chose to go without.
     tight = false;
     const packStart = this.bones.torso.children.length;
-    attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
-    attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
-    attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
-    attach('torso', new THREE.CylinderGeometry(0.075, 0.075, 0.42, 16), bedroll, 0, 1.51, -0.2).rotation.z = Math.PI / 2;
-    for (const x of [-0.12, 0.12]) attach('torso', new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 1.51, -0.2).rotation.z = Math.PI / 2;
-    attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
+    const scanned = model('gear-backpack');
+    if (scanned) {
+      // The scanned canvas rucksack with its blanket roll, flask and spade, tinted toward the
+      // colour chosen in the locker.
+      attach('torso', scanned.geometry, packMaterial(soleMaterial(scanned), packColor ?? 0x6a6150), 0, PACK_AT[1], PACK_AT[2]).castShadow = true;
+    } else {
+      attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
+      attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
+      attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
+      attach('torso', new THREE.CylinderGeometry(0.075, 0.075, 0.42, 16), bedroll, 0, 1.51, -0.2).rotation.z = Math.PI / 2;
+      for (const x of [-0.12, 0.12]) attach('torso', new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 1.51, -0.2).rotation.z = Math.PI / 2;
+      attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
+    }
     if (packColor === null) for (const o of this.bones.torso.children.slice(packStart)) o.removeFromParent();
 
     // Armband in the player's colour, around the left upper arm.
@@ -671,25 +678,46 @@ export class Avatar {
   }
 }
 
+/** Where the scanned rucksack's base sits on the survivor's back, in the rest pose. */
+const PACK_AT = [0, 0.98, -0.25] as const;
+const packMats = new Map<string, THREE.Material>();
+
+/** The rucksack's scanned material, tinted toward a colour while keeping the canvas texture. */
+function packMaterial(base: THREE.MeshStandardMaterial, colour: number): THREE.Material {
+  const key = `${base.uuid}:${colour}`;
+  let m = packMats.get(key);
+  if (m) return m;
+  const tint = new THREE.Color(colour);
+  tint.multiplyScalar(1 / Math.max(tint.r, tint.g, tint.b, 0.01));
+  const out = base.clone();
+  out.color = new THREE.Color(1, 1, 1).lerp(tint, 0.45);
+  packMats.set(key, (m = out));
+  return m;
+}
+
 export function nameTag(text: string, color: number, team = false): THREE.Sprite {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 64;
+  canvas.width = 512;
+  canvas.height = 128;
   const ctx = canvas.getContext('2d')!;
-  ctx.font = '600 28px system-ui, sans-serif';
-  const w = Math.min(ctx.measureText(text).width + 34, 256);
-  ctx.fillStyle = team ? 'rgba(24,70,32,0.7)' : 'rgba(20,18,15,0.6)';
-  ctx.beginPath();
-  ctx.roundRect((256 - w) / 2, 12, w, 40, 8);
-  ctx.fill();
-  // A thin stripe in the player's colour, so names stay easy to tell apart.
-  ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
-  ctx.fillRect((256 - w) / 2 + 8, 46, w - 16, 3);
-  ctx.fillStyle = team ? '#d8f5da' : '#ece4d6';
+  // Plain lettering over a soft shadow, the way survival games name players, with a short
+  // stripe in the player's colour underneath so names stay easy to tell apart.
+  ctx.font = "600 52px 'Barlow Condensed', 'Barlow', system-ui, sans-serif";
+  ctx.letterSpacing = '5px';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128, 31);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthWrite: false }));
+  const label = text.toUpperCase();
+  const w = Math.min(ctx.measureText(label).width, 480);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = team ? '#bfe8c4' : '#ebe6da';
+  ctx.fillText(label, 256, 56, 480);
+  ctx.shadowBlur = 4;
+  ctx.fillStyle = team ? '#5fd06a' : `#${color.toString(16).padStart(6, '0')}`;
+  ctx.fillRect(256 - Math.min(w, 120) / 2, 94, Math.min(w, 120), 5);
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthWrite: false }));
   sprite.scale.set(1.4, 0.35, 1);
   return sprite;
 }
