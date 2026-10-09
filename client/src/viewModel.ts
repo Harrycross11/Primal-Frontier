@@ -183,10 +183,10 @@ export class ViewModel {
       // A chop: drawn back and up, then brought down and across.
       const s = this.swingT < 1 ? Math.sin(this.swingT * Math.PI) : 0;
       const wind = this.swingT < 0.35 ? this.swingT / 0.35 : 0;
-      rot.x = -0.5 - s * 1.3 + wind * 0.6;
+      rot.x = -0.2 - s * 1.3 + wind * 0.6;
       rot.z = 0.15 - s * 0.35;
-      // Turned a little in towards the middle, so you see the side of the head and its edge leads.
-      rot.y = 0.35;
+      // Nearly upright, turned in towards the middle: you see the side of the head, edge leading.
+      rot.y = 0.55;
       at.y += s * 0.06;
       at.z -= s * 0.12;
     }
@@ -320,10 +320,22 @@ function headFacing(item: ItemId, model: THREE.Object3D): number {
   });
   let top = -Infinity;
   for (const p of points) top = Math.max(top, p.y);
-  // The furthest point of the head from the handle: the blade's edge reaches further than the poll.
+  // The handle's line, from the middle of the shaft below the head, and the point of the head
+  // furthest from it: an axe's edge reaches further from the shaft than its poll.
+  let ax = 0;
+  let az = 0;
+  let n = 0;
+  for (const p of points) {
+    if (p.y < top * 0.3 || p.y > top * 0.55) continue;
+    ax += p.x;
+    az += p.z;
+    n++;
+  }
+  if (n) [ax, az] = [ax / n, az / n];
   let far: THREE.Vector3 | null = null;
-  for (const p of points) if (p.y >= top * 0.7 && (!far || Math.hypot(p.x, p.z) > Math.hypot(far.x, far.z))) far = p;
-  const turn = far && Math.hypot(far.x, far.z) > 0.02 ? Math.PI - Math.atan2(far.x, far.z) : 0;
+  const reach = (p: THREE.Vector3) => Math.hypot(p.x - ax, p.z - az);
+  for (const p of points) if (p.y >= top * 0.7 && (!far || reach(p) > reach(far))) far = p;
+  const turn = far && reach(far) > 0.02 ? Math.PI - Math.atan2(far.x - ax, far.z - az) : 0;
   facings.set(item, turn);
   return turn;
 }
