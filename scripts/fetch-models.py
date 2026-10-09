@@ -148,6 +148,8 @@ LANDMARK_PROPS = {
     'crate-drop': ('eaf6cbca12f944f498fc6dde845da06e', 512),
     'parachute': ('af52e08feebc4d94a244692212ac25bb', 512),
     'plane': ('549bce95137c4304b771a2b046420c6f', 512),
+    # The scrap car you can drive.
+    'vehicle-pickup': ('d52c6ed3b0ee4d9eb562f875b3c448a4', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.

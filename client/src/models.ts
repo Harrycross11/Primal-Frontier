@@ -258,8 +258,8 @@ async function load(loader: GLTFLoader, name: string) {
   if (out.length) models.set(name, out);
 }
 
-/** Rigged characters, kept whole (skeleton and skinned meshes) rather than merged. */
-const CHARACTERS = ['survivor', 'ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
+/** Rigged characters and the car, kept whole (skeleton, skinned meshes, wheels) rather than merged. */
+const CHARACTERS = ['survivor', 'ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear', 'vehicle-pickup'];
 const characters = new Map<string, THREE.Object3D>();
 /** Animations that came with a character, by name. */
 const clips = new Map<string, THREE.AnimationClip[]>();

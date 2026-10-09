@@ -32,6 +32,8 @@ import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Creatures } from './creatures.ts';
+import { Vehicles } from './vehicles.ts';
+import { VEHICLES, VEHICLE_RANGE, axes, touchesVehicle } from '../../shared/vehicles.ts';
 import { DayNight, type Fire } from './daynight.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
@@ -173,6 +175,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   effects.listener = camera;
   effects.startAmbience();
   const creatures = new Creatures(world.scene, effects);
+  const vehicles = new Vehicles(world.scene, effects, welcome.seed);
+  vehicles.sync(welcome.vehicles);
   const map = new WorldMap(welcome.seed, generateDecor(welcome.seed));
   const mapMarks = () => ({
     x: controller.position.x,
@@ -180,6 +184,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     yaw: controller.yaw,
     hounds: [...creatures.views.values()].filter((v) => v.state.owner === welcome.you.id && v.state.anim !== 'dead').map((v) => v.root.position),
     drops: [...world.deployables.values()].filter((d) => d.kind === 'supplyDrop'),
+    cars: [...vehicles.views.values()].map((v) => v.root.position),
     mates: mates().map((r) => ({ x: r.avatar.root.position.x, z: r.avatar.root.position.z, name: r.state.name })),
   });
   creatures.sync(welcome.creatures);
@@ -190,6 +195,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
   me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint);
   controller.onLand = (speed) => effects.landSound(surfaceUnder(controller.position), speed);
+  controller.onCrash = (speed) => effects.crash(controller.position.clone(), speed);
+  controller.vehicles = () => vehicles.solid();
 
   /** What a survivor is standing on: a floor or stairs of some material, or the bare ground. */
   function surfaceUnder(p: THREE.Vector3): Surface {
@@ -281,6 +288,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           r.target.set(p.x, p.y, p.z);
         }
         creatures.sync(m.creatures);
+        vehicles.sync(m.vehicles);
         break;
       case 'joined':
         addRemote(m.player);
@@ -373,6 +381,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'correct':
         controller.teleport(m.x, m.y, m.z);
         break;
+      case 'driving': {
+        driving = m.id;
+        const view = m.id === null ? undefined : vehicles.views.get(m.id);
+        const info = view ? VEHICLES[view.state.kind] : undefined;
+        controller.car = view && info ? { ...info, fuel: () => vehicles.views.get(view.state.id)?.state.fuel ?? 0 } : null;
+        controller.carSpeed = 0;
+        if (!controller.car) driving = null;
+        controller.yaw = m.yaw;
+        controller.teleport(m.x, m.y, m.z);
+        vehicles.mine = driving;
+        if (driving !== null) hud.notice(view!.state.fuel > 0 ? 'W and S to drive, A and D to steer, E to get out' : 'The tank is empty: fill it with low grade fuel', 4);
+        break;
+      }
       case 'mounted': {
         riding = m.id;
         const view = m.id === null ? undefined : creatures.views.get(m.id);
@@ -423,6 +444,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'died': {
         dead = true;
         triggerHeld = aiming = false;
+        // Thrown off whatever you were riding or driving.
+        riding = driving = vehicles.mine = creatures.mine = null;
+        controller.mount = controller.car = null;
         me.setDead(true);
         ui.hide();
         document.exitPointerLock?.();
@@ -742,6 +766,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aimHound: ReturnType<Creatures['ray']> = null;
   /** The animal you are riding, if you are. */
   let riding: number | null = null;
+  /** The car you are driving, if you are. */
+  let driving: number | null = null;
+  /** A car under the crosshair. */
+  let aimVehicle: ReturnType<Vehicles['ray']> = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
   /** The face the crosshair is on (world space), and whether it is a door rather than its wall. */
   let aimNormal: THREE.Vector3 | null = null;
@@ -795,6 +823,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       aimPlayer = null;
       aimResource = null;
       aimDeployable = null;
+      best = aimHound.t;
+    }
+    aimVehicle = vehicles.ray([o.x, o.y, o.z], [d.x, d.y, d.z], best);
+    if (aimVehicle) {
+      aimPlayer = null;
+      aimHound = null;
+      aimResource = null;
+      aimDeployable = null;
+      aim = null;
     }
   }
 
@@ -836,6 +873,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
     if (item && isExplosive(item)) return useExplosive(item);
     if (item === 'supplySignal') return throwHeld();
+    if (item === 'lowGradeFuel') {
+      if (!aimVehicle) return hud.notice('Aim at a car to fill it up');
+      if (!carInReach(aimVehicle.view.state)) return hud.notice('Get closer to fill it up');
+      net.send({ t: 'refuel', id: aimVehicle.view.state.id, slot: ui.active });
+      return me.swing();
+    }
     if (item && DOOR_KINDS.includes(item as DoorKind)) {
       const p = aim?.piece;
       if (p?.kind !== 'wall' || p.edit !== 'door') return hud.notice('Aim at a doorway: press G on a wall to make one');
@@ -855,7 +898,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         canvas.requestPointerLock?.();
       });
     }
-    if ((aimPlayer || aimHound) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
+    if ((aimPlayer || aimHound || aimVehicle) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
       if (!proposal) return;
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
@@ -927,8 +970,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   }
 
   /** E: open a furnace, box or door, authorise yourself on a tool cupboard, or pick a hemp plant. */
+  /** Close enough to a car to get in or fill it up. */
+  function carInReach(v: { kind: keyof typeof VEHICLES; x: number; z: number; yaw: number }) {
+    const view = vehicles.views.get((v as { id?: number }).id ?? -1);
+    const at = view ? { ...v, x: view.root.position.x, z: view.root.position.z, yaw: view.root.rotation.y } : v;
+    return touchesVehicle({ ...at, id: 0, y: 0, hp: 1, fuel: 0 }, controller.position.x, controller.position.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2 - 0.2);
+  }
+
   function interact() {
+    if (driving !== null) return net.send({ t: 'drive', id: null });
     if (riding !== null) return net.send({ t: 'ride', id: null });
+    if (aimVehicle) {
+      const s = aimVehicle.view.state;
+      if (s.driver !== undefined) return hud.notice('Someone is driving it');
+      if (!carInReach(s)) return hud.notice('Get closer to get in');
+      return net.send({ t: 'drive', id: s.id });
+    }
     const animal = aimHound?.view;
     if (animal && animal.state.owner === welcome.id && SPECIES[animal.species].ride && animal.state.anim !== 'dead') {
       if (!houndInReach(animal.root.position, MOUNT_RANGE)) return hud.notice('Get closer to climb on');
@@ -1045,6 +1102,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
 
   function describeTarget(): { text: string; health?: number } {
     const item = held();
+    const mine = driving === null ? undefined : vehicles.views.get(driving);
+    if (mine) {
+      const s = mine.state;
+      const info = VEHICLES[s.kind];
+      const kmh = Math.round(Math.abs(controller.carSpeed) * 3.6);
+      const fuel = s.fuel > 0 ? `Fuel ${Math.ceil(s.fuel)}/${info.tank}` : 'Out of fuel: get out and fill it with low grade fuel';
+      return { text: `${info.name}  ·  ${kmh} km/h  ·  ${fuel}  ·  E to get out`, health: s.hp / info.maxHp };
+    }
+    if (aimVehicle) {
+      const s = aimVehicle.view.state;
+      const info = VEHICLES[s.kind];
+      const fuel = `fuel ${Math.ceil(s.fuel)}/${info.tank}`;
+      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? 'E to drive' : 'Get closer to get in';
+      return { text: `${info.name} (${fuel})  ·  ${how}`, health: s.hp / info.maxHp };
+    }
     if (item && isExplosive(item) && item !== 'beancan') {
       const spot = plantSpot(item);
       if (!aimPlayer && !aimHound) return { text: spot ? `${ITEMS[item].name}  ·  Left click to stick it here` : `${ITEMS[item].name}  ·  Get close to a wall or door` };
@@ -1212,6 +1284,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       effects.plane(buildPlane(), new THREE.Vector3().fromArray(from), new THREE.Vector3().fromArray(to), speed, elapsed),
     /** Climbs on one of your animals, or gets off with null. */
     ride: (id: number | null) => net.send({ t: 'ride', id }),
+    /** Handles a message as if the server sent it: the screenshot browser is too slow to hear the real one in time. */
+    receive: (m: ServerMessage) => net.onMessage(m),
     /** Throws what is in your hands. */
     throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
@@ -1264,7 +1338,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
-    me.seated = riding !== null;
+    me.seated = riding !== null || driving !== null;
+    // Your own car goes where you drive it at once, rather than waiting on the server.
+    const car = driving === null ? undefined : vehicles.views.get(driving);
+    if (car && controller.car) {
+      const { fx, fz, rx, rz } = axes(controller.yaw);
+      const s = controller.car.seat;
+      car.carry(controller.position.x - fx * s.ahead + rx * s.left, controller.position.z - fz * s.ahead + rz * s.left, controller.yaw, controller.carSpeed);
+    }
     // Your own mount goes where you steer it at once, rather than waiting on the server.
     const mount = riding === null ? undefined : creatures.views.get(riding);
     if (mount) mount.carry(controller.position.x, controller.position.y - (controller.mount?.seat ?? 0), controller.position.z, controller.yaw + Math.PI);
@@ -1329,10 +1410,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       r.avatar.setHeld(r.state.held);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
-      r.avatar.seated = r.state.riding !== undefined;
+      r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
       r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
     creatures.update(dt);
+    vehicles.update(dt);
 
     updateAim();
     updateGhost();

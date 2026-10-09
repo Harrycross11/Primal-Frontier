@@ -96,6 +96,18 @@ import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Materi
 import { BIOMES, CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
 import { atLandmark, crateSpots, landmarks } from '../shared/landmarks.ts';
 import { rollLoot } from '../shared/loot.ts';
+import {
+  START_FUEL,
+  VEHICLES,
+  VEHICLE_RANGE,
+  VEHICLE_RESPAWN,
+  axes,
+  rayVehicle,
+  seatAt,
+  touchesVehicle,
+  vehicleSpots,
+  type VehicleState,
+} from '../shared/vehicles.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, MAX_MOUNTS, MOUNT_RANGE, SPECIES, clearOfRuins, herds, rayCreature, yawTowards, type Species } from '../shared/creatures.ts';
 import { blocked, bodyRadius, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
@@ -189,6 +201,14 @@ export interface WorldSave {
   crates?: [string, number][];
   /** Teams by id: their members' player ids, leader first. */
   teams?: [number, number[]][];
+  /** Cars where they were left, and wrecked ones' parking spots with ms until they are back. */
+  vehicles?: Vehicle[];
+  vehicleDue?: [number, number][];
+}
+
+/** A car in the world, and which parking spot it came from. */
+interface Vehicle extends VehicleState {
+  spot: number;
 }
 
 /** A code lock's code, and everyone who has opened it with the code (its owner first). */
@@ -245,6 +265,12 @@ export const BAG_COOLDOWN = 60;
 const CODE_DELAY = 1;
 /** Health a wrong code costs: the lock shocks you. */
 const CODE_SHOCK = 5;
+/** How far a car's blast reaches, and what it does to someone right beside it. */
+const CAR_BLAST = 7;
+const CAR_BLAST_DAMAGE = 70;
+/** A car going at least this fast (m/s) hurts whoever it hits: this much per m/s. */
+const RUN_OVER_SPEED = 5;
+const RUN_OVER_DAMAGE = 4;
 /** Most survivors one team can hold. */
 export const MAX_TEAM = 6;
 /** Seconds a team invite stays open. */
@@ -293,6 +319,14 @@ export class Game {
   /** Teams by id: their members' player ids, leader first. */
   private teams = new Map<number, number[]>();
   private nextTeam = 1;
+  readonly vehicles = new Map<number, Vehicle>();
+  private nextVehicleId = 1;
+  /** When each parking spot whose car was wrecked gets a new one (ms). */
+  private vehicleDue = new Map<number, number>();
+  /** Turned off for tests that need an empty map. */
+  cars = true;
+  /** When each player was last run over, so one bump hurts once. */
+  private runOverAt = new Map<number, number>();
   /** Open team invites, by who was invited. */
   private invites = new Map<number, { from: number; at: number }>();
   private fuses = new Map<number, Fuse>();
@@ -408,6 +442,7 @@ export class Game {
             hp: player.hp,
             vitals: { ...player.vitals },
             team: [...this.team(id)],
+            vehicles: this.vehicleStates(),
           },
         },
         { to: 'others', except: id, msg: { t: 'joined', player: pub } },
@@ -445,7 +480,9 @@ export class Game {
     const dt = Math.max((now - p.lastMoveAt) / 1000, 0.05);
     const horizontal = Math.hypot(x - p.x, z - p.z);
     const mount = this.mountOf(p);
-    const allowed = Math.max(PLAYER_SPRINT, mount ? SPECIES[mount.species].ride!.sprint : 0) * dt * 1.5 + 0.5;
+    const car = this.carOf(p);
+    const pace = car ? VEHICLES[car.kind].top : mount ? SPECIES[mount.species].ride!.sprint : 0;
+    const allowed = Math.max(PLAYER_SPRINT, pace) * dt * 1.5 + 0.5;
     const ground = terrainHeight(this.seed, x, z);
     const outside = Math.abs(x) > HALF_WORLD || Math.abs(z) > HALF_WORLD;
     if (horizontal > allowed || y < ground - 1 || y > ground + 60 || outside) {
@@ -488,6 +525,7 @@ export class Game {
     if (h.rider !== null && h.rider !== id) return [];
     if (Math.hypot(h.x - p.x, h.z - p.z) > MOUNT_RANGE + SPECIES[h.species].length / 2) return [notice(id, 'Get closer to climb on')];
     this.dismount(p);
+    this.getOut(p);
     h.rider = id;
     h.target = null;
     p.riding = h.id;
@@ -509,6 +547,146 @@ export class Game {
     if (p.dead) return [];
     Object.assign(p, { x, y, z });
     return [{ to: p.id, msg: { t: 'mounted', id: null, x, y, z, yaw: p.yaw } }];
+  }
+
+  /** Every car, as players see it. */
+  private vehicleStates(): VehicleState[] {
+    return [...this.vehicles.values()].map(({ spot: _, ...v }) => ({ ...v, x: round2(v.x), y: round2(v.y), z: round2(v.z), yaw: round2(v.yaw), hp: Math.round(v.hp), fuel: Math.round(v.fuel * 10) / 10 }));
+  }
+
+  /** The car a player is driving, if they are. */
+  private carOf(p: Player): Vehicle | null {
+    const v = p.driving === undefined ? undefined : this.vehicles.get(p.driving);
+    return v && v.driver === p.id ? v : null;
+  }
+
+  /** Gets in at the wheel of a car nobody is driving, or (id null) gets out of yours. */
+  drive(id: number, vehicle: number | null): Outgoing[] {
+    const p = this.alive(id);
+    if (!p) return [];
+    if (vehicle === null) return this.getOut(p);
+    const v = this.vehicles.get(vehicle);
+    if (!v) return [];
+    if (v.driver !== undefined && v.driver !== id) return [notice(id, 'Someone is already driving it')];
+    if (!touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to get in')];
+    this.dismount(p);
+    v.driver = id;
+    p.driving = v.id;
+    const [x, y, z] = seatAt(v, this.seed);
+    Object.assign(p, { x, y, z, yaw: v.yaw });
+    return [{ to: id, msg: { t: 'driving', id: v.id, x, y, z, yaw: v.yaw } }];
+  }
+
+  /** Out of the car, standing beside the driver's door (or the other side if that is blocked). */
+  private getOut(p: Player): Outgoing[] {
+    const v = p.driving === undefined ? undefined : this.vehicles.get(p.driving);
+    delete p.driving;
+    if (!v || v.driver !== p.id) return [];
+    delete v.driver;
+    const { rx, rz } = axes(v.yaw);
+    const side = VEHICLES[v.kind].width / 2 + 0.6;
+    let [x, z] = [v.x - rx * side, v.z - rz * side];
+    if (blocked(this.pieces.values(), x, terrainHeight(this.seed, x, z), z, 0.35)) [x, z] = [v.x + rx * side, v.z + rz * side];
+    const y = terrainHeight(this.seed, x, z);
+    if (p.dead) return [];
+    Object.assign(p, { x, y, z });
+    return [{ to: p.id, msg: { t: 'driving', id: null, x, y, z, yaw: p.yaw } }];
+  }
+
+  /** Pours the low grade fuel in a belt slot into a car's tank, as much as it holds. */
+  refuel(id: number, vehicle: number, slot: number): Outgoing[] {
+    const p = this.alive(id);
+    const v = this.vehicles.get(vehicle);
+    if (!p || !v || !isBeltSlot(slot)) return [];
+    const stack = p.slots[slot];
+    if (stack?.item !== 'lowGradeFuel') return [];
+    if (!touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to fill it up')];
+    const room = Math.floor(VEHICLES[v.kind].tank - v.fuel);
+    if (room <= 0) return [notice(id, 'The tank is full')];
+    const pour = Math.min(room, stack.count);
+    stack.count -= pour;
+    if (stack.count === 0) p.slots[slot] = null;
+    v.fuel += pour;
+    return [this.inventory(p), notice(id, `Poured in ${pour} fuel: the tank has ${Math.floor(v.fuel)} of ${VEHICLES[v.kind].tank}`)];
+  }
+
+  /** Damages a car; at nothing left it blows up, hurting whoever is near. */
+  private hurtVehicle(v: Vehicle, amount: number, by: Player | null, now: number): Outgoing[] {
+    if (!this.vehicles.has(v.id) || amount <= 0) return [];
+    v.hp -= amount;
+    if (v.hp > 0) return [];
+    return this.wreck(v, by, now);
+  }
+
+  private wreck(v: Vehicle, by: Player | null, now: number): Outgoing[] {
+    const driver = v.driver === undefined ? undefined : this.players.get(v.driver);
+    const out: Outgoing[] = driver ? this.getOut(driver) : [];
+    this.vehicles.delete(v.id);
+    this.vehicleDue.set(v.spot, now + VEHICLE_RESPAWN * 1000);
+    const c: Vec3 = [v.x, v.y + 0.8, v.z];
+    out.push({ to: 'all', msg: { t: 'explosion', at: c, item: 'car' } });
+    for (const victim of [...this.players.values()]) {
+      if (victim.dead) continue;
+      const dist = Math.hypot(victim.x - c[0], victim.y + 1 - c[1], victim.z - c[2]);
+      if (dist > CAR_BLAST) continue;
+      const amount = CAR_BLAST_DAMAGE * blastFalloff(dist, CAR_BLAST) * armourFactor(victim.wear, 'chest');
+      if (by && by !== victim) {
+        out.push(...this.damage(victim, amount, by, null, false, new Set<ArmourSlot>(['chest'])));
+        continue;
+      }
+      victim.hp = Math.max(0, victim.hp - amount);
+      victim.sentHp = Math.round(victim.hp);
+      out.push({ to: victim.id, msg: { t: 'health', hp: victim.sentHp, from: c } });
+      if (victim.hp <= 0) out.push(...this.kill(victim, null, null, false, 'explosion'));
+    }
+    return out;
+  }
+
+  /**
+   * Parks a car at every spot that has none (all of them, at first), carries each car along under
+   * its driver, burns its fuel, and hurts anyone it runs into at speed.
+   */
+  private tickVehicles(now: number, dt: number): Outgoing[] {
+    const out: Outgoing[] = [];
+    if (this.cars) {
+      const taken = new Set([...this.vehicles.values()].map((v) => v.spot));
+      vehicleSpots(this.seed).forEach((s, spot) => {
+        if (taken.has(spot) || (this.vehicleDue.get(spot) ?? 0) > now) return;
+        this.vehicleDue.delete(spot);
+        const v: Vehicle = { id: this.nextVehicleId++, kind: 'pickup', spot, x: s.x, y: terrainHeight(this.seed, s.x, s.z), z: s.z, yaw: s.yaw, hp: VEHICLES.pickup.maxHp, fuel: START_FUEL };
+        this.vehicles.set(v.id, v);
+      });
+    }
+    for (const v of [...this.vehicles.values()]) {
+      if (v.driver === undefined) continue;
+      const p = this.players.get(v.driver);
+      if (!p || p.dead || p.driving !== v.id) {
+        delete v.driver;
+        if (p && p.driving === v.id) delete p.driving;
+        continue;
+      }
+      // The driver sits left of the middle: the car is where their seat puts it.
+      const info = VEHICLES[v.kind];
+      const { fx, fz, rx, rz } = axes(p.yaw);
+      const x = p.x - fx * info.seat.ahead + rx * info.seat.left;
+      const z = p.z - fz * info.seat.ahead + rz * info.seat.left;
+      const moved = Math.hypot(x - v.x, z - v.z);
+      const speed = dt > 0 ? moved / dt : 0;
+      Object.assign(v, { x, z, y: terrainHeight(this.seed, x, z), yaw: p.yaw });
+      v.fuel = Math.max(0, v.fuel - moved / info.range);
+      if (speed < RUN_OVER_SPEED) continue;
+      for (const other of this.players.values()) {
+        if (other === p || other.dead || other.driving !== undefined) continue;
+        if (!touchesVehicle(v, other.x, other.z, 0.35) || now - (this.runOverAt.get(other.id) ?? -1e9) < 1000) continue;
+        this.runOverAt.set(other.id, now);
+        out.push(...this.damage(other, speed * RUN_OVER_DAMAGE, p, null, false, new Set<ArmourSlot>(['chest', 'legs'])));
+      }
+      for (const h of [...this.hounds.values()]) {
+        if (h.deadAt || h.rider !== null || !touchesVehicle(v, h.x, h.z, bodyRadius(h.species))) continue;
+        out.push(...this.hurtHound(h, speed * RUN_OVER_DAMAGE * dt * 4, { kind: 'player', id: p.id }, now));
+      }
+    }
+    return out;
   }
 
   /**
@@ -1094,6 +1272,10 @@ export class Game {
       }
       if (!onDoor) out.push(...this.damagePiece(key, piece, info.structure * share(dist), d.owner));
     }
+    for (const v of [...this.vehicles.values()]) {
+      const dist = Math.max(0, Math.hypot(v.x - c[0], v.z - c[2]) - VEHICLES[v.kind].width / 2);
+      if (dist <= info.radius) out.push(...this.hurtVehicle(v, info.structure * share(dist), this.players.get(d.owner) ?? null, now));
+    }
     for (const other of [...this.deployables.values()]) {
       if (CHARGE_KINDS.includes(other.kind) || CRATE_KINDS.includes(other.kind) || other.kind === 'supplySignal') continue;
       const dist = distanceToBox(c, deployableBox(other));
@@ -1176,6 +1358,7 @@ export class Game {
     const ends: Vec3[] = [];
     const damage = new Map<Player, { amount: number; head: boolean; zones: Set<ArmourSlot> }>();
     const bites = new Map<Hound, { amount: number; head: boolean }>();
+    const dents = new Map<Vehicle, number>();
     for (let n = 0; n < (w.pellets ?? 1); n++) {
       const pd = spreadDir(d, cone, this.rand);
       const hit = this.trace(p, from, pd, w.range);
@@ -1186,6 +1369,7 @@ export class Game {
         sum.head ||= hit.head;
         bites.set(hit.hound, sum);
       }
+      if (hit.vehicle) dents.set(hit.vehicle, (dents.get(hit.vehicle) ?? 0) + w.damage * falloff(hit.t, w.range) * 0.5);
       if (!hit.player) continue;
       const amount = w.damage * falloff(hit.t, w.range) * (hit.head ? HEADSHOT : 1) * armourFactor(hit.player.wear, hit.zone);
       const sum = damage.get(hit.player) ?? { amount: 0, head: false, zones: new Set() };
@@ -1198,6 +1382,7 @@ export class Game {
     out.push(...this.wear(p, slot));
     for (const [victim, { amount, head, zones }] of damage) out.push(...this.damage(victim, amount, p, stack.item, head, zones));
     for (const [hound, { amount, head }] of bites) out.push(...this.hurtHound(hound, amount, { kind: 'player', id: p.id }, now, head));
+    for (const [v, amount] of dents) out.push(...this.hurtVehicle(v, amount, p, now));
     out.push(this.inventory(p));
     return out;
   }
@@ -1236,6 +1421,12 @@ export class Game {
     if (hit.hound) {
       const out = this.wear(p, slot);
       out.push(...this.hurtHound(hit.hound, w.damage * (hit.head ? 1.5 : 1), { kind: 'player', id: p.id }, now, hit.head));
+      if (stack) out.push(this.inventory(p));
+      return out;
+    }
+    if (hit.vehicle) {
+      const out = this.wear(p, slot);
+      out.push(...this.hurtVehicle(hit.vehicle, w.damage * 0.5, p, now));
       if (stack) out.push(this.inventory(p));
       return out;
     }
@@ -1361,7 +1552,7 @@ export class Game {
    * Follows a ray until it hits a player, or is stopped by a building piece, a deployable or
    * the ground. Returns how far it went.
    */
-  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; hound?: Hound; head: boolean; zone: ArmourSlot } {
+  private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } {
     let t = range;
     for (const piece of this.pieces.values()) {
       for (const b of pieceBoxes(piece)) {
@@ -1375,7 +1566,13 @@ export class Game {
     }
     const ground = rayTerrain(this.seed, o, d, t);
     if (ground !== null) t = ground;
-    let best: { t: number; player?: Player; hound?: Hound; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
+    let best: { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
+    for (const v of this.vehicles.values()) {
+      // Never the car you are driving, which is all round you.
+      if (v.driver === shooter.id) continue;
+      const hit = rayVehicle(o, d, v, best.t);
+      if (hit !== null) best = { t: hit, vehicle: v, head: false, zone: 'chest' };
+    }
     for (const other of this.players.values()) {
       if (other === shooter || other.dead) continue;
       const hit = rayPlayer(o, d, other, best.t);
@@ -1512,6 +1709,8 @@ export class Game {
         .map((h) => ({ x: h.x, y: h.y, z: h.z, yaw: h.yaw, hp: h.hp, owner: h.owner!, name: h.name ?? SPECIES[h.species].name, species: h.species })),
       locks: [...this.locks],
       teams: [...this.teams],
+      vehicles: [...this.vehicles.values()].map((v) => ({ ...v, driver: undefined })),
+      vehicleDue: [...this.vehicleDue].map(([spot, at]) => [spot, Math.max(0, at - now)]),
       fuses: [...this.fuses].map(([id, f]) => [id, { in: Math.max(0, f.at - now), key: f.key, door: f.door }]),
       bagCooldowns: [...this.bagReady].filter(([, at]) => at > now).map(([id, at]) => [id, at - now]),
       crates: [...this.crateDue].map(([key, at]) => [key, Math.max(0, at - now)]),
@@ -1536,6 +1735,9 @@ export class Game {
     game.locks = new Map(save.locks ?? []);
     game.teams = new Map(save.teams ?? []);
     game.nextTeam = Math.max(0, ...game.teams.keys()) + 1;
+    for (const v of save.vehicles ?? []) game.vehicles.set(v.id, { ...v });
+    game.nextVehicleId = Math.max(0, ...game.vehicles.keys()) + 1;
+    game.vehicleDue = new Map((save.vehicleDue ?? []).map(([spot, ms]) => [spot, now + ms]));
     game.fuses = new Map((save.fuses ?? []).map(([id, f]) => [id, { at: now + f.in, key: f.key, door: f.door }]));
     game.bagReady = new Map((save.bagCooldowns ?? []).map(([id, ms]) => [id, now + ms]));
     game.crateDue = new Map((save.crates ?? []).map(([key, ms]) => [key, now + ms]));
@@ -1577,9 +1779,9 @@ export class Game {
       if (left - dt > 0) this.bagExpiry.set(bag, left - dt);
       else out.push(...this.removeDeployable(bag));
     }
-    out.push(...this.tickWildlife(now, dt));
+    out.push(...this.tickWildlife(now, dt), ...this.tickVehicles(now, dt));
     if (this.players.size > 0) {
-      out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState), creatures: this.creatures() } });
+      out.push({ to: 'all', msg: { t: 'state', players: [...this.players.values()].map(publicState), creatures: this.creatures(), vehicles: this.vehicleStates() } });
     }
     return out;
   }
@@ -2168,6 +2370,9 @@ function radProtection(p: Player): number {
   return p.wear.reduce((sum, s) => sum + (s ? (ITEMS[s.item].armour?.radiation ?? 0) : 0), 0);
 }
 
+/** Rounded to centimetres, to keep messages small. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 function publicState(p: Player): PlayerState {
   return {
     id: p.id,
@@ -2183,6 +2388,7 @@ function publicState(p: Player): PlayerState {
     wear: p.wear.map((s) => s?.item ?? null),
     look: p.look,
     ...(p.riding !== undefined && { riding: p.riding }),
+    ...(p.driving !== undefined && { driving: p.driving }),
   };
 }
 

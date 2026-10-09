@@ -177,6 +177,12 @@ wss.on('connection', (ws) => {
       case 'gather':
         deliver(game.gather(id, msg.id, now, msg.slot));
         break;
+      case 'drive':
+        deliver(game.drive(id, msg.id));
+        break;
+      case 'refuel':
+        deliver(game.refuel(id, msg.id, msg.slot));
+        break;
       case 'invite':
         deliver(game.invite(id, msg.id, now));
         break;

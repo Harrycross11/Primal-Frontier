@@ -21,6 +21,8 @@ export interface MapMarks {
   hounds: { x: number; z: number }[];
   /** Supply drops lying about, waiting to be looted. */
   drops: { x: number; z: number }[];
+  /** Cars, wherever they are. */
+  cars: { x: number; z: number }[];
   /** Your teammates, wherever they are. */
   mates: { x: number; z: number; name: string }[];
 }
@@ -206,6 +208,13 @@ export class WorldMap {
       ctx.arc(px, py, pulse, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+    }
+    // Cars: small dark blocks.
+    ctx.fillStyle = '#3c5e66';
+    for (const car of marks.cars) {
+      const [px, py] = this.toPx(car.x, car.z);
+      ctx.fillRect(px - 4, py - 2.5, 8, 5);
+      ctx.strokeRect(px - 4, py - 2.5, 8, 5);
     }
     // Teammates: green dots with their names.
     ctx.font = 'bold 11px system-ui, sans-serif';

@@ -604,8 +604,8 @@ export class Effects {
    * Something blowing up: a fireball and a flash that lights the area, a cloud of smoke,
    * debris thrown out, a boom that arrives late from far away, and a shake if it was close.
    */
-  explosion(at: THREE.Vector3, item: 'beancan' | 'satchel' | 'c4', floor: number) {
-    const size = item === 'c4' ? 1.7 : item === 'satchel' ? 1.25 : 0.9;
+  explosion(at: THREE.Vector3, item: 'beancan' | 'satchel' | 'c4' | 'car', floor: number) {
+    const size = item === 'car' ? 2.2 : item === 'c4' ? 1.7 : item === 'satchel' ? 1.25 : 0.9;
     for (let n = 0; n < 6; n++) {
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
       sprite.position.copy(at).add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(0.8 * size));
@@ -923,6 +923,65 @@ export class Effects {
   }
 
   /** A voice's path out: through a little saturation, panned, with some sent to the echo. */
+  /** Each running car's engine: a low growl that climbs with its speed. */
+  private engines = new Map<number, { level: GainNode; pan: StereoPannerNode; low: OscillatorNode; high: OscillatorNode; filter: BiquadFilterNode }>();
+
+  /**
+   * Keeps a car's engine sound going at `at`: `load` from 0 (idling) to 1 (flat out), or off with
+   * null (and gone for good once the car is).
+   */
+  engine(id: number, at: THREE.Vector3 | null, load: number | null) {
+    let e = this.engines.get(id);
+    if (load === null || !at) {
+      if (e) {
+        e.level.gain.setTargetAtTime(0, e.level.context.currentTime, 0.15);
+        const old = e;
+        setTimeout(() => [old.low, old.high].forEach((o) => o.stop()), 800);
+        this.engines.delete(id);
+      }
+      return;
+    }
+    const a = this.context();
+    if (!a) return;
+    const { ctx } = a;
+    if (!e) {
+      // Two rough oscillators a fifth apart through a low-pass: a tired old straight-six.
+      const low = ctx.createOscillator();
+      low.type = 'sawtooth';
+      const high = ctx.createOscillator();
+      high.type = 'square';
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 2;
+      const mix = ctx.createGain();
+      mix.gain.value = 0.5;
+      const level = ctx.createGain();
+      level.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      low.connect(filter);
+      high.connect(mix).connect(filter);
+      filter.connect(level).connect(pan).connect(this.audio!.out);
+      low.start();
+      high.start();
+      e = { level, pan, low, high, filter };
+      this.engines.set(id, e);
+    }
+    const { near, pan } = this.placed(at, 10);
+    const t = ctx.currentTime;
+    const hz = 34 + load * 70;
+    e.low.frequency.setTargetAtTime(hz, t, 0.12);
+    e.high.frequency.setTargetAtTime(hz * 1.5 + 1.3, t, 0.12);
+    e.filter.frequency.setTargetAtTime(260 + load * 900, t, 0.12);
+    e.level.gain.setTargetAtTime(near * (0.07 + load * 0.08), t, 0.1);
+    e.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
+  }
+
+  /** A car slamming into something. */
+  crash(at: THREE.Vector3, speed: number) {
+    this.gatherSound('scrap', at);
+    if (speed > 8) this.gatherSound('scrap', at, true);
+  }
+
   private voiceBus(pan: number, echo: number, drive = 0.55): AudioNode {
     const { ctx, out, reverb } = this.audio!;
     const input = ctx.createGain();

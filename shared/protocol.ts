@@ -8,6 +8,7 @@ import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
 import type { SurvivalCause, Vitals } from './survival.ts';
+import type { VehicleState } from './vehicles.ts';
 import type { Material, ResourceNode } from './world.ts';
 
 export interface PlayerState {
@@ -29,6 +30,8 @@ export interface PlayerState {
   look: Look;
   /** The animal they are riding. */
   riding?: number;
+  /** The car they are driving. */
+  driving?: number;
 }
 
 /** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
@@ -73,6 +76,10 @@ export type ClientMessage =
   | { t: 'use'; slot: number }
   /** Climb on your own tame animal, or (id null) get off the one you are riding. */
   | { t: 'ride'; id: number | null }
+  /** Get in a car at the wheel, or (id null) get out of the one you are driving. */
+  | { t: 'drive'; id: number | null }
+  /** Pour the low grade fuel in a belt slot into a car's tank. */
+  | { t: 'refuel'; id: number; slot: number }
   | { t: 'invite'; id: number }
   | { t: 'acceptInvite' }
   | { t: 'leaveTeam' }
@@ -113,8 +120,9 @@ export type ServerMessage =
       vitals: Vitals;
       /** Everyone on your team (you included), or just you. */
       team: number[];
+      vehicles: VehicleState[];
     }
-  | { t: 'state'; players: PlayerState[]; creatures: CreatureState[] }
+  | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }
   /** A node's amount changed: `by` gathered from it, or it grew back (no `by`). */
@@ -129,10 +137,12 @@ export type ServerMessage =
   /** A deployable was placed or changed (set), or destroyed (null). */
   | { t: 'deployable'; id: number; d: Deployable | null; by: number }
   | { t: 'correct'; x: number; y: number; z: number }
-  /** You climbed on an animal (id), or got off one (id null) at this spot. */
   | { t: 'invited'; from: string }
   /** Your team's members (you included), or none when you're on no team. */
   | { t: 'team'; members: number[] }
+  /** You got in a car (id) at the wheel, or got out of one (id null) at this spot. */
+  | { t: 'driving'; id: number | null; x: number; y: number; z: number; yaw: number }
+  /** You climbed on an animal (id), or got off one (id null) at this spot. */
   | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }
   /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
@@ -148,7 +158,7 @@ export type ServerMessage =
   /** You died. */
   | { t: 'died'; by: string | null; item: ItemId | null; cause?: DeathCause }
   /** Something blew up. */
-  | { t: 'explosion'; at: Vec3; item: 'beancan' | 'satchel' | 'c4' }
+  | { t: 'explosion'; at: Vec3; item: 'beancan' | 'satchel' | 'c4' | 'car' }
   /**
    * The supply plane crosses the map at `y`, from `from` to `to` (x, z), leaving at `start`
    * (server ms) at `speed` m/s. It drops its crate at `drop`, over the land named `over`.

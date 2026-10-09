@@ -16,6 +16,7 @@ export type ItemId =
   | 'charcoal'
   | 'gunpowder'
   | 'cloth'
+  | 'lowGradeFuel'
   // Tools
   | 'rock'
   | 'buildingPlan'
@@ -222,6 +223,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   charcoal: res('Charcoal', 'Left over when a furnace burns wood.'),
   gunpowder: res('Gunpowder', 'Made from charcoal and sulfur. Every bullet needs some.'),
   cloth: res('Cloth', 'Picked from hemp plants.'),
+  lowGradeFuel: { name: 'Low Grade Fuel', kind: 'resource', stack: 500, description: 'Rough fuel cooked up from charcoal and rags. Hold it and left click a car to fill its tank.' },
   rock: {
     name: 'Rock',
     kind: 'tool',
@@ -648,6 +650,7 @@ export const RECIPES: Recipe[] = [
   { item: 'feedSack', count: 1, cost: { cloth: 10, mushroom: 2 }, time: 3, category: 'Tools' },
 
   { item: 'gunpowder', count: 10, cost: { charcoal: 30, sulfur: 20 }, time: 3, category: 'Resources' },
+  { item: 'lowGradeFuel', count: 5, cost: { charcoal: 10, cloth: 2 }, time: 2, category: 'Resources' },
 ];
 
 export function recipeFor(item: ItemId): Recipe | undefined {
