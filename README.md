@@ -1,4 +1,4 @@
-# Primal Frontier
+# PRIME
 
 A survival sandbox set in a world after a nuclear apocalypse. Players join a server, scavenge a barren map for wood, stone, scrap, ores and hemp, craft tools and guns, build, and fight. The full vision is Rust-style survival with ARK-style creatures, Minecraft-style building and Fortnite-style characters on servers that wipe every 30 days.
 

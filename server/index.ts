@@ -349,5 +349,5 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 
 http.listen(PORT, () => {
-  console.log(`Primal Frontier server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'})`);
+  console.log(`PRIME server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'})`);
 });
