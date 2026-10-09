@@ -7,6 +7,7 @@ import type { CreatureState } from './creatures.ts';
 import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
+import type { AccountView } from './shop.ts';
 import type { SurvivalCause, Vitals } from './survival.ts';
 import type { VehicleKind, VehicleState } from './vehicles.ts';
 import type { Material, ResourceNode } from './world.ts';
@@ -55,6 +56,12 @@ export interface CraftJob {
 export type ClientMessage =
   /** `token` is a private random id the browser keeps, so a returning player gets their survivor back. */
   | { t: 'join'; name: string; look?: Look; token?: string }
+  /** From the main menu, before joining: your account and how the server is doing. */
+  | { t: 'hello'; token?: string }
+  /** Unlock a store pack with coins (from the main menu or in game). */
+  | { t: 'buy'; pack: string; token?: string }
+  /** Your coins and objectives, for the pause menu. */
+  | { t: 'getAccount' }
   | { t: 'move'; x: number; y: number; z: number; yaw: number; moving: boolean; slot: number }
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }
@@ -129,7 +136,14 @@ export type ServerMessage =
       /** Everyone on your team (you included), or just you. */
       team: number[];
       vehicles: VehicleState[];
+      /** Coins, packs and objectives; none without a token. */
+      account?: AccountView;
     }
+  /** The main menu's view: your account (if your browser has a token) and the server. */
+  | { t: 'lobby'; account: AccountView | null; online: number; max: number; wipeIn: number }
+  | { t: 'account'; account: AccountView }
+  /** You finished one of today's objectives. */
+  | { t: 'objectiveDone'; label: string; reward: number }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }

@@ -977,6 +977,26 @@ export class Effects {
   }
 
   /** A car slamming into something. */
+  /** A bright rising chime for a finished objective. */
+  objective() {
+    if (!this.audio) return;
+    const { ctx, out } = this.audio;
+    const t = ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      const start = t + i * 0.08;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.12, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.6);
+      osc.connect(gain).connect(out);
+      osc.start(start);
+      osc.stop(start + 0.65);
+    });
+  }
+
   crash(at: THREE.Vector3, speed: number) {
     this.gatherSound('scrap', at);
     if (speed > 8) this.gatherSound('scrap', at, true);

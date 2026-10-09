@@ -37,8 +37,11 @@ import { VEHICLES, VEHICLE_KINDS, VEHICLE_RANGE, axes, touchesVehicle, type Vehi
 import { DayNight, type Fire } from './daynight.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { Lobby, carStyle, renderObjectives, timeLeft } from './lobby.ts';
 import { PaintPanel, type PaintTarget } from './paintPanel.ts';
-import { PAINTS } from '../../shared/paint.ts';
+import { PauseMenu } from './pauseMenu.ts';
+import { PAINTS, paintOwned } from '../../shared/paint.ts';
+import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
@@ -118,25 +121,52 @@ function survivorToken(): string | undefined {
 // Start loading the scanned models straight away; joining waits for them.
 const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
 const picker = new LookPicker(modelsReady);
+const lobby = new Lobby(picker);
+
+// The main menu talks to the server before you play: your coins, objectives and the store.
+let net = new Net();
+const lobbyMessages = (m: ServerMessage) => {
+  if (m.t === 'lobby') lobby.update(m.account, m.online, m.max, m.wipeIn);
+  if (m.t === 'notice') lobby.toast(m.text);
+};
+net.onMessage = lobbyMessages;
+lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
+net
+  .opened()
+  .then(() => net.send({ t: 'hello', token: survivorToken() }))
+  .catch(() => lobby.update(null));
+// Keep the server count and objectives fresh while the menu is open.
+const lobbyTimer = setInterval(() => net.send({ t: 'hello', token: survivorToken() }), 20000);
 
 hud.onPlay(async (name) => {
-  const net = new Net();
   try {
     await net.opened();
-  } catch (e) {
-    hud.showJoinError((e as Error).message);
-    return;
+  } catch {
+    // The menu's connection dropped: try a fresh one.
+    net = new Net();
+    net.onMessage = lobbyMessages;
+    try {
+      await net.opened();
+    } catch (e) {
+      hud.showJoinError((e as Error).message);
+      return;
+    }
   }
   net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);
+      else lobbyMessages(m);
     };
   });
   if (welcome.t === 'full') {
     hud.showJoinError('This server is full (8 players). Try again later.');
+    // The server closes a full connection; the menu needs a new one.
+    net = new Net();
+    net.onMessage = lobbyMessages;
     return;
   }
+  clearInterval(lobbyTimer);
   await modelsReady;
   picker.dispose();
   hud.hideJoin();
@@ -253,6 +283,27 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let buildPaint = 0;
   const paintPanel = new PaintPanel();
   paintPanel.onClose = () => canvas.requestPointerLock?.();
+  paintPanel.onLocked = (pack) => hud.notice(`That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu`, 3);
+  // Coins, store packs and today's objectives.
+  let account = welcome.account ?? null;
+  paintPanel.owned = account?.packs ?? [];
+  const pause = new PauseMenu();
+  pause.setAccount(account);
+  pause.quality = gfx.quality;
+  pause.onResume = () => {
+    pause.hide();
+    canvas.requestPointerLock?.();
+  };
+  pause.onOpen = () => net.send({ t: 'getAccount' });
+  pause.onQuality = (q) => {
+    gfx.setQuality(q);
+    hud.setQuality(gfx.quality);
+  };
+  // Letting go of the mouse (Esc) in the middle of play brings up the menu.
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) return pause.hide();
+    if (!ui.open && !paintPanel.isOpen && !hud.codeOpen && !dead) pause.showMenu();
+  });
   const held = (): ItemId | null => slots[ui.active]?.item ?? null;
   const ui = new InventoryUi({
     move: (from, to, count) => {
@@ -480,6 +531,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'notice':
         hud.notice(m.text);
         break;
+      case 'account':
+        account = m.account;
+        paintPanel.owned = account.packs;
+        pause.setAccount(account);
+        break;
+      case 'objectiveDone':
+        hud.objectiveDone(m.label, m.reward);
+        effects.objective();
+        break;
       case 'plane': {
         const from = new THREE.Vector3(m.from[0], m.y, m.from[1]);
         const to = new THREE.Vector3(m.to[0], m.y, m.to[1]);
@@ -610,6 +670,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   });
   addEventListener('keydown', (e) => {
     if (hud.codeOpen) return;
+    if (pause.open) {
+      if (e.code === 'Escape') pause.onResume();
+      return;
+    }
     if (paintPanel.isOpen) {
       if (e.code === 'Escape' || e.code === 'KeyP') paintPanel.close();
       return;
@@ -1045,10 +1109,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const car = driving !== null ? vehicles.views.get(driving) : aimVehicle && carInReach(aimVehicle.view.state) && aimVehicle.view.state.driver === undefined ? aimVehicle.view : undefined;
     if (car) {
       const s = car.state;
+      const style = carStyle();
       targets.push({
         label: VEHICLES[s.kind].name,
         paint: s.paint,
         model: s.kind,
+        preset: paintOwned(style.paint, account?.packs ?? []) ? { label: `My style: ${PAINTS[style.paint].name} ${VEHICLES[style.kind].name}`, paint: style.paint, model: style.kind } : undefined,
         models: VEHICLE_KINDS.map((k) => ({ id: k, name: VEHICLES[k].name, blurb: VEHICLES[k].blurb })),
         apply: (paint, model) => {
           // Shown at once; the server's next update confirms it.
@@ -1282,6 +1348,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
     paint: () => openPaint(),
+    pause: () => pause.showMenu(),
     look: (yaw: number, pitch: number) => {
       controller.autoWalk = null;
       controller.yaw = yaw;

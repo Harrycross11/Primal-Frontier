@@ -76,6 +76,18 @@ export class Hud {
     this.noticeTimer = window.setTimeout(() => el.classList.remove('show'), seconds * 1000);
   }
 
+  private bannerTimer = 0;
+
+  /** Slides in "Objective complete" with what was done and the coins it paid. */
+  objectiveDone(label: string, reward: number) {
+    $('objective-banner-label').textContent = label;
+    $('objective-banner-reward').textContent = `+${reward}`;
+    const el = $('objective-banner');
+    el.classList.add('show');
+    clearTimeout(this.bannerTimer);
+    this.bannerTimer = window.setTimeout(() => el.classList.remove('show'), 4500);
+  }
+
   toggleHelp() {
     $('help').hidden = !$('help').hidden;
   }

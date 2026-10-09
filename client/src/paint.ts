@@ -22,49 +22,131 @@ const WEIGHT: Record<PaintMode, string> = {
 
 const cache = new Map<string, THREE.Material>();
 
+/** Smooth value noise over the texture's coordinates, for camo blotches. */
+const NOISE = `
+float paintHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float paintNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(paintHash(i), paintHash(i + vec2(1.0, 0.0)), f.x), mix(paintHash(i + vec2(0.0, 1.0)), paintHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float paintFbm(vec2 p) { return paintNoise(p) * 0.6 + paintNoise(p * 2.3 + 17.0) * 0.3 + paintNoise(p * 5.1 + 3.0) * 0.1; }
+`;
+
 /** A copy of `base` in paint `n` (shared between everything painted the same), or `base` for 0. */
 export function painted<M extends THREE.Material>(base: M, n: number, mode: PaintMode = 'all'): M {
-  const hex = PAINTS[n]?.hex ?? null;
+  const paint = PAINTS[n];
+  const hex = paint?.hex ?? null;
   if (hex === null) return base;
   const key = `${base.uuid}:${n}:${mode}`;
   const hit = cache.get(key);
   if (hit) return hit as M;
   const mat = base.clone() as M;
+  const finish = paint.finish ?? 'plain';
   const colour = { value: new THREE.Color(hex) };
-  // Glossier, less metallic: it reads as a coat of paint over whatever was there.
+  const camo = (paint.camo ?? [hex, hex, hex]).map((c) => ({ value: new THREE.Color(c) }));
   const std = mat as unknown as THREE.MeshStandardMaterial;
-  if (std.isMeshStandardMaterial && mode === 'all') {
-    std.metalness = Math.min(std.metalness, 0.3);
-    if (std.metalnessMap) std.metalness = Math.min(std.metalness, 0.15);
+  if (std.isMeshStandardMaterial) {
+    if (finish === 'chrome' || finish === 'pearl') {
+      // A polished coat: its own shine instead of the scan's rust and grime.
+      std.metalnessMap = null;
+      std.roughnessMap = null;
+      std.metalness = finish === 'chrome' ? 1 : 0.55;
+      std.roughness = finish === 'chrome' ? 0.12 : 0.28;
+    } else if (mode === 'all') {
+      // Glossier, less metallic: it reads as a coat of paint over whatever was there.
+      std.metalness = Math.min(std.metalness, 0.3);
+      if (std.metalnessMap) std.metalness = Math.min(std.metalness, 0.15);
+    }
   }
+  // How much the texture's own light and dark shows through.
+  const grain = finish === 'chrome' ? 'mix(0.8, 1.05, clamp(sqrt(lum) * 1.35, 0.0, 1.0))' : 'mix(0.42, 1.25, clamp(sqrt(lum) * 1.35, 0.0, 1.0))';
+  const tint =
+    finish === 'camo'
+      ? `paintCamo()`
+      : 'paintColour';
   mat.onBeforeCompile = (shader) => {
     base.onBeforeCompile?.(shader, undefined as never);
     shader.uniforms.paintColour = colour;
+    shader.uniforms.camoA = camo[0];
+    shader.uniforms.camoB = camo[1];
+    shader.uniforms.camoC = camo[2];
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 paintColour;')
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 paintColour;
+        uniform vec3 camoA;
+        uniform vec3 camoB;
+        uniform vec3 camoC;`,
+      )
+      // After the texture coordinates are declared, which camo needs.
+      .replace(
+        '#include <uv_pars_fragment>',
+        `#include <uv_pars_fragment>
+        ${NOISE}
+        vec3 paintCamo() {
+          #ifdef USE_MAP
+            vec2 at = vMapUv * 7.0;
+          #else
+            vec2 at = vec2(0.0);
+          #endif
+          vec3 c = paintColour;
+          c = mix(c, camoA, step(0.52, paintFbm(at)));
+          c = mix(c, camoB, step(0.6, paintFbm(at * 1.3 + 41.0)));
+          c = mix(c, camoC, step(0.66, paintFbm(at * 1.7 + 83.0)));
+          return c;
+        }`,
+      )
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
+        float paintW = 0.0;
         {
           vec3 c = diffuseColor.rgb;
           float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
           float hi = max(c.r, max(c.g, c.b));
           float sat = hi > 0.0 ? (hi - min(c.r, min(c.g, c.b))) / hi : 0.0;
-          float w = ${WEIGHT[mode]};
-          vec3 p = paintColour * mix(0.42, 1.25, clamp(sqrt(lum) * 1.35, 0.0, 1.0));
-          diffuseColor.rgb = mix(c, p, w);
+          paintW = ${WEIGHT[mode]};
+          vec3 p = ${tint} * ${grain};
+          diffuseColor.rgb = mix(c, p, paintW);
         }`,
       );
+    // Neon glows, so it shows up at night.
+    if (finish === 'neon') {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n totalEmissiveRadiance += paintColour * paintW * 0.9;',
+      );
+    }
   };
-  mat.customProgramCacheKey = () => `paint-${mode}-${base.customProgramCacheKey?.() ?? ''}`;
+  mat.customProgramCacheKey = () => `paint-${mode}-${finish}-${base.customProgramCacheKey?.() ?? ''}`;
   cache.set(key, mat);
   return mat;
 }
 
-/** CSS colour for a swatch. */
+const css = (hex: number) => `#${hex.toString(16).padStart(6, '0')}`;
+
+/** CSS background for a paint's swatch: flat, shiny, glowing or blotched to match its finish. */
 export function swatch(n: number): string {
-  const hex = PAINTS[n]?.hex;
-  return hex === null || hex === undefined ? 'transparent' : `#${hex.toString(16).padStart(6, '0')}`;
+  const p = PAINTS[n];
+  if (!p || p.hex === null) return 'transparent';
+  const c = css(p.hex);
+  switch (p.finish) {
+    case 'chrome':
+      return `linear-gradient(135deg, ${c} 0%, #ffffff 30%, ${c} 55%, #1a1a1a 100%)`;
+    case 'pearl':
+      return `radial-gradient(circle at 35% 30%, #ffffff 0%, ${c} 45%, ${c} 100%)`;
+    case 'neon':
+      return `radial-gradient(circle, #ffffff 0%, ${c} 35%, ${c} 100%)`;
+    case 'camo': {
+      const [a, b, d] = p.camo!.map(css);
+      return `radial-gradient(circle at 25% 30%, ${a} 0 22%, transparent 23%), radial-gradient(circle at 70% 65%, ${b} 0 20%, transparent 21%), radial-gradient(circle at 60% 20%, ${d} 0 14%, transparent 15%), ${c}`;
+    }
+    default:
+      return c;
+  }
 }
 
 /** Paints every mesh in a model, apart from anything under `skip` (a muzzle flash, say). */

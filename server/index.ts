@@ -6,9 +6,9 @@ import { createServer } from 'node:http';
 import { extname, join, normalize, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { WebSocket, WebSocketServer } from 'ws';
-import { TICK_RATE } from '../shared/constants.ts';
+import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
-import { Game, type Outgoing } from './game.ts';
+import { Game, cleanToken, type Outgoing } from './game.ts';
 import { openStore } from './store.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -112,6 +112,13 @@ if (saved && sameMap && !wipeDue(saved.startedAt, Date.now())) {
   game.startedAt = Date.now();
   if (saved) console.log(sameMap ? 'the world was due a wipe: starting a fresh one' : 'the map has changed: starting a fresh world');
 }
+// Coins, packs and objectives outlive wipes: they are kept apart from the world.
+game.accounts.load(
+  (await store?.loadAccounts().catch((e) => {
+    console.error('could not load accounts', e);
+    return [];
+  })) ?? [],
+);
 // START_AT='x,z' spawns everyone at one spot, for screenshots.
 if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
 const sockets = new Map<number, WebSocket>();
@@ -155,6 +162,17 @@ wss.on('connection', (ws) => {
     if (!msg || typeof msg !== 'object') return;
     const now = Date.now();
     if (id === null) {
+      // The main menu asks after your account and the server before you play.
+      if (msg.t === 'hello' || msg.t === 'buy') {
+        const token = cleanToken(msg.token);
+        if (msg.t === 'buy') {
+          const result = game.buy({ token }, String(msg.pack), now);
+          send(ws, { t: 'notice', text: result.text });
+        }
+        const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
+        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn });
+        return;
+      }
       if (msg.t !== 'join') return;
       const joined = game.join(msg.name, now, msg.look, msg.token);
       if (!joined) {
@@ -180,6 +198,16 @@ wss.on('connection', (ws) => {
       case 'drive':
         deliver(game.drive(id, msg.id));
         break;
+      case 'buy': {
+        const result = game.buy({ id }, String(msg.pack), now);
+        deliver([{ to: id, msg: { t: 'notice', text: result.text } }, ...[game.account(id, now)].filter((o) => o !== null)]);
+        break;
+      }
+      case 'getAccount': {
+        const o = game.account(id, now);
+        if (o) deliver([o]);
+        break;
+      }
       case 'refuel':
         deliver(game.refuel(id, msg.id, msg.slot));
         break;
@@ -288,7 +316,16 @@ let saving: Promise<void> = Promise.resolve();
 function save(): Promise<void> {
   if (!store) return Promise.resolve();
   const world = game.save(Date.now());
-  saving = saving.then(() => store.save(world)).catch((e) => console.error('could not save the world', e));
+  const accounts = game.accounts.dirty ? game.accounts.dump() : null;
+  game.accounts.dirty = false;
+  saving = saving
+    .then(() => store.save(world))
+    .catch((e) => console.error('could not save the world', e))
+    .then(() => (accounts ? store.saveAccounts(accounts) : undefined))
+    .catch((e) => {
+      game.accounts.dirty = true;
+      console.error('could not save accounts', e);
+    });
   return saving;
 }
 setInterval(save, SAVE_EVERY * 1000);

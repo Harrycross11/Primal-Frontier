@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Primal Frontier</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800&family=Barlow+Condensed:ital,wght@0,600;0,800;0,900;1,800;1,900&display=swap" rel="stylesheet" />
     <style>
       :root {
         --ink: #f4ead8;
@@ -16,44 +19,130 @@
         font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
       #game canvas { display: block; }
 
-      #join { position: fixed; inset: 0; display: grid; place-items: center;
-        background: radial-gradient(ellipse at 50% 30%, #6b5a46 0%, #2a241e 70%); }
+      .card { text-align: center; padding: 32px 32px; max-width: 420px; width: calc(100% - 32px); }
+      /* ---------- Main menu ---------- */
+      #join { position: fixed; inset: 0; overflow: hidden; font-family: 'Barlow', system-ui, sans-serif;
+        background: radial-gradient(ellipse 80% 60% at 35% 70%, rgba(255,150,70,.28), transparent 70%),
+          linear-gradient(to top, #0b0907 0%, #1d140d 28%, #4a2a17 55%, #a5562b 80%, #e39a55 100%); }
       #join[hidden] { display: none; }
-      .card { text-align: center; padding: 40px 36px; max-width: 420px; width: calc(100% - 32px); }
-      .title { font-size: 52px; font-weight: 900; letter-spacing: 2px; line-height: 1; margin: 0;
-        color: #ffd28a; text-shadow: 0 4px 0 #7a3a12, 0 8px 24px rgba(0,0,0,.5); }
-      .tagline { margin: 12px 0 28px; opacity: .8; }
-      #name { width: 100%; padding: 14px 16px; font-size: 18px; border-radius: 12px; border: 2px solid #8a7356;
-        background: rgba(0,0,0,.35); color: var(--ink); outline: none; }
-      #name:focus { border-color: var(--accent); }
-      #play { margin-top: 14px; width: 100%; padding: 14px; font-size: 20px; font-weight: 800; border: 0;
-        border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; box-shadow: 0 4px 0 #9a4614; }
+      #join::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 34%; pointer-events: none;
+        background: linear-gradient(to top, #0b0907 20%, transparent); }
+      #join::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: radial-gradient(ellipse at 40% 55%, transparent 40%, rgba(0,0,0,.65) 100%); }
+      #look-preview { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+      .lobby-ui { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; pointer-events: none; }
+      .lobby-ui > * { pointer-events: auto; }
+      .lobby-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; background: linear-gradient(to bottom, rgba(0,0,0,.7), transparent); }
+      .brand { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-style: italic; font-size: 30px; line-height: .82; letter-spacing: 1px; color: #ffd28a;
+        text-shadow: 0 3px 0 #7a3a12; white-space: nowrap; }
+      .brand span { display: block; font-size: 17px; letter-spacing: 6px; color: #fff; text-shadow: none; }
+      #lobby-tabs { display: flex; gap: 6px; flex: 1; }
+      #lobby-tabs button { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 1.5px; padding: 8px 18px; color: rgba(255,255,255,.7);
+        background: none; border: 0; border-bottom: 4px solid transparent; cursor: pointer; text-transform: uppercase; transition: color .15s; }
+      #lobby-tabs button:hover { color: #fff; }
+      #lobby-tabs button.on { color: #fff; border-bottom-color: #ffc23a; }
+      .lobby-me { display: flex; align-items: center; gap: 10px; }
+      .coins { display: flex; align-items: center; gap: 6px; padding: 6px 12px 6px 8px; background: rgba(0,0,0,.55); border-radius: 6px; font-weight: 800; font-size: 18px; }
+      .coin { display: inline-block; width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3b0, #ffc23a 45%, #b36d0c); box-shadow: inset 0 0 0 2px #8a4f06; vertical-align: -4px; }
+      #lobby-name-chip { padding: 6px 12px; background: rgba(0,0,0,.55); border-radius: 6px; font-weight: 700; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .page { display: none; flex: 1; min-height: 0; padding: 12px 28px 22px; position: relative; }
+      .page.on { display: flex; }
+      .side { margin-left: auto; width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+      .objective { padding: 8px 0; }
+      .panel-dark { background: rgba(10,8,6,.78); border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 16px 18px; backdrop-filter: blur(6px); }
+      .panel-dark h3, .page h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 10px; }
+      .panel-dark h3 { font-size: 20px; display: flex; justify-content: space-between; align-items: baseline; }
+      .panel-dark h3 small { font-family: 'Barlow', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0; opacity: .6; text-transform: none; }
+      .objective { padding: 10px 0; border-top: 1px solid rgba(255,255,255,.07); }
+      .objective:first-of-type { border-top: 0; }
+      .objective .row { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 15px; }
+      .objective .reward { display: flex; align-items: center; gap: 4px; color: #ffd15a; font-weight: 800; white-space: nowrap; }
+      .objective .reward .coin { width: 15px; height: 15px; }
+      .objective .track { height: 6px; margin-top: 6px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; }
+      .objective .track i { display: block; height: 100%; background: linear-gradient(90deg, #ffb02e, #ffd75a); }
+      .objective .count { font-size: 12px; opacity: .6; margin-top: 3px; }
+      .objective.done .row { opacity: .6; }
+      .objective.done .track i { background: #6fd36a; }
+      .play-box { margin-top: auto; }
+      .mode-card { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 6px; background: linear-gradient(135deg, rgba(255,140,60,.25), rgba(0,0,0,.6)); border: 1px solid rgba(255,190,110,.35); margin-bottom: 10px; }
+      .mode-card .mode { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-style: italic; font-size: 26px; line-height: 1; }
+      .mode-card .meta { font-size: 13px; opacity: .8; margin-top: 3px; }
+      .field-label { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .6; margin-bottom: 4px; }
+      #name { width: 100%; padding: 12px 14px; font-size: 17px; font-weight: 700; border-radius: 4px; border: 1px solid rgba(255,255,255,.18);
+        background: rgba(0,0,0,.5); color: var(--ink); outline: none; font-family: inherit; }
+      #name:focus { border-color: #ffc23a; }
+      #play { margin-top: 10px; width: 100%; padding: 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 38px; font-weight: 900; font-style: italic; letter-spacing: 2px;
+        border: 0; border-radius: 4px; background: linear-gradient(#ffe066, #ffb81c); color: #2a1a00; cursor: pointer; box-shadow: 0 6px 0 #b77a00, 0 10px 30px rgba(255,180,30,.35);
+        transition: transform .08s; text-transform: uppercase; }
+      #play:hover { transform: translateY(-1px); filter: brightness(1.06); }
+      #play:active { transform: translateY(3px); box-shadow: 0 3px 0 #b77a00; }
       #play:disabled { opacity: .6; cursor: wait; }
-      #loading { margin-top: 12px; font-size: 13px; opacity: .8; }
+      #loading { margin-top: 10px; font-size: 13px; opacity: .85; }
       #loading[hidden] { display: none; }
-      #loading .bar { height: 6px; margin-top: 6px; border-radius: 3px; background: rgba(0,0,0,.35); overflow: hidden; }
-      #loading-fill { width: 0; height: 100%; background: var(--accent); transition: width .2s; }
-      #join-error { min-height: 22px; margin-top: 12px; color: #ffb199; }
-      #join { overflow-y: auto; }
-      #look { margin-top: 14px; text-align: left; border: 2px solid #8a7356; border-radius: 12px; background: rgba(0,0,0,.25); }
-      #look summary { cursor: pointer; padding: 10px 14px; font-weight: 700; color: #ffd28a; }
-      #look[open] { width: min(640px, calc(100vw - 32px)); position: relative; left: 50%; transform: translateX(-50%); }
-      .look-body { display: flex; gap: 12px; padding: 0 12px 12px; align-items: center; }
-      #look-preview { width: 200px; height: 300px; flex: none; border-radius: 10px; background: radial-gradient(ellipse at 50% 40%, #7a6a56, #3a3128); }
-      .look-body > div { flex: 1; min-width: 0; }
-      .look-row { display: grid; grid-template-columns: 78px 32px 1fr 32px; align-items: center; gap: 4px; margin: 3px 0; font-size: 14px; }
-      .look-label { opacity: .75; }
-      .look-value { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .look-row button, .look-buttons button { height: 32px; border: 0; border-radius: 8px; background: rgba(255,255,255,.12); color: var(--ink); font-size: 18px; cursor: pointer; }
-      .look-row button:hover, .look-buttons button:hover { background: rgba(255,255,255,.22); }
-      .look-buttons { display: flex; gap: 8px; margin-top: 8px; }
-      .look-buttons button { flex: 1; font-size: 14px; }
-      @media (max-width: 520px) {
-        .look-body { flex-direction: column; }
-        #look-preview { width: 100%; height: 240px; }
-        .look-body > div { width: 100%; }
+      #loading .bar { height: 5px; margin-top: 6px; border-radius: 3px; background: rgba(0,0,0,.45); overflow: hidden; }
+      #loading-fill { width: 0; height: 100%; background: #ffc23a; transition: width .2s; }
+      #join-error { min-height: 20px; margin-top: 8px; color: #ffb199; font-weight: 600; }
+      .lobby-hint { position: absolute; left: 28px; bottom: 22px; font-size: 13px; opacity: .65; line-height: 1.6; max-width: 46%; }
+      /* Store */
+      .page.store { flex-direction: column; overflow-y: auto; }
+      .store-head { display: flex; align-items: baseline; gap: 14px; }
+      .page h2 { font-size: 40px; font-style: italic; font-weight: 900; margin: 4px 0 2px; }
+      .store-sub { opacity: .7; margin-bottom: 14px; }
+      .pack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+      .pack { position: relative; border-radius: 6px; overflow: hidden; background: #15100c; border: 2px solid rgba(255,255,255,.1); display: flex; flex-direction: column; transition: transform .12s, border-color .12s; }
+      .pack:hover { transform: translateY(-3px); border-color: #ffc23a; }
+      .pack .art { height: 150px; position: relative; display: flex; align-items: flex-end; padding: 10px; }
+      .pack .art .chips { display: flex; gap: 6px; }
+      .pack .art .chips i { width: 30px; height: 30px; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,.6), inset 0 0 0 2px rgba(255,255,255,.4); }
+      .pack .tag { position: absolute; top: 10px; left: 10px; padding: 3px 8px; background: #ffc23a; color: #2a1a00; font-weight: 900; font-size: 11px; letter-spacing: 1px; border-radius: 3px; }
+      .pack .info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+      .pack .name { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 800; text-transform: uppercase; line-height: 1; }
+      .pack .blurb { font-size: 13px; opacity: .7; }
+      .pack button { margin-top: auto; padding: 9px; border: 0; border-radius: 4px; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 800; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; gap: 6px; background: #ffc23a; color: #2a1a00; }
+      .pack button.owned { background: rgba(111,211,106,.2); color: #8ff08a; cursor: default; }
+      .pack button.short { background: rgba(255,255,255,.12); color: var(--ink); }
+      .bundles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 8px; }
+      .bundle { padding: 14px; border-radius: 6px; background: linear-gradient(160deg, #2a1d10, #120d09); border: 1px solid rgba(255,194,58,.25); text-align: center; }
+      .bundle .n { font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 6px; }
+      .bundle button { margin-top: 8px; width: 100%; padding: 7px; border: 0; border-radius: 4px; font-weight: 800; background: rgba(255,255,255,.1); color: rgba(255,255,255,.55); cursor: not-allowed; }
+      .store-note { font-size: 12px; opacity: .55; margin-top: 8px; }
+      .store-section { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 2px; text-transform: uppercase; margin: 22px 0 4px; }
+      /* Locker (character) and garage (car) */
+      .locker .look-row { display: grid; grid-template-columns: 82px 34px 1fr 34px; align-items: center; gap: 4px; margin: 4px 0; font-size: 14px; }
+      .look-label { opacity: .7; font-weight: 700; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+      .look-value { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+      .look-row button, .look-buttons button, .garage-models button { height: 34px; border: 0; border-radius: 4px; background: rgba(255,255,255,.1); color: var(--ink); font-size: 18px; cursor: pointer; font-family: inherit; }
+      .look-row button:hover, .look-buttons button:hover, .garage-models button:hover { background: rgba(255,255,255,.2); }
+      .look-buttons { display: flex; gap: 8px; margin-top: 10px; }
+      .look-buttons button { flex: 1; font-size: 14px; font-weight: 700; }
+      .garage-models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .garage-models button { height: auto; padding: 8px 10px; text-align: left; outline: 2px solid transparent; }
+      .garage-models button b { display: block; font-size: 15px; }
+      .garage-models button span { font-size: 12px; opacity: .7; }
+      .garage-models button.on { outline-color: #ffc23a; background: rgba(255,194,58,.16); }
+      .garage-stats { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; font-size: 12px; margin-top: 10px; align-items: center; }
+      .garage-stats i { display: block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ffb02e, #ffd75a); }
+      #garage-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin-top: 6px; max-height: 34vh; overflow-y: auto; padding: 4px; }
+      #garage-swatches .paint-group { grid-column: 1 / -1; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .7; margin-top: 4px; }
+      #garage-swatches button { aspect-ratio: 1; border-radius: 50%; border: 0; cursor: pointer; background: rgba(255,255,255,.12); font-size: 9px; font-weight: 800; color: var(--ink);
+        outline: 3px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); position: relative; }
+      #garage-swatches button.on { outline-color: #fff; }
+      #garage-swatches button.locked { opacity: .45; }
+      #garage-swatches button.locked::after { content: '🔒'; position: absolute; right: -3px; bottom: -3px; font-size: 10px; }
+      .garage-note { font-size: 12px; opacity: .65; margin-top: 10px; line-height: 1.5; }
+      #lobby-toast { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); z-index: 5; padding: 10px 18px; border-radius: 4px; background: rgba(10,8,6,.9);
+        border-left: 4px solid #ffc23a; font-weight: 700; opacity: 0; transition: opacity .3s; pointer-events: none; }
+      #lobby-toast.show { opacity: 1; }
+      @media (max-width: 760px) {
+        .lobby-top { flex-wrap: wrap; gap: 8px 14px; padding: 10px 16px; }
+        #lobby-tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
+        #lobby-tabs button { font-size: 17px; padding: 6px 10px; }
+        .page { padding: 8px 16px 16px; }
+        .side { width: 100%; margin-left: 0; margin-top: auto; }
+        .lobby-hint { display: none; }
+        .page.play .side { max-height: 100%; overflow-y: auto; }
       }
-      .controls { margin-top: 18px; font-size: 13px; opacity: .7; line-height: 1.6; }
 
       #hud[hidden] { display: none; }
       #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
@@ -147,15 +236,52 @@
       #code .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
       #code button { padding: 10px 20px; font-size: 16px; font-weight: 800; border: 0; border-radius: 10px; cursor: pointer; background: rgba(255,255,255,.12); color: var(--ink); }
       #code #code-ok { background: var(--accent); color: #1d120a; }
+      /* ---------- Pause menu and objective banner ---------- */
+      #pause { position: fixed; inset: 0; z-index: 45; display: flex; gap: 40px; padding: 48px 56px;
+        background: linear-gradient(90deg, rgba(8,6,4,.92) 0%, rgba(8,6,4,.75) 45%, rgba(8,6,4,.45) 100%); backdrop-filter: blur(3px); font-family: 'Barlow', system-ui, sans-serif; }
+      #pause[hidden] { display: none; }
+      .pause-left { display: flex; flex-direction: column; gap: 4px; width: 280px; flex: none; }
+      .pause-left .brand { margin-bottom: 26px; font-size: 38px; }
+      .pause-left .brand span { font-size: 20px; }
+      .pause-left button { text-align: left; padding: 10px 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+        color: rgba(255,255,255,.75); background: none; border: 0; border-left: 4px solid transparent; cursor: pointer; }
+      .pause-left button:hover { color: #fff; background: rgba(255,255,255,.06); }
+      .pause-left button.on { color: #fff; border-left-color: #ffc23a; background: rgba(255,194,58,.08); }
+      .pause-left .pause-big { margin-bottom: 14px; background: linear-gradient(#ffe066, #ffb81c); color: #2a1a00; border-radius: 3px; font-size: 30px; font-style: italic; }
+      .pause-left .pause-big:hover { background: linear-gradient(#ffe880, #ffc030); color: #2a1a00; }
+      #pause-leave { margin-top: auto; font-size: 18px !important; color: #ff9c86 !important; }
+      .pause-right { flex: 1; max-width: 560px; align-self: center; }
+      .pause-coins { margin-top: 12px; font-size: 13px; opacity: .8; display: flex; align-items: center; gap: 6px; }
+      .seg { display: inline-flex; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.15); }
+      .seg button { padding: 8px 18px; border: 0; background: none; color: var(--ink); font-weight: 700; cursor: pointer; font-family: inherit; }
+      .seg button.on { background: #ffc23a; color: #2a1a00; }
+      .pause-note { font-size: 13px; opacity: .65; }
+      .keys { width: 100%; border-collapse: collapse; font-size: 14px; }
+      .keys td { padding: 6px 0; border-top: 1px solid rgba(255,255,255,.07); }
+      .keys td:last-child { text-align: right; opacity: .9; }
+      kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 3px; background: rgba(255,255,255,.12); border-bottom: 2px solid rgba(0,0,0,.4); font: 700 12px 'Barlow', sans-serif; text-align: center; }
+      #objective-banner { position: fixed; right: 16px; top: 120px; z-index: 30; min-width: 260px; padding: 10px 16px 10px 14px; border-left: 5px solid #ffc23a;
+        background: linear-gradient(90deg, rgba(20,14,8,.95), rgba(20,14,8,.75)); font-family: 'Barlow', sans-serif; transform: translateX(120%); transition: transform .35s cubic-bezier(.2,.9,.3,1.2); pointer-events: none; }
+      #objective-banner.show { transform: none; }
+      #objective-banner small { display: block; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #ffc23a; }
+      #objective-banner b { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 800; }
+      #objective-banner .reward { display: flex; align-items: center; gap: 5px; color: #ffd15a; font-weight: 800; }
+      @media (max-width: 760px) {
+        #pause { flex-direction: column; padding: 20px 16px; gap: 12px; overflow-y: auto; }
+        .pause-left { width: 100%; }
+        .pause-left .brand { display: none; }
+      }
       #paint { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.35); z-index: 40; }
       #paint[hidden] { display: none; }
-      #paint .card { background: var(--panel); backdrop-filter: blur(6px); border-radius: 16px; padding: 20px 24px; width: min(460px, calc(100vw - 32px)); }
+      #paint .card { background: var(--panel); backdrop-filter: blur(6px); border-radius: 16px; padding: 20px 24px; width: min(460px, calc(100vw - 32px)); max-width: none; text-align: left; }
       #paint h2 { margin: 0 0 12px; font-size: 18px; }
       #paint button { font-family: inherit; color: var(--ink); border: 0; cursor: pointer; }
       #paint-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
       #paint-tabs[hidden], #paint-models[hidden], #paint-all-row[hidden] { display: none; }
       #paint-tabs button { padding: 6px 12px; border-radius: 8px; background: rgba(255,255,255,.1); font-size: 13px; font-weight: 700; }
       #paint-tabs button.on { background: var(--accent); color: #1d120a; }
+      #paint-preset { width: 100%; margin-bottom: 10px; padding: 9px 12px; border-radius: 6px; background: linear-gradient(90deg, rgba(255,194,58,.3), rgba(255,194,58,.1)) !important; font-weight: 800; text-align: left; }
+      #paint-preset[hidden] { display: none; }
       #paint-models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
       #paint-models button { padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.08); text-align: left; outline: 2px solid transparent; }
       #paint-models button b { display: block; font-size: 14px; }
@@ -164,6 +290,10 @@
       #paint-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
       #paint-swatches button { aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); font-size: 10px; font-weight: 800; outline: 3px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
       #paint-swatches button.on { outline-color: var(--ink); }
+      #paint-swatches { max-height: 46vh; overflow-y: auto; padding: 4px; }
+      #paint-swatches .paint-group { grid-column: 1 / -1; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .7; margin-top: 6px; }
+      #paint-swatches button.locked { opacity: .45; position: relative; }
+      #paint-swatches button.locked::after { content: '🔒'; position: absolute; right: -3px; bottom: -3px; font-size: 11px; }
       #paint-name { margin-top: 10px; font-size: 13px; opacity: .8; }
       #paint-all-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; }
       #paint .row { display: flex; justify-content: flex-end; margin-top: 14px; }
@@ -282,32 +412,103 @@
       #disconnected { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7);
         font-size: 20px; font-weight: 700; }
       #disconnected[hidden] { display: none; }
+      /* ---------- In-game theme: sharper, darker panels like Rust and COD ---------- */
+      :root { --panel: rgba(12, 10, 8, 0.78); --accent: #ffc23a; }
+      html, body { font-family: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      #top-left, #target, .res, .kill, .pickup, #vitals, #ammo, #map .card, #notice, #tooltip { border-radius: 4px; border: 1px solid rgba(255,255,255,.07); }
+      #top-left { border-left: 3px solid var(--accent); }
+      #land-name { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
+      #ammo b { font-family: 'Barlow Condensed', sans-serif; font-size: 34px; font-weight: 800; }
+      .vital .bar { border-radius: 2px; }
+      .slot { border-radius: 4px; background: rgba(12,10,8,.72); }
+      .slot.active { border-color: var(--accent); background: rgba(255,194,58,.16); box-shadow: 0 0 0 1px rgba(255,194,58,.35), 0 0 18px rgba(255,194,58,.18); }
+      #screen { background: radial-gradient(ellipse at center, rgba(10,8,6,.55), rgba(5,4,3,.88)); backdrop-filter: blur(4px); }
+      .panel { background: rgba(14,11,9,.92); border: 1px solid rgba(255,255,255,.08); border-top: 3px solid var(--accent); border-radius: 4px; }
+      .panel h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: 2px; opacity: 1; }
+      .panel h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 800; letter-spacing: 1.5px; opacity: .7; }
+      .tabs button { border-radius: 3px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; }
+      .tabs button.on { background: var(--accent); color: #2a1a00; }
+      .recipe { border-radius: 3px; border-left: 3px solid transparent; }
+      .recipe.on { border-left-color: var(--accent); }
+      #notice { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: .5px; border-left: 4px solid var(--accent); }
+      #death { background: radial-gradient(ellipse at center, rgba(60,8,4,.55), rgba(10,2,1,.9)); }
+      #death .card { border-radius: 4px; border-top: 3px solid #ff5a3c; }
+      #death h1 { font-family: 'Barlow Condensed', sans-serif; font-style: italic; font-weight: 900; font-size: 64px; }
+      #bags button, #paint .card, #code .card { border-radius: 4px; }
+      #paint .card, #code .card { background: rgba(14,11,9,.95); border-top: 3px solid var(--accent); }
+      #paint h2, #code h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: 1.5px; text-transform: uppercase; }
+      #paint-tabs button { border-radius: 3px; }
+      #paint-done, #code #code-ok { border-radius: 4px !important; }
+      #help { border-radius: 4px; }
     </style>
   </head>
   <body>
     <div id="game"></div>
 
     <div id="join">
-      <div class="card">
-        <h1 class="title">PRIMAL<br />FRONTIER</h1>
-        <p class="tagline">The world ended. Scavenge, build, survive.</p>
-        <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
-        <details id="look">
-          <summary>Customise your survivor</summary>
-          <div class="look-body">
-            <canvas id="look-preview"></canvas>
-            <div>
+      <canvas id="look-preview"></canvas>
+      <div class="lobby-ui">
+        <header class="lobby-top">
+          <div class="brand">PRIMAL<span>FRONTIER</span></div>
+          <nav id="lobby-tabs">
+            <button data-tab="play" class="on">Play</button>
+            <button data-tab="store">Store</button>
+            <button data-tab="character">Character</button>
+            <button data-tab="car">Car</button>
+          </nav>
+          <div class="lobby-me"><div class="coins" title="Coins"><span class="coin"></span><b id="coin-count">–</b></div><div id="lobby-name-chip">Survivor</div></div>
+        </header>
+
+        <section class="page play on" data-page="play">
+          <div class="lobby-hint">WASD move · Shift sprint · Space jump · Mouse look<br />Left click hit, build or shoot · Right click aim · R reload · Tab inventory · E use · P paint · Esc menu</div>
+          <div class="side">
+            <div class="panel-dark objectives">
+              <h3>Daily objectives <small id="objective-reset"></small></h3>
+              <div id="objective-list"><div class="objective"><div class="row">Connecting…</div></div></div>
+            </div>
+            <div class="play-box panel-dark">
+              <div class="mode-card"><div><div class="mode">WASTELAND SURVIVAL</div><div class="meta" id="server-meta">Finding the server…</div></div></div>
+              <div class="field-label">Survivor name</div>
+              <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
+              <button id="play">Play</button>
+              <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
+              <div id="join-error"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page store" data-page="store">
+          <div class="store-head"><h2>Item shop</h2></div>
+          <div class="store-sub">Packs of paint finishes for your cars, bases, guns and tools. Earn coins by finishing daily objectives.</div>
+          <div class="pack-grid" id="store-packs"></div>
+          <div class="store-section">Get coins</div>
+          <div class="bundles" id="coin-bundles"></div>
+          <div class="store-note" id="bundle-note">Buying coins with real money is coming soon.</div>
+        </section>
+
+        <section class="page character" data-page="character">
+          <div class="side">
+            <div class="panel-dark locker">
+              <h3>Locker</h3>
               <div id="look-rows"></div>
               <div class="look-buttons"><button type="button" id="look-random">Random</button><button type="button" id="look-reset">As scanned</button></div>
             </div>
           </div>
-        </details>
-        <button id="play">Enter the wasteland</button>
-        <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
-        <div id="join-error"></div>
-        <div class="controls">WASD move · Shift sprint · Space jump · Mouse look<br />
-          Left click hit, build or shoot · Right click aim · R reload · 1–6 belt · Tab inventory and crafting · E open</div>
+        </section>
+
+        <section class="page car" data-page="car">
+          <div class="side">
+            <div class="panel-dark garage">
+              <h3>Garage</h3>
+              <div class="garage-models" id="garage-models"></div>
+              <div class="garage-stats" id="garage-stats"></div>
+              <div id="garage-swatches"></div>
+              <div class="garage-note">This is your car style. In the game, stand by any car, press <b>P</b> and pick <b>My style</b> to make it yours.</div>
+            </div>
+          </div>
+        </section>
       </div>
+      <div id="lobby-toast"></div>
     </div>
 
     <div id="hud" hidden>
@@ -337,7 +538,47 @@
       </div>
       <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><div id="bags"></div><button id="respawn">Respawn somewhere random</button></div></div>
       <div id="code" hidden><div class="card"><h2 id="code-title">Enter the code</h2><input id="code-input" inputmode="numeric" maxlength="4" autocomplete="off" /><div class="row"><button id="code-cancel">Cancel</button><button id="code-ok">OK</button></div></div></div>
-      <div id="paint" hidden><div class="card"><div id="paint-tabs"></div><h2 id="paint-title">Paint</h2><div id="paint-models"></div><div id="paint-swatches"></div><div id="paint-name"></div><label id="paint-all-row"><input type="checkbox" id="paint-all" /> Paint the whole base around it</label><div class="row"><button id="paint-done">Done</button></div></div></div>
+      <div id="paint" hidden><div class="card"><div id="paint-tabs"></div><h2 id="paint-title">Paint</h2><button id="paint-preset" hidden></button><div id="paint-models"></div><div id="paint-swatches"></div><div id="paint-name"></div><label id="paint-all-row"><input type="checkbox" id="paint-all" /> Paint the whole base around it</label><div class="row"><button id="paint-done">Done</button></div></div></div>
+      <div id="objective-banner"><small>Objective complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin"></span><span id="objective-banner-reward"></span></span></div>
+      <div id="pause" hidden>
+        <div class="pause-left">
+          <div class="brand">PRIMAL<span>FRONTIER</span></div>
+          <button id="pause-resume" class="pause-big">Resume</button>
+          <button data-section="objectives" class="on">Objectives</button>
+          <button data-section="settings">Settings</button>
+          <button data-section="controls">Controls</button>
+          <button id="pause-leave">Leave to main menu</button>
+        </div>
+        <div class="pause-right">
+          <div class="panel-dark pause-page" data-page="objectives">
+            <h3>Daily objectives <small id="pause-reset"></small></h3>
+            <div id="pause-objectives"></div>
+            <div class="pause-coins"><span class="coin"></span><b id="pause-coins">–</b> coins · spend them in the store on the main menu</div>
+          </div>
+          <div class="panel-dark pause-page" data-page="settings" hidden>
+            <h3>Graphics</h3>
+            <div id="pause-quality" class="seg"><button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button></div>
+            <p class="pause-note">Lower settings run faster on older computers. <kbd>O</kbd> also switches in game.</p>
+          </div>
+          <div class="panel-dark pause-page" data-page="controls" hidden>
+            <h3>Controls</h3>
+            <table class="keys">
+              <tr><td>Move · sprint · jump</td><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>Shift</kbd> · <kbd>Space</kbd></td></tr>
+              <tr><td>Hit, gather, build, shoot</td><td>Left click</td></tr>
+              <tr><td>Aim · next building piece</td><td>Right click</td></tr>
+              <tr><td>Reload · building material</td><td><kbd>R</kbd></td></tr>
+              <tr><td>Belt</td><td><kbd>1</kbd>–<kbd>6</kbd> or mouse wheel</td></tr>
+              <tr><td>Inventory and crafting</td><td><kbd>Tab</kbd></td></tr>
+              <tr><td>Use, open, ride, drive</td><td><kbd>E</kbd></td></tr>
+              <tr><td>Edit a wall</td><td><kbd>G</kbd></td></tr>
+              <tr><td>Paint · swap car model</td><td><kbd>P</kbd></td></tr>
+              <tr><td>Map</td><td><kbd>M</kbd></td></tr>
+              <tr><td>Team: invite · join · leave</td><td><kbd>T</kbd> · <kbd>Y</kbd> · <kbd>L</kbd></td></tr>
+              <tr><td>Help · graphics</td><td><kbd>H</kbd> · <kbd>O</kbd></td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
       <div id="notice"></div>
       <div id="help">
         <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />

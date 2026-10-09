@@ -111,7 +111,9 @@ import {
   type VehicleKind,
   type VehicleState,
 } from '../shared/vehicles.ts';
-import { cleanPaint } from '../shared/paint.ts';
+import { PAINTS, cleanPaint, paintOwned } from '../shared/paint.ts';
+import { PACKS, type Stat } from '../shared/shop.ts';
+import { Accounts } from './accounts.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, MAX_MOUNTS, MOUNT_RANGE, SPECIES, clearOfRuins, herds, rayCreature, yawTowards, type Species } from '../shared/creatures.ts';
 import { blocked, bodyRadius, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
@@ -293,6 +295,8 @@ export class Game {
   /** Survivors who are offline, by their token, and the token of each one online. */
   private sleepers = new Map<string, Sleeper>();
   private tokens = new Map<number, string>();
+  /** Coins, store packs and objectives, by token; saved apart from the world. */
+  accounts = new Accounts();
   private nextId = 1;
   private nextDeployableId = 1;
   private respawns: { id: number; at: number }[] = [];
@@ -447,6 +451,7 @@ export class Game {
             vitals: { ...player.vitals },
             team: [...this.team(id)],
             vehicles: this.vehicleStates(),
+            ...(key && { account: this.accounts.view(key, now) }),
           },
         },
         { to: 'others', except: id, msg: { t: 'joined', player: pub } },
@@ -553,6 +558,52 @@ export class Game {
     return [{ to: p.id, msg: { t: 'mounted', id: null, x, y, z, yaw: p.yaw } }];
   }
 
+  /** The store packs a player has unlocked (none without an account). */
+  private packsOf(p: Player): string[] {
+    const token = this.tokens.get(p.id);
+    return token ? this.accounts.get(token, Math.max(0, this.lastTick)).packs : [];
+  }
+
+  /** Refuses a paint from a pack the player hasn't unlocked. */
+  private lockedPaint(p: Player, paint: number): Outgoing | null {
+    if (paintOwned(paint, this.packsOf(p))) return null;
+    const pack = PACKS.find((k) => k.id === PAINTS[paint].pack);
+    return notice(p.id, `${PAINTS[paint].name} comes in the ${pack?.name ?? 'store'}: unlock it in the store`);
+  }
+
+  /** Counts towards a player's daily objectives, and tells them about any they finish. */
+  private progress(p: Player, stat: Stat, amount: number, now = Math.max(0, this.lastTick)): Outgoing[] {
+    const token = this.tokens.get(p.id);
+    if (!token) return [];
+    const finished = this.accounts.bump(token, stat, amount, now);
+    if (!finished.length) return [];
+    return [
+      ...finished.map((o) => ({ to: p.id, msg: { t: 'objectiveDone' as const, label: o.label, reward: o.reward } })),
+      this.account(p.id, now)!,
+    ];
+  }
+
+  /** Unlocks a store pack with coins, for a token from the main menu or a player in game. */
+  buy(who: { token: unknown } | { id: number }, pack: string, now: number): { ok: boolean; text: string; token: string | null } {
+    const token = 'id' in who ? (this.tokens.get(who.id) ?? null) : cleanToken(who.token);
+    if (!token) return { ok: false, text: 'Your browser needs to allow storage to use the store', token: null };
+    const info = PACKS.find((k) => k.id === pack);
+    const result = this.accounts.buy(token, pack, now);
+    const text = {
+      bought: `${info?.name} unlocked`,
+      owned: `You already have the ${info?.name}`,
+      short: `You need ${info?.price} coins for the ${info?.name}: finish objectives to earn more`,
+      unknown: 'That pack is not in the store',
+    }[result];
+    return { ok: result === 'bought', text, token };
+  }
+
+  /** A player's coins, packs and objectives, for the menus. */
+  account(id: number, now: number): Outgoing | null {
+    const token = this.tokens.get(id);
+    return token ? { to: id, msg: { t: 'account', account: this.accounts.view(token, now) } } : null;
+  }
+
   /** Every car, as players see it. */
   private vehicleStates(): VehicleState[] {
     return [...this.vehicles.values()].map(({ spot: _, ...v }) => ({ ...v, x: round2(v.x), y: round2(v.y), z: round2(v.z), yaw: round2(v.yaw), hp: Math.round(v.hp), fuel: Math.round(v.fuel * 10) / 10 }));
@@ -625,6 +676,8 @@ export class Game {
     const mine = v.driver === id && p.driving === v.id;
     if (!mine && v.driver !== undefined) return [notice(id, 'Someone is driving it')];
     if (!mine && !touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to the car')];
+    const locked = this.lockedPaint(p, cleanPaint(paint));
+    if (locked) return [locked];
     v.paint = cleanPaint(paint);
     if (kind === v.kind) return [];
     const was = VEHICLES[v.kind];
@@ -704,6 +757,7 @@ export class Game {
       const speed = dt > 0 ? moved / dt : 0;
       Object.assign(v, { x, z, y: terrainHeight(this.seed, x, z), yaw: p.yaw });
       v.fuel = Math.max(0, v.fuel - moved / info.range);
+      out.push(...this.progress(p, 'drive', moved, now));
       if (speed < RUN_OVER_SPEED) continue;
       for (const other of this.players.values()) {
         if (other === p || other.dead || other.driving !== undefined) continue;
@@ -749,6 +803,7 @@ export class Game {
     node.amount -= got;
     addItem(p.slots, info.yields, got);
     const out: Outgoing[] = [{ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount, by: id } }];
+    if (info.yields === 'wood' || info.yields === 'stone' || info.yields === 'metalOre' || info.yields === 'sulfurOre') out.push(...this.progress(p, info.yields, got, now));
     if (held && tool && info.tool !== 'pickup') {
       held.hp = (held.hp ?? tool.durability) - 1;
       if (held.hp <= 0) {
@@ -809,9 +864,9 @@ export class Game {
     }
     removeItem(p.slots, material, PIECE_COST);
     piece.hp = MAX_HP[material];
-    if (cleanPaint(paint)) piece.paint = cleanPaint(paint);
+    if (cleanPaint(paint) && !this.lockedPaint(p, cleanPaint(paint))) piece.paint = cleanPaint(paint);
     this.pieces.set(key, piece);
-    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p)];
+    return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p), ...this.progress(p, 'pieces', 1)];
   }
 
   /**
@@ -928,6 +983,8 @@ export class Game {
     if (!this.inReach(p, pieceBounds(target))) return [notice(id, 'Too far away')];
     if (this.blockedAt(p, pieceBounds(target))) return [notice(id, BLOCKED)];
     const colour = cleanPaint(paint);
+    const locked = this.lockedPaint(p, colour);
+    if (locked) return [locked];
     const centre = boxCentre(pieceBounds(target));
     const out: Outgoing[] = [];
     for (const [k, piece] of all ? this.pieces : [[key, target] as const]) {
@@ -948,6 +1005,8 @@ export class Game {
     if (!p || !stack) return [];
     if (!paintable(stack.item)) return [notice(id, "That can't be painted")];
     const colour = cleanPaint(paint);
+    const locked = this.lockedPaint(p, colour);
+    if (locked) return [locked];
     if (colour) stack.paint = colour;
     else delete stack.paint;
     return [this.inventory(p)];
@@ -1016,7 +1075,10 @@ export class Game {
     for (const d of new Set([src.deployable, dst.deployable])) {
       if (!d) continue;
       // An emptied loot bag or crate goes away.
-      if ((d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) && !d.slots.some(Boolean)) out.push(...this.removeDeployable(d.id, id));
+      if ((d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) && !d.slots.some(Boolean)) {
+        out.push(...this.removeDeployable(d.id, id));
+        if (CRATE_KINDS.includes(d.kind)) out.push(...this.progress(p, 'crates', 1));
+      }
       else out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } });
     }
     return out;
@@ -1834,7 +1896,10 @@ export class Game {
       out.push({ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount } });
       return false;
     });
-    for (const p of this.players.values()) out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt, now));
+    for (const p of this.players.values()) {
+      out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt, now));
+      if (!p.dead) out.push(...this.progress(p, 'minutes', dt / 60, now));
+    }
     for (const d of this.deployables.values()) if (d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
     for (const [id, fuse] of [...this.fuses]) {
       const d = this.deployables.get(id);
@@ -1955,7 +2020,7 @@ export class Game {
     p.craftBlocked = false;
     p.queue.shift();
     addItem(p.slots, job.item, recipe.count);
-    return [this.inventory(p), this.crafting(p), { to: p.id, msg: { t: 'crafted', item: job.item, count: recipe.count } }];
+    return [this.inventory(p), this.crafting(p), { to: p.id, msg: { t: 'crafted', item: job.item, count: recipe.count } }, ...this.progress(p, 'craft', 1)];
   }
 
   /**
@@ -2064,6 +2129,7 @@ export class Game {
     this.litters.push({ pack: h.pack, at: now + info.respawn * 1000 });
     Object.assign(h, { owner: p.id, name: `${p.name}'s ${info.name}`, pack: -1, target: null, hp: info.maxHp, fed: 0, fedBy: null, fleeUntil: 0 });
     out.push(notice(p.id, mount ? `The ${info.name} is yours. It follows you: press E on it to ride` : `The ${info.name} is yours. It follows you and fights for you`));
+    out.push(...this.progress(p, 'tame', 1, now));
     return out;
   }
 
@@ -2077,7 +2143,7 @@ export class Game {
       this.hurt.set(shooter.id, { prey: { kind: 'hound', id: h.id }, at: now });
       out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0 } });
     }
-    if (h.hp <= 0) return [...out, ...this.houndDies(h, now)];
+    if (h.hp <= 0) return [...out, ...(shooter && h.species === 'ashhound' && h.owner === null ? this.progress(shooter, 'hounds', 1, now) : []), ...this.houndDies(h, now)];
     if (now >= h.animUntil || h.anim !== 'attack') {
       h.anim = 'hit';
       h.animUntil = now + 350;
@@ -2529,7 +2595,7 @@ function validIndex(slots: Slots, i: unknown): i is number {
 }
 
 /** A browser's private token: long and random, so nobody can guess another player's. */
-function cleanToken(token: unknown): string | null {
+export function cleanToken(token: unknown): string | null {
   return typeof token === 'string' && /^[\w-]{16,64}$/.test(token) ? token : null;
 }
 
