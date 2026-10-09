@@ -121,12 +121,18 @@ function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+/** Past this much unsent data a player's connection is behind, so world snapshots wait. */
+const BEHIND = 64 * 1024;
+
 function deliver(out: Outgoing[]) {
   for (const o of out) {
     const data = JSON.stringify(o.msg);
     if (o.to === 'all' || o.to === 'others') {
       for (const [id, ws] of sockets) {
         if (o.to === 'others' && id === o.except) continue;
+        // A slow connection skips snapshots (the next one replaces it anyway) so that builds,
+        // hits and inventory changes queued behind them still arrive promptly.
+        if (o.msg.t === 'state' && ws.bufferedAmount > BEHIND) continue;
         if (ws.readyState === WebSocket.OPEN) ws.send(data);
       }
     } else {
