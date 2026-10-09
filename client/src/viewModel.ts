@@ -119,6 +119,8 @@ export class ViewModel {
     } else {
       this.palm.set(0, 0, 0);
       this.hold = null;
+      // An axe's blade or a pick's point faces forward, away from you.
+      if (model) model.rotation.y = headFacing(item!, model);
     }
     // Brought up from below when it changes.
     this.lower = 1;
@@ -183,6 +185,8 @@ export class ViewModel {
       const wind = this.swingT < 0.35 ? this.swingT / 0.35 : 0;
       rot.x = -0.5 - s * 1.3 + wind * 0.6;
       rot.z = 0.15 - s * 0.35;
+      // Turned a little in towards the middle, so you see the side of the head and its edge leads.
+      rot.y = 0.35;
       at.y += s * 0.06;
       at.z -= s * 0.12;
     }
@@ -292,4 +296,34 @@ function sightLine(item: ItemId, model: THREE.Object3D, muzzle: THREE.Vector3): 
   const out = { rear: rear.add(new THREE.Vector3(0, 0.004, 0)), front: front.add(new THREE.Vector3(0, 0.004, 0)) };
   sightLines.set(item, out);
   return { rear: out.rear.clone(), front: out.front.clone() };
+}
+
+/**
+ * The turn about the handle that points a tool's head forward (down -z): the side of the
+ * handle its head sticks out furthest, such as an axe's blade rather than its poll, measured
+ * once per tool from the top of the model.
+ */
+const facings = new Map<ItemId, number>();
+function headFacing(item: ItemId, model: THREE.Object3D): number {
+  const known = facings.get(item);
+  if (known !== undefined) return known;
+  model.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const points: THREE.Vector3[] = [];
+  model.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const pos = mesh.geometry.getAttribute('position');
+    const to = new THREE.Matrix4().multiplyMatrices(inv, mesh.matrixWorld);
+    const step = Math.max(1, Math.floor(pos.count / 6000));
+    for (let i = 0; i < pos.count; i += step) points.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(to));
+  });
+  let top = -Infinity;
+  for (const p of points) top = Math.max(top, p.y);
+  // The furthest point of the head from the handle: the blade's edge reaches further than the poll.
+  let far: THREE.Vector3 | null = null;
+  for (const p of points) if (p.y >= top * 0.7 && (!far || Math.hypot(p.x, p.z) > Math.hypot(far.x, far.z))) far = p;
+  const turn = far && Math.hypot(far.x, far.z) > 0.02 ? Math.PI - Math.atan2(far.x, far.z) : 0;
+  facings.set(item, turn);
+  return turn;
 }
