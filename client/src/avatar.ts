@@ -11,6 +11,7 @@ import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
 import { character } from './models.ts';
 import { PISTOLS, gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
+import { paintModel } from './paint.ts';
 import { ScanBody } from './scanBody.ts';
 import { headGear, tintScan } from './survivorLook.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
@@ -94,6 +95,7 @@ export class Avatar {
   /** The photo-scanned body, when it loaded; it replaces the modelled one. */
   private scan: ScanBody | null = null;
   private held: ItemId | null | undefined = undefined;
+  private heldPaint = 0;
   /** What they have in their hands. */
   get heldItem(): ItemId | null {
     return this.held ?? null;
@@ -321,12 +323,14 @@ export class Avatar {
   }
 
   /** Shows the item in their right hand. */
-  setHeld(item: ItemId | null) {
-    if (item === this.held) return;
+  setHeld(item: ItemId | null, paint = 0) {
+    if (item === this.held && paint === this.heldPaint) return;
     this.held = item;
+    this.heldPaint = paint;
     this.hand.clear();
     const model = buildHeldItem(item);
     if (model) this.hand.add(model);
+    if (model && paint) paintModel(model, paint, model.userData.flame as THREE.Object3D | undefined);
     this.muzzle = (model?.userData.muzzle as THREE.Object3D | undefined) ?? null;
     this.flame = (model?.userData.flame as THREE.Object3D | undefined) ?? null;
     const w = item ? ITEMS[item].weapon : undefined;

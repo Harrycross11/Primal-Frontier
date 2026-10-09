@@ -193,7 +193,16 @@ wss.on('connection', (ws) => {
         deliver(game.leaveTeam(id));
         break;
       case 'place':
-        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
+        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material, msg.paint));
+        break;
+      case 'paintPiece':
+        deliver(game.paintPiece(id, String(msg.key), msg.paint, msg.all === true));
+        break;
+      case 'paintItem':
+        deliver(game.paintItem(id, msg.slot, msg.paint));
+        break;
+      case 'customiseCar':
+        deliver(game.customiseCar(id, msg.id, msg.kind, msg.paint));
         break;
       case 'hit':
         deliver(game.hit(id, String(msg.key), now, msg.door === true));

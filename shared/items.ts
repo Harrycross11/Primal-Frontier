@@ -449,6 +449,8 @@ export interface Stack {
   hp?: number;
   /** Rounds loaded, for bows and guns. */
   ammo?: number;
+  /** Its paint, from the palette in paint.ts, for guns, tools and melee weapons. */
+  paint?: number;
 }
 
 export type Slots = (Stack | null)[];

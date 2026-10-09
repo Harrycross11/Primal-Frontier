@@ -147,6 +147,27 @@
       #code .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
       #code button { padding: 10px 20px; font-size: 16px; font-weight: 800; border: 0; border-radius: 10px; cursor: pointer; background: rgba(255,255,255,.12); color: var(--ink); }
       #code #code-ok { background: var(--accent); color: #1d120a; }
+      #paint { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.35); z-index: 40; }
+      #paint[hidden] { display: none; }
+      #paint .card { background: var(--panel); backdrop-filter: blur(6px); border-radius: 16px; padding: 20px 24px; width: min(460px, calc(100vw - 32px)); }
+      #paint h2 { margin: 0 0 12px; font-size: 18px; }
+      #paint button { font-family: inherit; color: var(--ink); border: 0; cursor: pointer; }
+      #paint-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+      #paint-tabs[hidden], #paint-models[hidden], #paint-all-row[hidden] { display: none; }
+      #paint-tabs button { padding: 6px 12px; border-radius: 8px; background: rgba(255,255,255,.1); font-size: 13px; font-weight: 700; }
+      #paint-tabs button.on { background: var(--accent); color: #1d120a; }
+      #paint-models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+      #paint-models button { padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.08); text-align: left; outline: 2px solid transparent; }
+      #paint-models button b { display: block; font-size: 14px; }
+      #paint-models button span { font-size: 12px; opacity: .75; }
+      #paint-models button.on { outline-color: var(--accent); background: rgba(255,122,47,.18); }
+      #paint-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+      #paint-swatches button { aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); font-size: 10px; font-weight: 800; outline: 3px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+      #paint-swatches button.on { outline-color: var(--ink); }
+      #paint-name { margin-top: 10px; font-size: 13px; opacity: .8; }
+      #paint-all-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; }
+      #paint .row { display: flex; justify-content: flex-end; margin-top: 14px; }
+      #paint-done { padding: 9px 20px; font-size: 15px; font-weight: 800; border-radius: 10px; background: var(--accent) !important; color: #1d120a !important; }
       #respawn { padding: 12px 26px; font-size: 18px; font-weight: 800; border: 0; border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; }
       #belt { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
       .slot { position: relative; width: 64px; height: 64px; background: rgba(24, 20, 16, 0.62); border: 2px solid rgba(255,255,255,.08);
@@ -158,6 +179,7 @@
       .stats { margin-top: 4px; color: #ffd28a; }
       .tag.locked { background: rgba(255,120,90,.25); }
       .slot .key { position: absolute; left: 5px; top: 2px; font-size: 11px; opacity: .6; pointer-events: none; }
+      .slot .paint { position: absolute; right: 5px; top: 5px; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0,0,0,.6); pointer-events: none; }
       .slot .wear { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0,0,0,.5); pointer-events: none; }
       .slot .wear i { display: block; height: 100%; border-radius: 2px; background: #9fd36b; }
       .slot.active { border-color: #ffb45e; background: rgba(80, 52, 20, 0.75); }
@@ -315,6 +337,7 @@
       </div>
       <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><div id="bags"></div><button id="respawn">Respawn somewhere random</button></div></div>
       <div id="code" hidden><div class="card"><h2 id="code-title">Enter the code</h2><input id="code-input" inputmode="numeric" maxlength="4" autocomplete="off" /><div class="row"><button id="code-cancel">Cancel</button><button id="code-ok">OK</button></div></div></div>
+      <div id="paint" hidden><div class="card"><div id="paint-tabs"></div><h2 id="paint-title">Paint</h2><div id="paint-models"></div><div id="paint-swatches"></div><div id="paint-name"></div><label id="paint-all-row"><input type="checkbox" id="paint-all" /> Paint the whole base around it</label><div class="row"><button id="paint-done">Done</button></div></div></div>
       <div id="notice"></div>
       <div id="help">
         <kbd>H</kbd> hide help · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
@@ -324,7 +347,8 @@
         Guns: right click aim · <kbd>R</kbd> reload<br />
         Plan: right click piece · <kbd>R</kbd> material · <kbd>G</kbd> edit<br />
         Bases: <kbd>E</kbd> doors, tool cupboard · explosives: left click<br />
-        Team: <kbd>T</kbd> invite who you look at · <kbd>Y</kbd> join · <kbd>L</kbd> leave
+        Team: <kbd>T</kbd> invite who you look at · <kbd>Y</kbd> join · <kbd>L</kbd> leave<br />
+        <kbd>P</kbd> paint a car, wall or gun, or swap a car's model
       </div>
       <div id="screen" hidden>
         <div class="panel" id="inventory-panel">

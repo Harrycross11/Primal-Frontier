@@ -17,6 +17,7 @@ import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery, type Patch } from './scenery.ts';
 import { terrainLayers } from './terrainLayers.ts';
+import { painted } from './paint.ts';
 import {
   barkSurface,
   concreteSurface,
@@ -1101,10 +1102,13 @@ export class World {
 
   /** Damaged pieces get darker, so you can see a wall is about to break. */
   private pieceMaterial(piece: Piece): THREE.Material {
-    const base = this.materials[piece.material];
+    const base = painted(this.materials[piece.material], piece.paint ?? 0);
     const health = piece.hp / MAX_HP[piece.material];
     if (health >= 0.999) return base;
     const m = base.clone();
+    // Cloning drops the paint's shader change; keep it.
+    m.onBeforeCompile = base.onBeforeCompile;
+    m.customProgramCacheKey = base.customProgramCacheKey;
     m.color.multiplyScalar(0.45 + 0.55 * health);
     return m;
   }

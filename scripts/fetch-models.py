@@ -150,6 +150,10 @@ LANDMARK_PROPS = {
     'plane': ('549bce95137c4304b771a2b046420c6f', 512),
     # The scrap car you can drive.
     'vehicle-pickup': ('d52c6ed3b0ee4d9eb562f875b3c448a4', 1024),
+    # The other cars you can swap it for.
+    'vehicle-sedan': ('91270dab9d1a47c7ba7ffaaf8c8b0beb', 1024),
+    'vehicle-van': ('bb4OJb5V4L0hgYjM3vtGvPB7ZMt', 1024),
+    'vehicle-jeep': ('70c8691c6fb64b859fbfc16babfa2c5f', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.

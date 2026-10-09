@@ -104,10 +104,14 @@ import {
   axes,
   rayVehicle,
   seatAt,
+  VEHICLE_KINDS,
+  spotKind,
   touchesVehicle,
   vehicleSpots,
+  type VehicleKind,
   type VehicleState,
 } from '../shared/vehicles.ts';
+import { cleanPaint } from '../shared/paint.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, MAX_MOUNTS, MOUNT_RANGE, SPECIES, clearOfRuins, herds, rayCreature, yawTowards, type Species } from '../shared/creatures.ts';
 import { blocked, bodyRadius, houndState, newHound, spread, steer, turnTo, type Hound, type Prey, type SavedHound } from './wildlife.ts';
@@ -610,6 +614,31 @@ export class Game {
     return [this.inventory(p), notice(id, `Poured in ${pour} fuel: the tank has ${Math.floor(v.fuel)} of ${VEHICLES[v.kind].tank}`)];
   }
 
+  /**
+   * Swaps a car for another model and repaints it, like a garage would: from the driver's seat, or
+   * standing beside a car nobody is driving. It keeps its share of health and as much fuel as fits.
+   */
+  customiseCar(id: number, vehicle: number, kind: VehicleKind, paint: number): Outgoing[] {
+    const p = this.alive(id);
+    const v = this.vehicles.get(vehicle);
+    if (!p || !v || !VEHICLE_KINDS.includes(kind)) return [];
+    const mine = v.driver === id && p.driving === v.id;
+    if (!mine && v.driver !== undefined) return [notice(id, 'Someone is driving it')];
+    if (!mine && !touchesVehicle(v, p.x, p.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2)) return [notice(id, 'Get closer to the car')];
+    v.paint = cleanPaint(paint);
+    if (kind === v.kind) return [];
+    const was = VEHICLES[v.kind];
+    const now = VEHICLES[kind];
+    v.hp = Math.max(1, (v.hp / was.maxHp) * now.maxHp);
+    v.fuel = Math.min(v.fuel, now.tank);
+    v.kind = kind;
+    if (!mine) return [];
+    // A different model puts the wheel somewhere else.
+    const [x, y, z] = seatAt(v, this.seed);
+    Object.assign(p, { x, y, z, yaw: v.yaw });
+    return [{ to: id, msg: { t: 'driving', id: v.id, x, y, z, yaw: v.yaw, kind } }];
+  }
+
   /** Damages a car; at nothing left it blows up, hurting whoever is near. */
   private hurtVehicle(v: Vehicle, amount: number, by: Player | null, now: number): Outgoing[] {
     if (!this.vehicles.has(v.id) || amount <= 0) return [];
@@ -653,7 +682,8 @@ export class Game {
       vehicleSpots(this.seed).forEach((s, spot) => {
         if (taken.has(spot) || (this.vehicleDue.get(spot) ?? 0) > now) return;
         this.vehicleDue.delete(spot);
-        const v: Vehicle = { id: this.nextVehicleId++, kind: 'pickup', spot, x: s.x, y: terrainHeight(this.seed, s.x, s.z), z: s.z, yaw: s.yaw, hp: VEHICLES.pickup.maxHp, fuel: START_FUEL };
+        const kind = spotKind(spot);
+        const v: Vehicle = { id: this.nextVehicleId++, kind, spot, x: s.x, y: terrainHeight(this.seed, s.x, s.z), z: s.z, yaw: s.yaw, hp: VEHICLES[kind].maxHp, fuel: START_FUEL, paint: 0 };
         this.vehicles.set(v.id, v);
       });
     }
@@ -752,7 +782,7 @@ export class Game {
     return [{ to: 'all', msg: { t: 'resource', id: node.id, amount: node.amount, by: p.id } }, this.vitalsMsg(p, true)!];
   }
 
-  place(id: number, kind: PieceKind, i: number, y: number, k: number, dir: number, material: Material): Outgoing[] {
+  place(id: number, kind: PieceKind, i: number, y: number, k: number, dir: number, material: Material, paint = 0): Outgoing[] {
     const p = this.alive(id);
     if (!p) return [];
     if (p.slots[p.active]?.item !== 'buildingPlan') return [notice(id, 'Hold a building plan to build')];
@@ -779,6 +809,7 @@ export class Game {
     }
     removeItem(p.slots, material, PIECE_COST);
     piece.hp = MAX_HP[material];
+    if (cleanPaint(paint)) piece.paint = cleanPaint(paint);
     this.pieces.set(key, piece);
     return [{ to: 'all', msg: { t: 'piece', key, piece, by: id } }, this.inventory(p)];
   }
@@ -884,6 +915,42 @@ export class Game {
     piece.edit = edit;
     out.unshift({ to: 'all', msg: { t: 'piece', key, piece, by: id } });
     return out;
+  }
+
+  /**
+   * Paints a building piece for free, or (all) every piece near it that you could build on: the
+   * whole base, if you are trusted on its tool cupboard.
+   */
+  paintPiece(id: number, key: string, paint: number, all = false): Outgoing[] {
+    const p = this.alive(id);
+    const target = this.pieces.get(key);
+    if (!p || !target) return [];
+    if (!this.inReach(p, pieceBounds(target))) return [notice(id, 'Too far away')];
+    if (this.blockedAt(p, pieceBounds(target))) return [notice(id, BLOCKED)];
+    const colour = cleanPaint(paint);
+    const centre = boxCentre(pieceBounds(target));
+    const out: Outgoing[] = [];
+    for (const [k, piece] of all ? this.pieces : [[key, target] as const]) {
+      const bounds = pieceBounds(piece);
+      if (all && (Math.hypot(...boxCentre(bounds).map((c, n) => c - centre[n])) > PAINT_RADIUS || this.blockedAt(p, bounds))) continue;
+      if ((piece.paint ?? 0) === colour) continue;
+      if (colour) piece.paint = colour;
+      else delete piece.paint;
+      out.push({ to: 'all', msg: { t: 'piece', key: k, piece, by: id } });
+    }
+    return out;
+  }
+
+  /** Paints the gun, tool or melee weapon in a belt slot. */
+  paintItem(id: number, slot: number, paint: number): Outgoing[] {
+    const p = this.alive(id);
+    const stack = p && isBeltSlot(slot) ? p.slots[slot] : null;
+    if (!p || !stack) return [];
+    if (!paintable(stack.item)) return [notice(id, "That can't be painted")];
+    const colour = cleanPaint(paint);
+    if (colour) stack.paint = colour;
+    else delete stack.paint;
+    return [this.inventory(p)];
   }
 
   /** Queues crafting jobs. Ingredients are taken now and refunded if the job is cancelled. */
@@ -1735,7 +1802,7 @@ export class Game {
     game.locks = new Map(save.locks ?? []);
     game.teams = new Map(save.teams ?? []);
     game.nextTeam = Math.max(0, ...game.teams.keys()) + 1;
-    for (const v of save.vehicles ?? []) game.vehicles.set(v.id, { ...v });
+    for (const v of save.vehicles ?? []) game.vehicles.set(v.id, { ...v, paint: cleanPaint(v.paint) });
     game.nextVehicleId = Math.max(0, ...game.vehicles.keys()) + 1;
     game.vehicleDue = new Map((save.vehicleDue ?? []).map(([spot, ms]) => [spot, now + ms]));
     game.fuses = new Map((save.fuses ?? []).map(([id, f]) => [id, { at: now + f.in, key: f.key, door: f.door }]));
@@ -2370,6 +2437,17 @@ function radProtection(p: Player): number {
   return p.wear.reduce((sum, s) => sum + (s ? (ITEMS[s.item].armour?.radiation ?? 0) : 0), 0);
 }
 
+/** Guns, bows, melee weapons and tools take paint. */
+export function paintable(item: ItemId): boolean {
+  const kind = ITEMS[item].kind;
+  return kind === 'weapon' || kind === 'tool';
+}
+
+/** How far from the piece you paint "the whole base" reaches. */
+export const PAINT_RADIUS = 24;
+
+const boxCentre = (b: Box): Vec3 => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+
 /** Rounded to centimetres, to keep messages small. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -2384,6 +2462,7 @@ function publicState(p: Player): PlayerState {
     yaw: p.yaw,
     moving: p.moving,
     held: p.dead ? null : (p.slots[p.active]?.item ?? null),
+    ...(!p.dead && p.slots[p.active]?.paint && { heldPaint: p.slots[p.active]!.paint }),
     dead: p.dead,
     wear: p.wear.map((s) => s?.item ?? null),
     look: p.look,

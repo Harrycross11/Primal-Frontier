@@ -59,6 +59,8 @@ export interface Piece {
   hp: number;
   /** The door hung in it, for walls edited into a doorway. */
   door?: Door;
+  /** Its paint, from the palette in paint.ts; none for bare material. */
+  paint?: number;
 }
 
 export type Box = { min: [number, number, number]; max: [number, number, number] };

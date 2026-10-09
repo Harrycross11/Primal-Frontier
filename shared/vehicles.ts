@@ -1,12 +1,16 @@
-// Cars to drive: a rusty pickup parked just outside each landmark, which runs on low grade fuel,
-// can be shot or blown up, and turns up again where it was parked a while after it is wrecked.
+// Cars to drive: an old car parked just outside each landmark, which runs on low grade fuel, can be
+// shot or blown up, and turns up again where it was parked a while after it is wrecked. Anyone can
+// swap a parked car for another model and paint it.
 // Shared so the server and the client agree on where they are, how big and how fast.
 
 import type { Box } from './building.ts';
 import { rayBox, type Vec3 } from './combat.ts';
 import { SITE_RADIUS, landmarkSites, terrainHeight } from './terrain.ts';
 
-export type VehicleKind = 'pickup';
+export type VehicleKind = 'pickup' | 'sedan' | 'van' | 'jeep';
+
+/** Every model, in the order the garage menu lists them. */
+export const VEHICLE_KINDS: readonly VehicleKind[] = ['pickup', 'sedan', 'van', 'jeep'];
 
 export interface VehicleInfo {
   name: string;
@@ -24,6 +28,8 @@ export interface VehicleInfo {
   height: number;
   /** Where the driver sits: height above the ground, and how far left of and ahead of the middle. */
   seat: { y: number; left: number; ahead: number };
+  /** What it is good at, for the garage menu. */
+  blurb: string;
   /** Fuel it can hold, in units of low grade fuel. */
   tank: number;
   /** Metres it goes on one unit of fuel. */
@@ -33,6 +39,7 @@ export interface VehicleInfo {
 export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
   pickup: {
     name: 'Rusty Pickup',
+    blurb: 'All-rounder',
     maxHp: 600,
     top: 17,
     reverse: 5,
@@ -45,7 +52,57 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     tank: 100,
     range: 30,
   },
+  sedan: {
+    name: 'Old Saloon',
+    blurb: 'Quickest, but fragile',
+    maxHp: 420,
+    top: 21,
+    reverse: 6,
+    accel: 7,
+    turn: 1.7,
+    length: 4.1,
+    width: 1.62,
+    height: 1.0,
+    seat: { y: 0.5, left: 0.36, ahead: -0.15 },
+    tank: 70,
+    range: 38,
+  },
+  van: {
+    name: 'Box Van',
+    blurb: 'Slow, tough, big tank',
+    maxHp: 850,
+    top: 14,
+    reverse: 4.5,
+    accel: 4.2,
+    turn: 1.3,
+    length: 4.4,
+    width: 1.85,
+    height: 1.6,
+    seat: { y: 0.65, left: 0.42, ahead: 1.2 },
+    tank: 140,
+    range: 24,
+  },
+  jeep: {
+    name: 'Old Jeep',
+    blurb: 'Nimble, turns tightly',
+    maxHp: 500,
+    top: 18,
+    reverse: 6,
+    accel: 6.5,
+    turn: 2.0,
+    length: 3.6,
+    width: 1.6,
+    height: 0.9,
+    seat: { y: 0.55, left: 0.35, ahead: -0.3 },
+    tank: 80,
+    range: 32,
+  },
 };
+
+/** The model first parked at each spot, so every landmark has a different one. */
+export function spotKind(spot: number): VehicleKind {
+  return VEHICLE_KINDS[spot % VEHICLE_KINDS.length];
+}
 
 /** How close you must be to get in or fill it up. */
 export const VEHICLE_RANGE = 3.5;
@@ -64,6 +121,8 @@ export interface VehicleState {
   yaw: number;
   hp: number;
   fuel: number;
+  /** Its paint, from the palette in paint.ts (0 as it came). */
+  paint: number;
   /** Who is at the wheel. */
   driver?: number;
 }

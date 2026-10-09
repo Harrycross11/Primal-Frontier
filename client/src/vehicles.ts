@@ -1,4 +1,4 @@
-// Cars as players see them: the scanned pickup set on the ground and tilted with the slope,
+// Cars as players see them: each model set on the ground and tilted with the slope, in its paint,
 // wheels turning as it rolls, its engine growling while someone drives, smoking when badly hurt.
 
 import * as THREE from 'three';
@@ -7,15 +7,29 @@ import { terrainHeight } from '../../shared/terrain.ts';
 import { VEHICLES, axes, rayVehicle, type VehicleKind, type VehicleState } from '../../shared/vehicles.ts';
 import type { Effects } from './effects.ts';
 import { character } from './models.ts';
+import { painted, type PaintMode } from './paint.ts';
 
-/** The model file for each kind of car. */
-const MODELS: Record<VehicleKind, string> = { pickup: 'vehicle-pickup' };
+/** Which parts of a mesh take paint: the whole surface, only its coloured parts, or none. */
+type PaintRule = (mesh: THREE.Mesh, material: THREE.Material) => PaintMode | null;
+
+/** The model file for each kind of car, and where its paint goes. */
+const MODELS: Record<VehicleKind, { file: string; paint: PaintRule }> = {
+  pickup: { file: 'vehicle-pickup', paint: (_, m) => (m.name === 'body' ? 'all' : null) },
+  sedan: { file: 'vehicle-sedan', paint: (_, m) => (m.name === 'CarBody' ? 'all' : null) },
+  // One texture for everything: paint only its coloured panels, not the tyres, glass and chrome.
+  van: { file: 'vehicle-van', paint: () => 'body' },
+  jeep: { file: 'vehicle-jeep', paint: (mesh) => (mesh.name.startsWith('Body') ? 'soft' : null) },
+};
 
 class VehicleView {
   readonly root = new THREE.Group();
   /** Tilted to the ground under it. */
   private body = new THREE.Group();
   private wheels: { pivot: THREE.Object3D; radius: number }[] = [];
+  /** Every mesh with its unpainted material, for repainting. */
+  private surfaces: { mesh: THREE.Mesh; base: THREE.Material }[] = [];
+  private shownKind: VehicleKind;
+  private shownPaint = 0;
   private target = new THREE.Vector3();
   private yaw: number;
   /** Speed along its heading as last seen, for the wheels and the engine. */
@@ -27,21 +41,27 @@ class VehicleView {
     private seed: number,
   ) {
     this.yaw = state.yaw;
+    this.shownKind = state.kind;
     this.root.add(this.body);
     this.build();
+    this.repaint();
     this.root.position.set(state.x, state.y, state.z);
     this.target.copy(this.root.position);
   }
 
   /** The scanned truck turned to face along -z (its heading), sat on the ground, wheels free to spin. */
   private build() {
+    this.body.clear();
+    this.wheels = [];
+    this.surfaces = [];
     const info = VEHICLES[this.state.kind];
-    const scene = character(MODELS[this.state.kind]);
+    const scene = character(MODELS[this.state.kind].file);
     if (!scene) {
       const box = new THREE.Mesh(new THREE.BoxGeometry(info.width, info.height, info.length), new THREE.MeshStandardMaterial({ color: 0x4a6a6e, roughness: 0.7 }));
       box.position.y = info.height / 2 + 0.3;
       box.castShadow = true;
       this.body.add(box);
+      this.surfaces.push({ mesh: box, base: box.material });
       return;
     }
     scene.updateMatrixWorld(true);
@@ -64,7 +84,8 @@ class VehicleView {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      if (mat.name === 'tire') tyres.push(mesh);
+      this.surfaces.push({ mesh, base: mat });
+      if (mat.name === 'tire' || /^wheel/i.test(mesh.name)) tyres.push(mesh);
     });
     for (const tyre of tyres) {
       const b = new THREE.Box3().setFromObject(tyre);
@@ -80,6 +101,22 @@ class VehicleView {
   sync(state: VehicleState) {
     this.state = state;
     this.target.set(state.x, state.y, state.z);
+    if (state.kind !== this.shownKind) {
+      this.shownKind = state.kind;
+      this.build();
+      this.shownPaint = -1;
+    }
+    if (state.paint !== this.shownPaint) this.repaint();
+  }
+
+  /** Puts its paint on the parts of the body that take it. */
+  private repaint() {
+    this.shownPaint = this.state.paint;
+    const rule = MODELS[this.state.kind].paint;
+    for (const { mesh, base } of this.surfaces) {
+      const mode = rule(mesh, base);
+      mesh.material = mode ? painted(base, this.state.paint, mode) : base;
+    }
   }
 
   /** Puts it right under its driver (you), rather than where the server last had it. */

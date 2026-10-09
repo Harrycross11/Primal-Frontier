@@ -8,7 +8,7 @@ import type { Deployable } from './deployables.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
 import type { SurvivalCause, Vitals } from './survival.ts';
-import type { VehicleState } from './vehicles.ts';
+import type { VehicleKind, VehicleState } from './vehicles.ts';
 import type { Material, ResourceNode } from './world.ts';
 
 export interface PlayerState {
@@ -22,6 +22,8 @@ export interface PlayerState {
   moving: boolean;
   /** The item in their hands, so others see it. */
   held: ItemId | null;
+  /** The paint on it. */
+  heldPaint?: number;
   /** Lying dead, waiting to respawn. */
   dead: boolean;
   /** Armour worn on the head, chest and legs, so others see it. */
@@ -56,7 +58,13 @@ export type ClientMessage =
   | { t: 'move'; x: number; y: number; z: number; yaw: number; moving: boolean; slot: number }
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }
-  | { t: 'place'; kind: PieceKind; i: number; y: number; k: number; dir: number; material: Material }
+  | { t: 'place'; kind: PieceKind; i: number; y: number; k: number; dir: number; material: Material; paint?: number }
+  /** Paint a building piece, or every piece near it you may build on. */
+  | { t: 'paintPiece'; key: string; paint: number; all?: boolean }
+  /** Paint the gun or tool in a belt slot. */
+  | { t: 'paintItem'; slot: number; paint: number }
+  /** Swap a car for another model and repaint it. */
+  | { t: 'customiseCar'; id: number; kind: VehicleKind; paint: number }
   /** Hit a building piece, or the door hung in it. */
   | { t: 'hit'; key: string; door?: boolean }
   | { t: 'hitDeployable'; id: number }
@@ -141,7 +149,8 @@ export type ServerMessage =
   /** Your team's members (you included), or none when you're on no team. */
   | { t: 'team'; members: number[] }
   /** You got in a car (id) at the wheel, or got out of one (id null) at this spot. */
-  | { t: 'driving'; id: number | null; x: number; y: number; z: number; yaw: number }
+  /** You got in or out of a car; `kind` when the car you drive was swapped for another model. */
+  | { t: 'driving'; id: number | null; x: number; y: number; z: number; yaw: number; kind?: VehicleKind }
   /** You climbed on an animal (id), or got off one (id null) at this spot. */
   | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }

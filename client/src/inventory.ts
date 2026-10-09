@@ -18,7 +18,9 @@ import {
   type Stack,
 } from '../../shared/items.ts';
 import type { CraftJob, SlotRef } from '../../shared/protocol.ts';
+import { PAINTS } from '../../shared/paint.ts';
 import { iconSvg } from './icons.ts';
+import { swatch } from './paint.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'sulfurOre', 'sulfur', 'hqmOre', 'hqm', 'charcoal', 'gunpowder', 'cloth'];
@@ -299,6 +301,7 @@ export class InventoryUi {
       if (max && stack.hp !== undefined) {
         el.insertAdjacentHTML('beforeend', `<span class="wear"><i style="width:${Math.round((stack.hp / max) * 100)}%"></i></span>`);
       }
+      if (stack.paint) el.insertAdjacentHTML('beforeend', `<span class="paint" style="background:${swatch(stack.paint)}"></span>`);
     }
     if (!interactive) return el;
     el.addEventListener('pointerenter', () => {
@@ -307,7 +310,8 @@ export class InventoryUi {
       const info = ITEMS[stack.item];
       const max = maxDurability(stack.item);
       const wear = max && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${max}` : '';
-      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}`;
+      const paint = stack.paint ? `<br/>${PAINTS[stack.paint].name} paint` : '';
+      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}${paint}`;
       tip.hidden = false;
     });
     el.addEventListener('pointerleave', () => ($('tooltip').hidden = true));

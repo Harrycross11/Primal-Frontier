@@ -44,7 +44,8 @@ This repository is the **browser prototype**, built step by step. Milestones don
   - **Code locks** (100 metal, workbench 1): fit one to a door and pick a 4-digit code. Only you, and whoever you tell the code, can open it. A wrong code shocks you.
   - **Sleeping bags** (30 cloth): lay one down and you can wake up in it when you die, once a minute.
   - **Explosives**: beancan grenades you throw (60 gunpowder, 20 metal, workbench 1), satchel charges you stick to a wall or door (4 beancans, 10 cloth, workbench 1), and timed explosive charges, C4 (5 explosives and 5 cloth at workbench 3; explosives are 50 gunpowder, 10 sulfur and 10 metal at workbench 2). Two satchels blow open a wooden wall or door and three a stone or scrap wall; one C4 takes out any wall or a wooden door, two a metal door. Blasts hurt anyone nearby who isn't behind a wall.
-- Cars: a rusty pickup is parked just outside every landmark. Press **E** to get in, **W** and **S** to drive and reverse, **A** and **D** to steer, and **E** again to get out. It runs on **low grade fuel** (5 from 10 charcoal and 2 cloth, or found in crates): hold it and left click a car to fill the tank, which holds 100 and goes about 30 m on each. Cars can be shot, hit and blown up; a wrecked car explodes, and a new one is parked in its place 10 minutes later. Hitting someone at speed hurts them. Cars show on the map and are saved with the world.
+- Cars: an old car is parked just outside every landmark: a rusty pickup, a saloon, a box van or a jeep. Press **E** to get in, **W** and **S** to drive and reverse, **A** and **D** to steer, and **E** again to get out. It runs on **low grade fuel** (5 from 10 charcoal and 2 cloth, or found in crates): hold it and left click a car to fill the tank, which holds 100 and goes about 30 m on each. Cars can be shot, hit and blown up; a wrecked car explodes, and a new one is parked in its place 10 minutes later. Hitting someone at speed hurts them. Cars show on the map and are saved with the world.
+- Paint: press **P** to paint the car you're in or next to (and swap it for another model: the saloon is quickest, the van toughest with the biggest tank, the jeep turns tightest), the building piece you look at (or the whole base around it), or the gun or tool in your hands. 16 colours, free. With a building plan in hand, **P** also picks the paint new pieces go up in. Others see your paint.
 - Teams (clans) of up to 6: look at someone and press **T** to invite them, and they press **Y** to join. Teammates can't hurt each other, and they share tool cupboards and code locks: if one of you is trusted, the whole team is. Teammates have green name tags and show on the map, and **L** leaves the team. Teams are saved with the world.
 - Places worth looting:
   - **A landmark in each land**, built from scanned models on levelled ground and marked on the map (M): Smith's Garage in the Ashlands, a Logging Camp in Deadwood, a Mining Outpost on Rust Mesa, an Oil Field on the Sulfur Flats and a Radio Station up in the Frostpeaks. Nobody can build there.
@@ -72,6 +73,7 @@ This repository is the **browser prototype**, built step by step. Milestones don
 | Edit the wall you look at (window, door, half wall, solid) | G |
 | Invite who you look at to your team / join a team you were invited to / leave your team | T / Y / L |
 | Get in or out of a car / drive / steer | E / W S / A D |
+| Paint a car, wall or gun, or swap a car's model | P |
 | Map | M |
 | Graphics high or low | O |
 | Hide help | H |

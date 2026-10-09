@@ -33,10 +33,12 @@ import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
 import { Creatures } from './creatures.ts';
 import { Vehicles } from './vehicles.ts';
-import { VEHICLES, VEHICLE_RANGE, axes, touchesVehicle } from '../../shared/vehicles.ts';
+import { VEHICLES, VEHICLE_KINDS, VEHICLE_RANGE, axes, touchesVehicle, type VehicleKind } from '../../shared/vehicles.ts';
 import { DayNight, type Fire } from './daynight.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { PaintPanel, type PaintTarget } from './paintPanel.ts';
+import { PAINTS } from '../../shared/paint.ts';
 import { LookPicker } from './lookPicker.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
@@ -247,6 +249,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let slots: Slots = welcome.slots;
   let pieceKind: PieceKind = 'wall';
   let material: Material = 'wood';
+  /** The paint new building pieces go up in. */
+  let buildPaint = 0;
+  const paintPanel = new PaintPanel();
+  paintPanel.onClose = () => canvas.requestPointerLock?.();
   const held = (): ItemId | null => slots[ui.active]?.item ?? null;
   const ui = new InventoryUi({
     move: (from, to, count) => {
@@ -384,6 +390,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'driving': {
         driving = m.id;
         const view = m.id === null ? undefined : vehicles.views.get(m.id);
+        // Swapped for another model from the driver's seat.
+        if (view && m.kind) view.sync({ ...view.state, kind: m.kind });
         const info = view ? VEHICLES[view.state.kind] : undefined;
         controller.car = view && info ? { ...info, fuel: () => vehicles.views.get(view.state.id)?.state.fuel ?? 0 } : null;
         controller.carSpeed = 0;
@@ -602,6 +610,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   });
   addEventListener('keydown', (e) => {
     if (hud.codeOpen) return;
+    if (paintPanel.isOpen) {
+      if (e.code === 'Escape' || e.code === 'KeyP') paintPanel.close();
+      return;
+    }
     if (e.code === 'Tab' || e.code === 'KeyI') {
       e.preventDefault();
       return ui.open ? closeScreen() : openScreen(null);
@@ -617,6 +629,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyP') openPaint();
     if (e.code === 'KeyT') {
       if (!aimPlayer) hud.notice('Look at someone to invite them to your team');
       else if (teamIds.includes(aimPlayer.state.id)) hud.notice(`${aimPlayer.state.name} is on your team`);
@@ -902,7 +915,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (item === 'buildingPlan') {
       if (!proposal) return;
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
-      net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material });
+      net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material, ...(buildPaint && { paint: buildPaint }) });
       me.swing();
       return;
     }
@@ -974,7 +987,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   function carInReach(v: { kind: keyof typeof VEHICLES; x: number; z: number; yaw: number }) {
     const view = vehicles.views.get((v as { id?: number }).id ?? -1);
     const at = view ? { ...v, x: view.root.position.x, z: view.root.position.z, yaw: view.root.rotation.y } : v;
-    return touchesVehicle({ ...at, id: 0, y: 0, hp: 1, fuel: 0 }, controller.position.x, controller.position.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2 - 0.2);
+    return touchesVehicle({ ...at, id: 0, y: 0, hp: 1, fuel: 0, paint: 0 }, controller.position.x, controller.position.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2 - 0.2);
   }
 
   function interact() {
@@ -1021,6 +1034,55 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (!inReach(controller.eye, piece)) return hud.notice('Too far away');
     const next = WALL_EDITS[(WALL_EDITS.indexOf(piece.edit) + 1) % WALL_EDITS.length];
     net.send({ t: 'edit', key: pieceKey(piece), edit: next });
+  }
+
+  /**
+   * P: paint whatever is to hand. The car you drive or stand by (and its model), the building piece
+   * you look at, the gun or tool in your hands, or with a building plan the pieces you place next.
+   */
+  function openPaint() {
+    const targets: PaintTarget[] = [];
+    const car = driving !== null ? vehicles.views.get(driving) : aimVehicle && carInReach(aimVehicle.view.state) && aimVehicle.view.state.driver === undefined ? aimVehicle.view : undefined;
+    if (car) {
+      const s = car.state;
+      targets.push({
+        label: VEHICLES[s.kind].name,
+        paint: s.paint,
+        model: s.kind,
+        models: VEHICLE_KINDS.map((k) => ({ id: k, name: VEHICLES[k].name, blurb: VEHICLES[k].blurb })),
+        apply: (paint, model) => {
+          // Shown at once; the server's next update confirms it.
+          car.sync({ ...car.state, paint, kind: (model ?? s.kind) as VehicleKind });
+          net.send({ t: 'customiseCar', id: s.id, kind: (model ?? s.kind) as VehicleKind, paint });
+        },
+      });
+    }
+    const item = held();
+    const stack = slots[ui.active];
+    if (!car && stack && (ITEMS[stack.item].kind === 'weapon' || ITEMS[stack.item].kind === 'tool')) {
+      const slot = ui.active;
+      targets.push({ label: ITEMS[stack.item].name, paint: stack.paint ?? 0, apply: (paint) => net.send({ t: 'paintItem', slot, paint }) });
+    }
+    const piece = !car && aim?.piece && inReach(controller.eye, aim.piece) ? aim.piece : undefined;
+    if (piece) {
+      const key = pieceKey(piece);
+      const name = `${ITEMS[piece.material].name} ${PIECE_NAMES[piece.kind].toLowerCase()}`;
+      const entry: PaintTarget = {
+        label: name,
+        paint: piece.paint ?? 0,
+        wholeBase: true,
+        apply: (paint, _, all) => {
+          if (item === 'buildingPlan') buildPaint = paint;
+          net.send({ t: 'paintPiece', key, paint, ...(all && { all: true }) });
+        },
+      };
+      // With a plan in hand the piece comes first; otherwise what you hold does.
+      if (item === 'buildingPlan') targets.unshift(entry);
+      else targets.push(entry);
+    }
+    if (item === 'buildingPlan') targets.push({ label: 'New pieces', paint: buildPaint, apply: (paint) => (buildPaint = paint) });
+    if (!targets.length) return hud.notice('Get next to a car, look at a building piece, or hold a gun or tool to paint it');
+    paintPanel.open(targets);
   }
 
   // Blue see-through preview of the piece about to be placed, red if it can't go there.
@@ -1108,13 +1170,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const info = VEHICLES[s.kind];
       const kmh = Math.round(Math.abs(controller.carSpeed) * 3.6);
       const fuel = s.fuel > 0 ? `Fuel ${Math.ceil(s.fuel)}/${info.tank}` : 'Out of fuel: get out and fill it with low grade fuel';
-      return { text: `${info.name}  ·  ${kmh} km/h  ·  ${fuel}  ·  E to get out`, health: s.hp / info.maxHp };
+      return { text: `${info.name}  ·  ${kmh} km/h  ·  ${fuel}  ·  E to get out  ·  P to paint`, health: s.hp / info.maxHp };
     }
     if (aimVehicle) {
       const s = aimVehicle.view.state;
       const info = VEHICLES[s.kind];
       const fuel = `fuel ${Math.ceil(s.fuel)}/${info.tank}`;
-      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? 'E to drive' : 'Get closer to get in';
+      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? 'E to drive  ·  P to paint or swap model' : 'Get closer to get in';
       return { text: `${info.name} (${fuel})  ·  ${how}`, health: s.hp / info.maxHp };
     }
     if (item && isExplosive(item) && item !== 'beancan') {
@@ -1195,7 +1257,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const show = held() === 'buildingPlan';
     buildInfo.hidden = !show;
     if (!show) return;
-    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)<br/><small>Right click: foundation, wall, floor, stairs, ramp, roof · R: wood, stone, scrap</small>`;
+    const paint = buildPaint ? ` · ${PAINTS[buildPaint].name} paint` : '';
+    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)${paint}<br/><small>Right click: foundation, wall, floor, stairs, ramp, roof · R: wood, stone, scrap · P: paint</small>`;
     if (buildInfo.innerHTML !== html) buildInfo.innerHTML = html;
   }
 
@@ -1218,6 +1281,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       position: controller.position.toArray(),
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
+    paint: () => openPaint(),
     look: (yaw: number, pitch: number) => {
       controller.autoWalk = null;
       controller.yaw = yaw;
@@ -1243,7 +1307,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === 'buildingPlan');
       if (n >= 0) selectSlot(n);
-      net.send({ t: 'place', kind, i, y, k, dir, material: mat });
+      net.send({ t: 'place', kind, i, y, k, dir, material: mat, ...(buildPaint && { paint: buildPaint }) });
     },
     craft: (item: ItemId, count = 1) => net.send({ t: 'craft', item, count }),
     /** Fires the gun in your hands at a point in the world. */
@@ -1286,6 +1350,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     ride: (id: number | null) => net.send({ t: 'ride', id }),
     /** Handles a message as if the server sent it: the screenshot browser is too slow to hear the real one in time. */
     receive: (m: ServerMessage) => net.onMessage(m),
+    /** The nearest car's state. */
+    cars: () => [...vehicles.views.values()].map((v) => v.state).sort((a, b) => Math.hypot(a.x - controller.position.x, a.z - controller.position.z) - Math.hypot(b.x - controller.position.x, b.z - controller.position.z))[0],
     /** Throws what is in your hands. */
     throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
@@ -1349,7 +1415,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     // Your own mount goes where you steer it at once, rather than waiting on the server.
     const mount = riding === null ? undefined : creatures.views.get(riding);
     if (mount) mount.carry(controller.position.x, controller.position.y - (controller.mount?.seat ?? 0), controller.position.z, controller.yaw + Math.PI);
-    me.setHeld(dead ? null : held());
+    me.setHeld(dead ? null : held(), dead ? 0 : (slots[ui.active]?.paint ?? 0));
     me.setWear(ui.wear.map((s) => s?.item ?? null));
     me.aimPitch = controller.pitch;
     me.update(dt, controller.moving && !dead);
@@ -1407,7 +1473,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     for (const r of remotes.values()) {
       r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
       r.avatar.root.rotation.y = r.state.yaw + Math.PI;
-      r.avatar.setHeld(r.state.held);
+      r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
       r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
