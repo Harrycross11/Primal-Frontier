@@ -13,7 +13,7 @@ import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { BOULDERS, model, soleMaterial } from './models.ts';
 import { lodIndex, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
-import { clothSurface, concreteSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
+import { clothSurface, concreteSurface, soilSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
 const cache = new Map<string, THREE.Material>();
 function mat(key: string, make: () => THREE.Material): THREE.Material {
@@ -22,7 +22,7 @@ function mat(key: string, make: () => THREE.Material): THREE.Material {
   return m;
 }
 const stoneMat = () => mat('stone', () => new THREE.MeshStandardMaterial({ ...concreteSurface(), color: 0xa49d92, roughness: 1, flatShading: true }));
-const soilMat = () => mat('planter-soil', () => new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 1 }));
+const soilMat = () => mat('planter-soil', () => new THREE.MeshStandardMaterial({ ...soilSurface(), color: 0x8a7a6a, roughness: 1 }));
 const plankMat = () => mat('planks', () => new THREE.MeshStandardMaterial({ ...plankSurface(), roughness: 0.85 }));
 const metalMat = () => mat('metal', () => new THREE.MeshStandardMaterial({ ...metalSurface(), roughness: 0.5, metalness: 0.7 }));
 const rustMat = () => mat('rust', () => new THREE.MeshStandardMaterial({ ...rustSurface('#6a6a64'), roughness: 0.6, metalness: 0.6 }));
@@ -241,8 +241,64 @@ export function buildHemp(rand: () => number): THREE.Group {
   return g;
 }
 
+const stems = new WeakMap<THREE.BufferGeometry, [number, number]>();
+/** Where a plant meets the ground: the middle of its lowest few centimetres. */
+function stemOf(geo: THREE.BufferGeometry): [number, number] {
+  let at = stems.get(geo);
+  if (at) return at;
+  const pos = geo.attributes.position;
+  const low = geo.boundingBox!.min.y + 0.04;
+  let x = 0;
+  let z = 0;
+  let n = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) > low) continue;
+    x += pos.getX(i);
+    z += pos.getZ(i);
+    n++;
+  }
+  stems.set(geo, (at = n ? [x / n, z / n] : [0, 0]));
+  return at;
+}
+
+/** A crop built from the scanned plants, if they loaded. */
+function scannedCrop(seed: ItemId, rand: () => number): THREE.Group | null {
+  const g = new THREE.Group();
+  // Stood on its stem: scanned plants lean, so the middle of their bounds is not where they grow from.
+  const place = (m: ReturnType<typeof model>) => {
+    const root = new THREE.Group();
+    const o = shared(new THREE.Mesh(m!.geometry, m!.material));
+    const [x, z] = stemOf(m!.geometry);
+    o.position.set(-x, 0, -z);
+    return root.add(o);
+  };
+  if (seed === 'hempSeed' || seed === 'cornSeed') {
+    const m = model(seed === 'hempSeed' ? 'crop-hemp' : 'crop-corn');
+    if (!m) return null;
+    const plant = place(m);
+    plant.rotation.y = rand() * Math.PI * 2;
+    plant.scale.setScalar(0.85 + rand() * 0.25);
+    return g.add(plant);
+  }
+  // Pumpkins: a sprawling vine of leaves, the pumpkin sat among them once it is nearly ripe.
+  const leaves = model('crop-vine');
+  const pumpkin = model('crop-pumpkin');
+  if (!leaves || !pumpkin) return null;
+  const vine = place(leaves);
+  vine.rotation.y = rand() * Math.PI * 2;
+  g.add(vine);
+  const fruit = place(pumpkin);
+  fruit.userData.fruit = true;
+  fruit.position.set((rand() - 0.5) * 0.12, 0, (rand() - 0.5) * 0.12);
+  fruit.rotation.y = rand() * Math.PI * 2;
+  g.add(fruit);
+  return g;
+}
+
 /** A crop growing from a seed, full grown; its corn cobs or pumpkin are marked `fruit`. */
 export function buildCrop(seed: ItemId, rand: () => number): THREE.Group {
+  const scanned = scannedCrop(seed, rand);
+  if (scanned) return scanned;
   if (seed === 'hempSeed') {
     const g = buildHemp(rand);
     g.scale.setScalar(0.9);
@@ -492,17 +548,31 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     // A rusty sign on top so it reads at a glance.
     g.add(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.02), rustMat(), 0, h + 0.08, l / 2 - 0.06));
   } else if (kind === 'planter') {
-    // A long plank box of dark soil, with a plant in each of its three plots.
-    const wall = 0.06;
-    for (const z of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(w, h, wall), plankMat(), 0, h / 2, z * (l / 2 - wall / 2)));
-    for (const x of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(wall, h, l - wall * 2), plankMat(), x * (w / 2 - wall / 2), h / 2, 0));
-    for (const x of [-1, 1]) for (const z of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.09, h + 0.04, 0.09), plankMat(), x * (w / 2 - 0.03), (h + 0.04) / 2, z * (l / 2 - 0.03)));
-    const soil = mesh(new THREE.BoxGeometry(w - wall * 2, 0.04, l - wall * 2), soilMat(), 0, h - 0.06, 0);
+    // A scanned raised bed of weathered planks with rusty steel corners, filled with dark soil,
+    // and a plant in each of its three plots.
+    const wall = 0.07;
+    const scan = model('planter');
+    if (scan) g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
+    else {
+      for (const z of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(w, h, wall), plankMat(), 0, h / 2, z * (l / 2 - wall / 2)));
+      for (const x of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(wall, h, l - wall * 2), plankMat(), x * (w / 2 - wall / 2), h / 2, 0));
+    }
+    // Heaped a little in the middle, so it reads as earth rather than a lid.
+    const soilGeo = new THREE.PlaneGeometry(w - wall * 2, l - wall * 2, 12, 8).rotateX(-Math.PI / 2);
+    const sp = soilGeo.attributes.position;
+    for (let i = 0; i < sp.count; i++) {
+      const fx = sp.getX(i) / ((w - wall * 2) / 2);
+      const fz = sp.getZ(i) / ((l - wall * 2) / 2);
+      sp.setY(i, 0.03 * (1 - fx * fx) * (1 - fz * fz) + Math.sin(i * 12.9898) * 0.006);
+    }
+    soilGeo.computeVertexNormals();
+    const soil = mesh(soilGeo, soilMat(), 0, h - 0.1, 0);
     soil.castShadow = false;
+    soil.receiveShadow = true;
     g.add(soil);
     const plots = PLANTER_SEED_SLOTS.map((_, n) => {
       const plot = new THREE.Group();
-      plot.position.set((n - 1) * (w / 3), h - 0.04, 0);
+      plot.position.set((n - 1) * ((w - 0.3) / 3), h - 0.08, 0);
       g.add(plot);
       return plot;
     });

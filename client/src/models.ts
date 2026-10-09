@@ -38,6 +38,8 @@ interface Fit {
   set?: boolean;
   /** Cut-out leaves or blades: lit like the ground rather than by each card's facing. */
   foliage?: boolean;
+  /** Foliage whose colour map carries its own cut-out (Sketchfab), rather than a separate mask (Poly Haven). */
+  ownAlpha?: boolean;
 }
 
 const FIT: Record<string, Fit> = {
@@ -147,6 +149,14 @@ const FIT: Record<string, Fit> = {
   'tool-combatKnife': { height: 0.33, turn: [0, 0, Math.PI / 2] },
   'tool-nailBat': { height: 0.84, turn: [Math.PI / 2, 0, 0] },
   'tool-fireAxe': { height: 0.9, turn: [-0.048, 0.263, -1.542] },
+  // Farming: the raised bed (its greens cut out; turned so its length runs along x, as
+  // DEPLOYABLE_INFO.planter), and the crops at full grown size.
+  planter: { width: 1.7, turn: [0, Math.PI / 2, 0] },
+  'crop-corn': { height: 1.9, foliage: true, ownAlpha: true },
+  'crop-hemp': { height: 1.4, foliage: true, ownAlpha: true },
+  'crop-vine': { width: 0.9, drop: /WATERMELON/, foliage: true, ownAlpha: true },
+  'crop-pumpkin': { width: 0.3 },
+  'food-corn': { width: 0.2 },
   // Lies at an angle in all three axes; found by lining the handle up with y and the head with z.
   'tool-sledgehammer': { height: 0.9, turn: [-2.679, -0.679, 2.835] },
 };
@@ -233,7 +243,8 @@ function foliage(m: THREE.MeshStandardMaterial, alpha?: THREE.Texture): THREE.Me
   out.side = THREE.DoubleSide;
   out.normalMap = null;
   if (alpha && m.transparent) out.alphaMap = alpha;
-  out.alphaTest = Math.max(out.alphaTest, 0.4);
+  // Some files cut out at 0.9 or more, which eats most of each leaf.
+  out.alphaTest = Math.min(0.5, Math.max(out.alphaTest, 0.4));
   out.transparent = false;
   // Back faces would flip the upward normal into the ground; keep it pointing up on both sides.
   out.onBeforeCompile = (shader) => {
@@ -254,7 +265,7 @@ async function load(loader: GLTFLoader, name: string) {
   while (fit.set && level.children.length === 1) level = level.children[0];
   const roots = fit.set ? [...level.children] : [gltf.scene];
   let alpha: THREE.Texture | undefined;
-  if (fit.foliage) {
+  if (fit.foliage && !fit.ownAlpha) {
     alpha = await new THREE.TextureLoader().loadAsync(`/models/${name}_alpha.jpg`);
     // glTF textures are not flipped; the mask must match them.
     alpha.flipY = false;
@@ -286,8 +297,8 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
   clips.set(name, gltf.animations);
 }
 
-/** Models only needed once you are in the game (held guns and tools), fetched after the rest. */
-const isLate = (name: string) => name.startsWith('gun-') || name.startsWith('tool-');
+/** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
+const isLate = (name: string) => /^(gun-|tool-|crop-|food-|planter$)/.test(name);
 
 /**
  * Loads the models the menu and the world need; resolves even if some fail, so a missing file

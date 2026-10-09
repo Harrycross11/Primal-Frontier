@@ -44,7 +44,7 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { lateLoaded, lateModels, loadModels } from './models.ts';
+import { lateLoaded, lateModels, loadModels, variants } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi, planterStatus } from './inventory.ts';
@@ -1486,6 +1486,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let watched: { id: number; offset: number[] } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
     effects,
+    world,
     state: () => ({
       id: welcome.id,
       others: remotes.size,
@@ -1621,6 +1622,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     },
     moveItem: (from: SlotRef, to: SlotRef, count?: number) => net.send({ t: 'moveItem', from, to, count }),
     slotOf: (item: ItemId) => slots.findIndex((s) => s?.item === item),
+    /** Each loaded variant of a model: its size and material count, to check a model came in right. */
+    modelInfo: (name: string) => variants(name).map((m) => ({ size: m.geometry.boundingBox!.getSize(new THREE.Vector3()).toArray(), mats: Array.isArray(m.material) ? m.material.length : 1 })),
     furnace: (id: number, on: boolean) => net.send({ t: 'furnace', id, on }),
     openScreen: (id: number | null) => openScreen(id === null ? null : (world.deployables.get(id) ?? null)),
     closeScreen: () => ui.hide(),

@@ -486,6 +486,20 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       part(g, new THREE.TorusGeometry(0.016, 0.004, 5, 12).rotateX(Math.PI / 2), mat('feed-string', () => new THREE.MeshStandardMaterial({ color: 0x5a4426, roughness: 1 })), 0, 0.152, 0);
       return g;
     }
+    case 'corn':
+    case 'pumpkin': {
+      // The scanned cob or pumpkin, if it loaded.
+      const scan = model(item === 'corn' ? 'food-corn' : 'crop-pumpkin');
+      if (!scan) break;
+      const m = new THREE.Mesh(scan.geometry, scan.material);
+      m.castShadow = true;
+      m.userData.shared = true;
+      if (item === 'corn') m.scale.setScalar(0.9);
+      else m.scale.setScalar(0.55);
+      return g.add(m);
+    }
+  }
+  switch (item) {
     case 'corn': {
       // A cob lying across, its husk peeled back from the base.
       const cob = new THREE.Group();

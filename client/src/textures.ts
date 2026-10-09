@@ -128,6 +128,8 @@ function repaint(ctx: CanvasRenderingContext2D, size: number, paint: string, cov
   ctx.putImageData(img, 0, 0);
 }
 
+/** Dark forest soil with leaf litter, for planter boxes. */
+export const soilSurface = () => photo('forest-floor', { repeat: 1 });
 /** Dry, cracked grey earth. */
 export const groundSurface = () => photo('ground', { repeat: 2.5 });
 /** Dusty brown dirt and gravel, blended into the ground in drifts. */
