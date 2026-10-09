@@ -5,7 +5,9 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DOORWAY, type DoorKind } from '../../shared/building.ts';
-import { DEPLOYABLE_INFO, type DeployableKind } from '../../shared/deployables.ts';
+import { DEPLOYABLE_INFO, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
+import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { BOULDERS, model, soleMaterial } from './models.ts';
@@ -20,6 +22,7 @@ function mat(key: string, make: () => THREE.Material): THREE.Material {
   return m;
 }
 const stoneMat = () => mat('stone', () => new THREE.MeshStandardMaterial({ ...concreteSurface(), color: 0xa49d92, roughness: 1, flatShading: true }));
+const soilMat = () => mat('planter-soil', () => new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 1 }));
 const plankMat = () => mat('planks', () => new THREE.MeshStandardMaterial({ ...plankSurface(), roughness: 0.85 }));
 const metalMat = () => mat('metal', () => new THREE.MeshStandardMaterial({ ...metalSurface(), roughness: 0.5, metalness: 0.7 }));
 const rustMat = () => mat('rust', () => new THREE.MeshStandardMaterial({ ...rustSurface('#6a6a64'), roughness: 0.6, metalness: 0.6 }));
@@ -238,6 +241,68 @@ export function buildHemp(rand: () => number): THREE.Group {
   return g;
 }
 
+/** A crop growing from a seed, full grown; its corn cobs or pumpkin are marked `fruit`. */
+export function buildCrop(seed: ItemId, rand: () => number): THREE.Group {
+  if (seed === 'hempSeed') {
+    const g = buildHemp(rand);
+    g.scale.setScalar(0.9);
+    return new THREE.Group().add(g);
+  }
+  const g = new THREE.Group();
+  const leafMat = mat('crop-leaf', () => new THREE.MeshStandardMaterial({ color: 0x6f8a36, roughness: 0.8, side: THREE.DoubleSide }));
+  if (seed === 'cornSeed') {
+    const stalkMat = plain(0x7d8f3e);
+    const cobMat = mat('corn-cob', () => new THREE.MeshStandardMaterial({ color: 0xe0b83a, roughness: 0.6 }));
+    const huskMat = plain(0xa8a858, 0.9);
+    for (let s = 0; s < 3; s++) {
+      const h = 1.3 + rand() * 0.4;
+      const stalk = mesh(new THREE.CylinderGeometry(0.014, 0.024, h, 6).translate(0, h / 2, 0), stalkMat);
+      stalk.position.set((rand() - 0.5) * 0.3, 0, (rand() - 0.5) * 0.3);
+      stalk.rotation.set((rand() - 0.5) * 0.15, 0, (rand() - 0.5) * 0.15);
+      for (let l = 0; l < 7; l++) {
+        const leaf = mesh(new THREE.PlaneGeometry(0.09, 0.6).translate(0, 0.3, 0), leafMat);
+        leaf.position.y = h * (0.15 + l * 0.11);
+        leaf.rotation.set(0.9 + rand() * 0.5, (l / 7) * Math.PI * 2 + rand(), 0, 'YXZ');
+        stalk.add(leaf);
+      }
+      const cob = new THREE.Group();
+      cob.userData.fruit = true;
+      cob.add(mesh(new THREE.CapsuleGeometry(0.035, 0.12, 4, 8), cobMat));
+      cob.add(mesh(new THREE.CylinderGeometry(0.04, 0.02, 0.1, 6), huskMat, 0, -0.07, 0));
+      cob.position.set(0.04, h * 0.55, 0);
+      cob.rotation.z = -0.35;
+      stalk.add(cob);
+      g.add(stalk);
+    }
+    return g;
+  }
+  // A pumpkin vine: broad leaves on short stems, the pumpkin sitting in among them.
+  const stemMat = plain(0x5f7a2e);
+  for (let l = 0; l < 7; l++) {
+    const a = (l / 7) * Math.PI * 2 + rand();
+    const leaf = new THREE.Group();
+    leaf.add(mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.22, 4).translate(0, 0.11, 0), stemMat));
+    leaf.add(mesh(new THREE.CircleGeometry(0.13, 14).scale(1, 0.85, 1).rotateX(-Math.PI / 2 + 0.3), leafMat, 0, 0.22, 0.06));
+    leaf.position.set(Math.cos(a) * 0.14, 0, Math.sin(a) * 0.14);
+    leaf.rotation.set(0.5, -a + Math.PI / 2, 0, 'YXZ');
+    g.add(leaf);
+  }
+  const pumpkin = new THREE.Group();
+  pumpkin.userData.fruit = true;
+  const skin = mat('pumpkin', () => new THREE.MeshStandardMaterial({ color: 0xd8742a, roughness: 0.55 }));
+  for (let r = 0; r < 8; r++) {
+    const lobe = mesh(new THREE.SphereGeometry(0.1, 10, 8).scale(0.55, 0.8, 1), skin);
+    const a = (r / 8) * Math.PI * 2;
+    lobe.position.set(Math.cos(a) * 0.075, 0, Math.sin(a) * 0.075);
+    lobe.rotation.y = -a;
+    pumpkin.add(lobe);
+  }
+  pumpkin.add(mesh(new THREE.CylinderGeometry(0.012, 0.02, 0.07, 6), plain(0x5a4a2a), 0, 0.09, 0));
+  pumpkin.position.set(0.05, 0.08, 0.04);
+  g.add(pumpkin);
+  return g;
+}
+
 /** A clump of pale wasteland mushrooms with brown, speckled caps. */
 export function buildMushrooms(rand: () => number): THREE.Group {
   const g = new THREE.Group();
@@ -426,6 +491,37 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     g.add(saw, mesh(new THREE.BoxGeometry(0.12, 0.06, 0.03), handleMat(), w / 4 - 0.03, h * 0.6 + 0.2, l / 2 + 0.04));
     // A rusty sign on top so it reads at a glance.
     g.add(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.02), rustMat(), 0, h + 0.08, l / 2 - 0.06));
+  } else if (kind === 'planter') {
+    // A long plank box of dark soil, with a plant in each of its three plots.
+    const wall = 0.06;
+    for (const z of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(w, h, wall), plankMat(), 0, h / 2, z * (l / 2 - wall / 2)));
+    for (const x of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(wall, h, l - wall * 2), plankMat(), x * (w / 2 - wall / 2), h / 2, 0));
+    for (const x of [-1, 1]) for (const z of [-1, 1]) g.add(mesh(new THREE.BoxGeometry(0.09, h + 0.04, 0.09), plankMat(), x * (w / 2 - 0.03), (h + 0.04) / 2, z * (l / 2 - 0.03)));
+    const soil = mesh(new THREE.BoxGeometry(w - wall * 2, 0.04, l - wall * 2), soilMat(), 0, h - 0.06, 0);
+    soil.castShadow = false;
+    g.add(soil);
+    const plots = PLANTER_SEED_SLOTS.map((_, n) => {
+      const plot = new THREE.Group();
+      plot.position.set((n - 1) * (w / 3), h - 0.04, 0);
+      g.add(plot);
+      return plot;
+    });
+    g.userData.setGrow = (d: Deployable) => {
+      PLANTER_SEED_SLOTS.forEach((slot, n) => {
+        const plot = plots[n];
+        const seed = d.slots[slot]?.item ?? null;
+        if (plot.userData.seed !== seed) {
+          plot.clear();
+          plot.userData.seed = seed;
+          if (seed) plot.add(buildCrop(seed, mulberry32(d.id * 31 + n)));
+        }
+        const crop = plot.children[0];
+        if (!seed || !crop) return;
+        const ripe = ripeness(seed, d.grow?.[n] ?? 0);
+        crop.scale.setScalar(0.12 + 0.88 * ripe);
+        crop.traverse((o) => o.userData.fruit && (o.visible = ripe > 0.7));
+      });
+    };
   } else if (kind === 'sleepingBag') {
     // A quilted bag laid flat, with a rolled pillow at the head.
     const bag = mesh(new RoundedBoxGeometry(w, h, l, 3, 0.06), plain(0x4f5a3a, 1), 0, h / 2, 0);
@@ -628,6 +724,8 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     case 'bottledWater':
     case 'antiRadPills':
     case 'mushroom':
+    case 'corn':
+    case 'pumpkin':
     case 'feedSack':
     case 'rawMeat':
     case 'cookedMeat':

@@ -179,6 +179,22 @@ function resource(item: ItemId): THREE.Object3D | null {
       add(g, new THREE.TorusGeometry(0.125, 0.012, 6, 20), sack, 0, 0.25, 0, Math.PI / 2);
       return g;
     }
+    case 'hempSeed':
+    case 'cornSeed':
+    case 'pumpkinSeed': {
+      // A little cloth pouch, tied off, with a few seeds spilled out in front.
+      const pouch = std('seed-pouch', { ...clothSurface(), color: 0x8f7448, roughness: 1 });
+      add(g, new THREE.SphereGeometry(0.11, 14, 10).scale(1, 0.85, 1), pouch, -0.04, 0.09, -0.03);
+      add(g, new THREE.CylinderGeometry(0.03, 0.06, 0.07, 10), pouch, -0.04, 0.2, -0.03);
+      add(g, new THREE.TorusGeometry(0.035, 0.008, 5, 12), std('seed-string', { color: 0x5a4426, roughness: 1 }), -0.04, 0.19, -0.03, Math.PI / 2);
+      const look = item === 'hempSeed' ? { color: 0x6a6450, size: [0.016, 0.012, 0.012] } : item === 'cornSeed' ? { color: 0xe0b83a, size: [0.02, 0.012, 0.016] } : { color: 0xe8dfc4, size: [0.03, 0.008, 0.018] };
+      const seedMat = std(`seed-${item}`, { color: look.color, roughness: 0.6 });
+      for (let n = 0; n < 9; n++) {
+        const [sx, sy, sz] = look.size.map((v) => v * 1.6);
+        add(g, new THREE.SphereGeometry(1, 8, 6).scale(sx, sy, sz), seedMat, 0.06 + (rand() - 0.5) * 0.14, sy, 0.08 + (rand() - 0.5) * 0.12, 0, rand() * 3, 0);
+      }
+      return g;
+    }
     case 'cloth': {
       const colors = [0xc9bb94, 0x8a7a5a, 0xa89a74];
       for (let n = 0; n < 3; n++) {

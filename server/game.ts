@@ -94,6 +94,7 @@ import {
   type Vec3,
 } from '../shared/combat.ts';
 import { EXPLOSIVES, PLANT_RANGE, POINT_BLANK, THROW_SPEED, blastFalloff, isExplosive, type ExplosiveId } from '../shared/explosives.ts';
+import { CROPS, PLANTER_OUTPUT_SLOTS, PLANTER_SEED_SLOTS, WILD_HEMP_SEED, growthAt, ripeness } from '../shared/farming.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
 import { BIOMES, CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
 import { atLandmark, crateSpots, landmarks } from '../shared/landmarks.ts';
@@ -858,6 +859,10 @@ export class Game {
         p.slots[slot] = null;
         out.push(notice(id, `Your ${ITEMS[held.item].name} broke`));
       }
+    }
+    if (node.kind === 'hemp' && this.lootRand() < WILD_HEMP_SEED && roomFor(p.slots, 'hempSeed') > 0) {
+      addItem(p.slots, 'hempSeed', 1);
+      out.push(notice(id, 'Found a hemp seed. Plant it in a planter box'));
     }
     if (node.kind === 'scrap') {
       // Rummaging through a wreck sometimes turns up something to eat or drink.
@@ -1960,7 +1965,9 @@ export class Game {
       out.push(...this.tickCrafting(p, dt), ...this.tickSurvival(p, dt, now));
       if (!p.dead) out.push(...this.progress(p, 'minutes', dt / 60, now));
     }
-    for (const d of this.deployables.values()) if (d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
+    for (const d of this.deployables.values()) {
+      if ((d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) || (d.kind === 'planter' && this.tickPlanter(d, dt))) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
+    }
     for (const [id, fuse] of [...this.fuses]) {
       const d = this.deployables.get(id);
       if (!d) this.fuses.delete(id);
@@ -2122,6 +2129,36 @@ export class Game {
         furnaceOutput(d, smelt.into);
         changed = true;
       }
+    });
+    return changed;
+  }
+
+  /**
+   * Grows a planter's plants, at its land's pace. A ripe plant drops its crop and seeds into
+   * the harvest slots and uses up its seed; if they are too full it waits, ripe. Returns true
+   * when a plant visibly grew or was harvested, so everyone sees it.
+   */
+  private tickPlanter(d: Deployable, dt: number): boolean {
+    const grow = (d.grow ??= PLANTER_SEED_SLOTS.map(() => 0));
+    const rate = growthAt(this.seed, d.x, d.z);
+    let changed = false;
+    PLANTER_SEED_SLOTS.forEach((slot, n) => {
+      const seed = d.slots[slot];
+      const crop = seed && CROPS[seed.item];
+      if (!seed || !crop) {
+        if (grow[n] !== 0) changed = true;
+        grow[n] = 0;
+        return;
+      }
+      const stage = Math.floor(ripeness(seed.item, grow[n]) * 8);
+      grow[n] = Math.min(crop.seconds, grow[n] + dt * rate);
+      if (grow[n] >= crop.seconds && planterHasRoom(d, crop.yields)) {
+        for (const [item, count] of crop.yields) planterOutput(d, item, count);
+        seed.count -= 1;
+        if (seed.count === 0) d.slots[slot] = null;
+        grow[n] = 0;
+        changed = true;
+      } else if (Math.floor(ripeness(seed.item, grow[n]) * 8) !== stage) changed = true;
     });
     return changed;
   }
@@ -2623,6 +2660,18 @@ function furnaceOutput(d: Deployable, item: ItemId) {
     const free = FURNACE_OUTPUT_SLOTS.find((i) => !d.slots[i]);
     if (free !== undefined) d.slots[free] = { item, count: 1 };
   }
+}
+
+/** Whether a planter's harvest slots can take all of a crop. */
+function planterHasRoom(d: Deployable, yields: [ItemId, number][]): boolean {
+  const slots = PLANTER_OUTPUT_SLOTS.map((i) => (d.slots[i] ? { ...d.slots[i]! } : null));
+  return yields.every(([item, count]) => addItem(slots, item, count) === 0);
+}
+
+function planterOutput(d: Deployable, item: ItemId, count: number) {
+  const slots = PLANTER_OUTPUT_SLOTS.map((i) => d.slots[i]);
+  addItem(slots, item, count);
+  PLANTER_OUTPUT_SLOTS.forEach((i, n) => (d.slots[i] = slots[n]));
 }
 
 function isVec3(v: unknown): v is Vec3 {

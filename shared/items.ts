@@ -17,6 +17,9 @@ export type ItemId =
   | 'gunpowder'
   | 'cloth'
   | 'lowGradeFuel'
+  | 'hempSeed'
+  | 'cornSeed'
+  | 'pumpkinSeed'
   // Tools
   | 'rock'
   | 'buildingPlan'
@@ -32,6 +35,7 @@ export type ItemId =
   | 'storageBox'
   | 'toolCupboard'
   | 'sleepingBag'
+  | 'planter'
   | 'woodenDoor'
   | 'metalDoor'
   | 'codeLock'
@@ -100,6 +104,8 @@ export type ItemId =
   | 'bottledWater'
   | 'rawMeat'
   | 'cookedMeat'
+  | 'corn'
+  | 'pumpkin'
   | 'feedSack'
   // Armour
   | 'burlapHeadwrap'
@@ -220,6 +226,9 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   sulfur: res('Sulfur', 'Mix it with charcoal to make gunpowder.'),
   hqmOre: res('High Quality Metal Ore', 'Mined from rare blue-grey rocks. Smelts slowly.'),
   hqm: res('High Quality Metal', 'Needed for the better guns and workbench levels 2 and 3.'),
+  hempSeed: { name: 'Hemp Seed', kind: 'resource', stack: 50, description: 'Sometimes found when picking wild hemp. Plant it in a planter box to grow cloth.' },
+  cornSeed: { name: 'Corn Seed', kind: 'resource', stack: 50, description: 'Found in crates. Plant it in a planter box to grow corn.' },
+  pumpkinSeed: { name: 'Pumpkin Seed', kind: 'resource', stack: 50, description: 'Found in crates. Plant it in a planter box to grow pumpkins, which are food and water in one.' },
   charcoal: res('Charcoal', 'Left over when a furnace burns wood.'),
   gunpowder: res('Gunpowder', 'Made from charcoal and sulfur. Every bullet needs some.'),
   cloth: res('Cloth', 'Picked from hemp plants.'),
@@ -277,6 +286,12 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     description: 'Put it inside your base. Nobody else can build within 18 m, and their hits barely scratch your walls. Press E on it to let a friend build too.',
   },
   sleepingBag: { name: 'Sleeping Bag', kind: 'deployable', stack: 1, description: 'Lay it down in your base and wake up there when you die.' },
+  planter: {
+    name: 'Planter Box',
+    kind: 'deployable',
+    stack: 1,
+    description: 'A box of soil for three plants. Put seeds in it (E) and they grow by themselves; crops land in its harvest slots. Grows fastest in Deadwood Forest, slowest in the Frostpeaks.',
+  },
   woodenDoor: { name: 'Wooden Door', kind: 'deployable', stack: 1, description: 'Hang it in a doorway (edit a wall with G). E opens and closes it.' },
   metalDoor: { name: 'Sheet Metal Door', kind: 'deployable', stack: 1, description: 'A much tougher door. Takes five satchel charges or two C4 to blow open.' },
   codeLock: { name: 'Code Lock', kind: 'deployable', stack: 5, description: 'Fit it to a door and pick a 4-digit code. Only you, and whoever knows the code, can open it.' },
@@ -432,6 +447,8 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     consume: { food: 35, water: 2 },
     description: 'Seared over a furnace. Filling, and Ashhounds and Frost Bears will take it from your hand: feed one enough and it is yours.',
   },
+  corn: { name: 'Corn', kind: 'food', stack: 20, consume: { food: 20, water: 6 }, description: 'A cob grown in a planter box. Left click to eat.' },
+  pumpkin: { name: 'Pumpkin', kind: 'food', stack: 10, consume: { food: 30, water: 20 }, description: 'Grown in a planter box. Filling and full of water. Left click to eat.' },
   feedSack: {
     name: 'Feed Sack',
     kind: 'food',
@@ -576,6 +593,7 @@ export const RECIPES: Recipe[] = [
   { item: 'workbench', count: 1, cost: { wood: 250, metal: 50, scrap: 50 }, time: 10, category: 'Construction' },
   { item: 'toolCupboard', count: 1, cost: { wood: 300 }, time: 6, category: 'Construction' },
   { item: 'sleepingBag', count: 1, cost: { cloth: 30 }, time: 3, category: 'Construction' },
+  { item: 'planter', count: 1, cost: { wood: 150, stone: 20 }, time: 4, category: 'Construction' },
   { item: 'woodenDoor', count: 1, cost: { wood: 150 }, time: 4, category: 'Construction' },
   { item: 'metalDoor', count: 1, cost: { metal: 150 }, time: 8, workbench: 1, category: 'Construction' },
   { item: 'codeLock', count: 1, cost: { metal: 100 }, time: 5, workbench: 1, category: 'Construction' },
