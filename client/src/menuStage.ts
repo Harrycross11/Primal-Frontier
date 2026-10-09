@@ -40,6 +40,8 @@ interface Framing {
   fov: number;
   /** How far left of the middle of the screen the subject sits, as a share of the width. */
   shift: number;
+  /** How far away things are sharpest (by default, whatever the camera looks at). */
+  focus?: number;
 }
 
 /** What each store pack is shown on, and in which of its paints. */
@@ -48,6 +50,8 @@ const PACK_SHOTS: Record<string, { kind: VehicleKind; paint: number }> = {
   neon: { kind: 'pickup', paint: 21 },
   camo: { kind: 'jeep', paint: 24 },
   legend: { kind: 'van', paint: 31 },
+  /** The news card's picture: an old pickup as found. */
+  news: { kind: 'pickup', paint: 0 },
 };
 
 export class MenuStage {
@@ -62,6 +66,7 @@ export class MenuStage {
   private aim = new THREE.Vector3();
   private fov = 40;
   private shift = 0;
+  private focus = 5;
   private time = 0;
   private started = false;
   /** Where the car is parked, which way the shot looks back from, and across it. */
@@ -71,6 +76,8 @@ export class MenuStage {
   private heading: number;
   /** The landmark the scene is set at, and its land. */
   readonly place: { landmark: string; land: string };
+  /** A soft key light on the survivor, as in a photo shoot, so their face isn't lost against the sun. */
+  private key = new THREE.SpotLight(0xffe6cc, 55, 18, 0.45, 0.9, 2);
   /** Clutter taken out of the shot, put back for the game. */
   private cleared: THREE.Object3D[] = [];
   /** Called once the first frame is on screen. */
@@ -128,6 +135,10 @@ export class MenuStage {
     this.cars = new Vehicles(this.world.scene, { engine() {}, puff() {} } as never, seed);
     this.park();
     this.avatar = this.dress(look);
+    const keyAt = this.survivorAt();
+    this.key.position.copy(keyAt).addScaledVector(this.out, 3.2).addScaledVector(this.side, -2.2).add(new THREE.Vector3(0, 3.8, 0));
+    this.key.target.position.copy(keyAt).add(new THREE.Vector3(0, 1, 0));
+    this.world.scene.add(this.key, this.key.target);
 
     const start = this.framing('play');
     this.eye.copy(start.from);
@@ -148,8 +159,9 @@ export class MenuStage {
     const a = new Avatar(MENU_ACCENT, undefined, look);
     const at = this.survivorAt();
     a.root.position.copy(at);
-    const cam = this.framing('character').from;
-    a.root.rotation.y = Math.atan2(cam.x - at.x, cam.z - at.z) - 0.35;
+    a.root.visible = this.shot !== 'car';
+    const cam = this.framing('play').from;
+    a.root.rotation.y = Math.atan2(cam.x - at.x, cam.z - at.z) - 0.3;
     this.world.scene.add(a.root);
     return a;
   }
@@ -179,6 +191,8 @@ export class MenuStage {
 
   show(shot: Shot) {
     this.shot = shot;
+    // The garage is the car's shot alone.
+    this.avatar.root.visible = shot !== 'car';
   }
 
   /** For screenshots: cuts straight to the current shot instead of easing there. */
@@ -188,6 +202,7 @@ export class MenuStage {
     this.aim.copy(f.to);
     this.fov = f.fov;
     this.shift = f.shift;
+    this.focus = f.focus ?? f.from.distanceTo(f.to);
   }
 
   /** The camera for each tab, built round the parked car with its landmark behind. */
@@ -199,13 +214,15 @@ export class MenuStage {
     const survivor = this.survivorAt();
     switch (shot) {
       case 'character':
-        return { from: ground(survivor.clone().addScaledVector(this.out, 5.2).addScaledVector(this.side, 0.9).add(up(1.35)), 1.2), to: survivor.clone().add(up(0.95)), fov: 30, shift: 0.16 };
+        return { from: ground(survivor.clone().addScaledVector(this.out, 4.4).addScaledVector(this.side, 1.0).add(up(1.15)), 1.1), to: survivor.clone().add(up(0.93)), fov: 30, shift: 0.17 };
       case 'car':
-        return { from: ground(at(7.5, -4.5, 1.7), 1.2), to: s.clone().add(up(0.7)), fov: 38, shift: 0.15 };
+        return { from: ground(at(7, -3.6, 1.6), 1.2), to: s.clone().add(up(0.7)), fov: 36, shift: 0.15 };
       case 'store':
-        return { from: ground(at(18, -6, 5.5), 2), to: at(-14, 0, 3), fov: 46, shift: 0 };
+        // The play shot thrown out of focus, as a quiet backdrop for the cards.
+        return { ...this.framing('play'), focus: 0.6 };
       default:
-        return { from: ground(at(9.5, 3.2, 1.55), 1.2), to: at(0.4, 1.4, 1.25), fov: 40, shift: 0.17 };
+        // A hero shot: the survivor large and sharp, the car and landmark soft behind.
+        return { from: ground(survivor.clone().addScaledVector(this.out, 4.6).addScaledVector(this.side, -0.5).add(up(1.2)), 1.1), to: survivor.clone().add(up(0.92)), fov: 30, shift: 0.06 };
     }
   }
 
@@ -219,6 +236,7 @@ export class MenuStage {
     this.aim.lerp(f.to, k);
     this.fov += (f.fov - this.fov) * k;
     this.shift += (f.shift - this.shift) * k;
+    this.focus += ((f.focus ?? f.from.distanceTo(f.to)) - this.focus) * k;
 
     const cam = this.gfx.camera;
     cam.position.copy(this.eye);
@@ -231,6 +249,7 @@ export class MenuStage {
     cam.setViewOffset(w, h, w * shift, 0, w, h);
     cam.updateProjectionMatrix();
 
+    this.gfx.setFocus(this.focus);
     this.avatar.update(dt, false);
     this.cars.update(dt);
     this.world.update(dt, this.spot, this.time);
@@ -263,7 +282,7 @@ export class MenuStage {
     const vh = Math.min(height, Math.floor(canvas.height / ratio));
     for (const pack of packs) {
       const shot = PACK_SHOTS[pack];
-      if (!shot || !PAINTS[shot.paint]) continue;
+      if (!shot || PAINTS[shot.paint] === undefined) continue;
       this.park(shot);
       this.cars.update(0.016);
       const s = this.spot;
@@ -291,9 +310,10 @@ export class MenuStage {
    */
   handOver(serverNow: number): { world: World; gfx: Graphics; dayNight: DayNight } {
     this.gfx.renderer.setAnimationLoop(null);
-    this.world.scene.remove(this.avatar.root);
+    this.world.scene.remove(this.avatar.root, this.key, this.key.target);
     this.cars.sync([]);
     for (const g of this.cleared) g.visible = true;
+    this.gfx.setFocus(null);
     const cam = this.gfx.camera;
     cam.clearViewOffset();
     cam.fov = 70;

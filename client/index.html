@@ -96,7 +96,6 @@
       #join-error { min-height: 0; margin-top: 8px; color: #e48a6e; font-size: 13px; font-weight: 600; }
       #join-error:empty { display: none; }
       .lobby-foot { position: absolute; left: 40px; bottom: 30px; font-family: 'Barlow Condensed', sans-serif; letter-spacing: .2em; text-transform: uppercase; font-size: 12px; color: var(--muted); }
-      .lobby-foot b { display: block; font-size: 44px; font-weight: 600; letter-spacing: .12em; color: var(--bone); line-height: 1; margin-bottom: 8px; text-shadow: 0 2px 24px rgba(0,0,0,.5); }
       /* Store */
       .page.store { flex-direction: column; overflow-y: auto; max-width: 1240px; width: 100%; margin: 0 auto; }
       .page h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 40px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; margin: 0; line-height: 1; }
@@ -184,6 +183,50 @@
         .page.play .side { max-height: 100%; overflow-y: auto; }
         .lobby-shade { background: linear-gradient(to bottom, rgba(8,7,6,.7) 0%, transparent 20%, rgba(8,7,6,.55) 50%, rgba(8,7,6,.9) 100%); }
       }
+
+      /* Logo, news, settings and motion */
+      .brand { display: flex; align-items: center; gap: 12px; }
+      .brand::before { display: none; }
+      .brand .mark { width: 34px; height: 34px; color: var(--rust); flex: none; }
+      .brand .word b { display: block; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: .26em; color: var(--bone); }
+      .brand .word span { display: block; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 10.5px; line-height: 1; letter-spacing: .66em; color: var(--muted); margin-top: 5px; }
+      .icon-btn { width: 38px; height: 38px; display: grid; place-items: center; background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer; padding: 0; transition: color .15s, border-color .15s, transform .4s; }
+      .icon-btn svg { width: 22px; height: 22px; }
+      .icon-btn:hover { color: var(--bone); border-color: var(--line); transform: rotate(45deg); }
+      .lobby-left { position: absolute; left: 40px; bottom: 30px; display: flex; flex-direction: column; gap: 16px; width: 340px; }
+      .news { display: flex; flex-direction: column; text-align: left; padding: 0; border: 1px solid var(--line); background: var(--sheet); backdrop-filter: blur(10px); color: var(--bone); cursor: pointer; font-family: inherit; overflow: hidden; transition: border-color .2s; }
+      .news:hover { border-color: rgba(235,230,218,.35); }
+      .news-art { aspect-ratio: 16 / 7; background: #1a1714 center 60% / cover no-repeat; transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+      .news:hover .news-art { transform: scale(1.04); }
+      .news-body { padding: 12px 16px 14px; border-top: 2px solid var(--rust); position: relative; background: inherit; }
+      .news .kicker { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--rust-hi); }
+      .news-title { font-family: 'Barlow Condensed', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-top: 2px; }
+      .news-sub { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+      .lobby-foot { position: static; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .lobby-foot #land-title { color: var(--bone); }
+      .lobby-foot .pin { width: 7px; height: 7px; background: var(--rust); transform: rotate(45deg); }
+      .build-tag { position: absolute; right: 40px; bottom: 8px; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: rgba(235,230,218,.35); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; }
+      #lobby-settings { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(8,7,6,.55); backdrop-filter: blur(4px); }
+      #lobby-settings[hidden] { display: none; }
+      #lobby-settings .panel-dark { width: min(440px, calc(100vw - 32px)); border-top: 2px solid var(--rust); background: rgba(13,12,10,.95); }
+      .set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+      .set-row:first-of-type { border-top: 0; }
+      .set-row > span { font-size: 15px; }
+      .set-row .ghost { flex: none; padding: 0 18px; }
+      .set-done { display: flex; justify-content: flex-end; margin-top: 8px; }
+      .set-done .ghost { flex: none; padding: 0 26px; }
+      #play { position: relative; overflow: hidden; }
+      #play::after { content: ''; position: absolute; top: 0; bottom: 0; left: -60%; width: 40%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.18), transparent); transform: skewX(-20deg); transition: left .6s ease; }
+      #play:hover::after { left: 120%; }
+      .pack .art { transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+      .pack { overflow: hidden; }
+      .pack:hover .art { transform: scale(1.04); }
+      @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+      .page.on .side > *, .page.on .lobby-left > *, .page.on > *:not(.lobby-left):not(.side):not(.build-tag) { animation: rise .5s cubic-bezier(.2,.8,.2,1) both; }
+      .page.on .side > *:nth-child(2), .page.on .lobby-left > *:nth-child(2) { animation-delay: .08s; }
+      .page.on > *:nth-child(3) { animation-delay: .05s; } .page.on > *:nth-child(4) { animation-delay: .1s; } .page.on > *:nth-child(5) { animation-delay: .15s; } .page.on > *:nth-child(6) { animation-delay: .2s; }
+      @media (max-width: 1100px) { .lobby-left { width: 280px; } .news-sub { display: none; } }
+      @media (max-width: 760px) { .lobby-left, .build-tag { display: none; } .brand .word span { display: none; } }
 
       #hud[hidden] { display: none; }
       #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
@@ -497,18 +540,26 @@
       <div class="lobby-veil"></div>
       <div class="lobby-ui">
         <header class="lobby-top">
-          <div class="brand">PRIMAL <span>FRONTIER</span></div>
+          <div class="brand"><svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg><div class="word"><b>PRIMAL</b><span>FRONTIER</span></div></div>
           <nav id="lobby-tabs">
             <button data-tab="play" class="on">Play</button>
             <button data-tab="store">Store</button>
             <button data-tab="character">Character</button>
             <button data-tab="car">Car</button>
           </nav>
-          <div class="lobby-me"><div class="coins" title="Coins"><span class="coin"></span><b id="coin-count">–</b></div><div id="lobby-name-chip">Survivor</div></div>
+          <div class="lobby-me"><div class="coins" title="Coins"><span class="coin"></span><b id="coin-count">–</b></div><div id="lobby-name-chip">Survivor</div>
+            <button id="lobby-gear" class="icon-btn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Zm8.4 4.6.1-1.2-.1-1.2 2-1.6-2-3.4-2.4.9a8 8 0 0 0-2.1-1.2L15.5 3h-4l-.4 2.5a8 8 0 0 0-2.1 1.2l-2.4-.9-2 3.4 2 1.6-.1 1.2.1 1.2-2 1.6 2 3.4 2.4-.9a8 8 0 0 0 2.1 1.2l.4 2.5h4l.4-2.5a8 8 0 0 0 2.1-1.2l2.4.9 2-3.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button></div>
         </header>
 
         <section class="page play on" data-page="play">
-          <div class="lobby-foot"><b id="land-title">The Wasteland</b><span id="land-sub">Survive · build · raid</span></div>
+          <div class="lobby-left">
+            <button class="news" id="news-card" type="button">
+              <div class="news-art" id="news-art"></div>
+              <div class="news-body"><div class="kicker">New update</div><div class="news-title">Cars, paint and the store</div><div class="news-sub">Four cars to drive and paint, plus chrome, neon, camo and legendary finishes.</div></div>
+            </button>
+            <div class="lobby-foot"><span class="pin"></span><span id="land-title">The Wasteland</span><span class="dot">·</span><span id="land-sub">Survival</span></div>
+          </div>
+          <div class="build-tag">Early access · build 0.12</div>
           <div class="side">
             <div class="panel-dark objectives">
               <h3>Daily challenges <small id="objective-reset"></small></h3>
@@ -562,6 +613,14 @@
         </section>
       </div>
       <div id="lobby-toast"></div>
+      <div id="lobby-settings" hidden>
+        <div class="panel-dark">
+          <h3>Settings</h3>
+          <div class="set-row"><span>Graphics</span><div class="seg" id="lobby-quality"><button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button></div></div>
+          <div class="set-row"><span>Display</span><button class="ghost" id="lobby-fullscreen" type="button">Full screen</button></div>
+          <div class="set-done"><button class="ghost" id="lobby-settings-done" type="button">Done</button></div>
+        </div>
+      </div>
     </div>
 
     <div id="hud" hidden>
@@ -595,7 +654,7 @@
       <div id="objective-banner"><small>Challenge complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin"></span><span id="objective-banner-reward"></span></span></div>
       <div id="pause" hidden>
         <div class="pause-left">
-          <div class="brand">PRIMAL <span>FRONTIER</span></div>
+          <div class="brand"><svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg><div class="word"><b>PRIMAL</b><span>FRONTIER</span></div></div>
           <button id="pause-resume" class="pause-big">Resume</button>
           <button data-section="objectives" class="on">Challenges</button>
           <button data-section="settings">Settings</button>

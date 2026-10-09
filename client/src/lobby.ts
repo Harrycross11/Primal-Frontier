@@ -4,6 +4,7 @@
 import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { COIN_BUNDLES, PACKS, type AccountView } from '../../shared/shop.ts';
 import { VEHICLES, VEHICLE_KINDS, type VehicleKind } from '../../shared/vehicles.ts';
+import type { Quality } from './graphics.ts';
 import type { MenuStage } from './menuStage.ts';
 import { swatch } from './paint.ts';
 
@@ -69,6 +70,41 @@ export class Lobby {
     this.renderBundles();
     this.renderStore();
     this.renderGarage();
+    $('news-card').addEventListener('click', () => this.show('store'));
+    // Settings: graphics quality (used by the menu's world and the game) and full screen.
+    const settings = $('lobby-settings');
+    const quality = () => {
+      let q = 'high';
+      try {
+        q = localStorage.getItem('pf-quality') ?? 'high';
+      } catch {
+        /* storage unavailable */
+      }
+      for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-quality button')) b.classList.toggle('on', b.dataset.q === q);
+    };
+    $('lobby-gear').addEventListener('click', () => {
+      quality();
+      settings.hidden = false;
+    });
+    $('lobby-settings-done').addEventListener('click', () => (settings.hidden = true));
+    settings.addEventListener('click', (e) => e.target === settings && (settings.hidden = true));
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-quality button')) {
+      b.addEventListener('click', () => {
+        const q = b.dataset.q as Quality;
+        if (this.stage) this.stage.gfx.setQuality(q);
+        else
+          try {
+            localStorage.setItem('pf-quality', q);
+          } catch {
+            /* storage unavailable */
+          }
+        quality();
+      });
+    }
+    $('lobby-fullscreen').addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen?.().catch(() => {});
+    });
   }
 
   show(tab: Tab) {
@@ -90,7 +126,8 @@ export class Lobby {
       $('join').classList.add('live');
       // A moment later, so the first frames of the world come first.
       setTimeout(() => {
-        this.art = stage.packArt(PACKS.map((p) => p.id));
+        this.art = stage.packArt([...PACKS.map((p) => p.id), 'news']);
+        if (this.art.news) $('news-art').style.backgroundImage = `url(${this.art.news})`;
         this.renderStore();
       }, 400);
     };

@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
@@ -216,6 +217,8 @@ export class Graphics {
   readonly camera: THREE.PerspectiveCamera;
   private composer: EffectComposer;
   private gtao: GTAOPass;
+  /** Depth of field, for the main menu's portrait shots; off in the game. */
+  private bokeh: BokehPass;
   private bloom: UnrealBloomPass;
   private shafts: ShaderPass;
   private grade: ShaderPass;
@@ -302,6 +305,9 @@ export class Graphics {
       });
     };
     this.composer.addPass(this.gtao);
+    this.bokeh = new BokehPass(scene, this.camera, { focus: 5, aperture: 0.0003, maxblur: 0.007 });
+    this.bokeh.enabled = false;
+    this.composer.addPass(this.bokeh);
     this.shafts = new ShaderPass(SunShaftShader);
     this.composer.addPass(this.shafts);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.22, 0.5, 1.6);
@@ -346,6 +352,13 @@ export class Graphics {
     this.renderer.setSize(innerWidth, innerHeight);
     this.composer.setSize(innerWidth, innerHeight);
     this.bloom.resolution.set(innerWidth / 2, innerHeight / 2);
+    this.bokeh.setSize(innerWidth, innerHeight);
+  }
+
+  /** Keeps things this far from the camera sharp and blurs what is nearer or further; null turns it off. */
+  setFocus(distance: number | null) {
+    this.bokeh.enabled = distance !== null;
+    if (distance !== null) (this.bokeh.uniforms as Record<string, THREE.IUniform>).focus.value = distance;
   }
 
   /**
