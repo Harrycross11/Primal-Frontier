@@ -6,7 +6,7 @@
     <title>Primal Frontier</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800&family=Barlow+Condensed:ital,wght@0,600;0,800;0,900;1,800;1,900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;0,900;1,800;1,900&display=swap" rel="stylesheet" />
     <style>
       :root {
         --ink: #f4ead8;
@@ -21,127 +21,168 @@
 
       .card { text-align: center; padding: 32px 32px; max-width: 420px; width: calc(100% - 32px); }
       /* ---------- Main menu ---------- */
-      #join { position: fixed; inset: 0; overflow: hidden; font-family: 'Barlow', system-ui, sans-serif;
-        background: radial-gradient(ellipse 80% 60% at 35% 70%, rgba(255,150,70,.28), transparent 70%),
-          linear-gradient(to top, #0b0907 0%, #1d140d 28%, #4a2a17 55%, #a5562b 80%, #e39a55 100%); }
+      :root {
+        --bone: #ebe6da;
+        --muted: #9a958a;
+        --line: rgba(235, 230, 218, .12);
+        --sheet: rgba(13, 12, 10, .74);
+        --rust: #c9562a;
+        --rust-hi: #dd6a37;
+        --gold: #d6b06a;
+      }
+      #join { position: fixed; inset: 0; overflow: hidden; font-family: 'Barlow', system-ui, sans-serif; font-weight: 500; color: var(--bone); }
       #join[hidden] { display: none; }
-      #join::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 34%; pointer-events: none;
-        background: linear-gradient(to top, #0b0907 20%, transparent); }
-      #join::after { content: ''; position: absolute; inset: 0; pointer-events: none;
-        background: radial-gradient(ellipse at 40% 55%, transparent 40%, rgba(0,0,0,.65) 100%); }
-      #look-preview { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
-      .lobby-ui { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; pointer-events: none; }
+      /* Shade over the live world: darker behind the menus on the right and along the top and bottom. */
+      .lobby-shade { position: absolute; inset: 0; pointer-events: none; transition: background .6s;
+        background: linear-gradient(to left, rgba(8,7,6,.78) 0%, rgba(8,7,6,.35) 34%, transparent 58%),
+          linear-gradient(to bottom, rgba(8,7,6,.85) 0%, rgba(8,7,6,.35) 14%, transparent 24%, transparent 72%, rgba(8,7,6,.75) 100%); }
+      #join.store .lobby-shade { background: linear-gradient(to bottom, rgba(8,7,6,.82), rgba(8,7,6,.62) 30%, rgba(8,7,6,.86)); }
+      /* Black until the world's first frame is drawn, then it fades away. */
+      .lobby-veil { position: absolute; inset: 0; background: #0d0c0b; transition: opacity 1.4s ease; pointer-events: none; }
+      #join.live .lobby-veil { opacity: 0; }
+      .lobby-ui { position: absolute; inset: 0; display: flex; flex-direction: column; pointer-events: none; }
       .lobby-ui > * { pointer-events: auto; }
-      .lobby-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; background: linear-gradient(to bottom, rgba(0,0,0,.7), transparent); }
-      .brand { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-style: italic; font-size: 30px; line-height: .82; letter-spacing: 1px; color: #ffd28a;
-        text-shadow: 0 3px 0 #7a3a12; white-space: nowrap; }
-      .brand span { display: block; font-size: 17px; letter-spacing: 6px; color: #fff; text-shadow: none; }
-      #lobby-tabs { display: flex; gap: 6px; flex: 1; }
-      #lobby-tabs button { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 1.5px; padding: 8px 18px; color: rgba(255,255,255,.7);
-        background: none; border: 0; border-bottom: 4px solid transparent; cursor: pointer; text-transform: uppercase; transition: color .15s; }
-      #lobby-tabs button:hover { color: #fff; }
-      #lobby-tabs button.on { color: #fff; border-bottom-color: #ffc23a; }
-      .lobby-me { display: flex; align-items: center; gap: 10px; }
-      .coins { display: flex; align-items: center; gap: 6px; padding: 6px 12px 6px 8px; background: rgba(0,0,0,.55); border-radius: 6px; font-weight: 800; font-size: 18px; }
-      .coin { display: inline-block; width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3b0, #ffc23a 45%, #b36d0c); box-shadow: inset 0 0 0 2px #8a4f06; vertical-align: -4px; }
-      #lobby-name-chip { padding: 6px 12px; background: rgba(0,0,0,.55); border-radius: 6px; font-weight: 700; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .page { display: none; flex: 1; min-height: 0; padding: 12px 28px 22px; position: relative; }
+      .lobby-top { display: flex; align-items: center; gap: 44px; padding: 0 40px; height: 72px; border-bottom: 1px solid var(--line); flex: none; }
+      .brand { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 21px; letter-spacing: .3em; color: var(--bone); white-space: nowrap; display: flex; align-items: center; gap: 12px; }
+      .brand::before { content: ''; width: 4px; height: 22px; background: var(--rust); }
+      .brand span { color: var(--muted); font-weight: 500; }
+      #lobby-tabs { display: flex; gap: 34px; flex: 1; align-self: stretch; }
+      #lobby-tabs button { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 16px; letter-spacing: .2em; padding: 0; color: var(--muted);
+        background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; text-transform: uppercase; transition: color .15s; }
+      #lobby-tabs button:hover { color: var(--bone); }
+      #lobby-tabs button.on { color: var(--bone); border-bottom-color: var(--rust); }
+      .lobby-me { display: flex; align-items: center; gap: 22px; font-family: 'Barlow Condensed', sans-serif; letter-spacing: .08em; }
+      .coins { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 18px; color: var(--bone); }
+      .coin { display: inline-block; width: 16px; height: 16px; flex: none; vertical-align: -2px;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 .8 14.2 4.4v7.2L8 15.2 1.8 11.6V4.4Z' fill='%23d6b06a'/%3E%3Cpath d='M8 3.2 12.2 5.6v4.8L8 12.8 3.8 10.4V5.6Z' fill='%238a6a34'/%3E%3Ccircle cx='8' cy='8' r='1.9' fill='%23d6b06a'/%3E%3C/svg%3E") center / contain no-repeat; }
+      #lobby-name-chip { font-weight: 600; font-size: 16px; letter-spacing: .14em; text-transform: uppercase; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 22px; border-left: 1px solid var(--line); }
+      .page { display: none; flex: 1; min-height: 0; padding: 22px 40px 26px; position: relative; }
       .page.on { display: flex; }
-      .side { margin-left: auto; width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
-      .objective { padding: 8px 0; }
-      .panel-dark { background: rgba(10,8,6,.78); border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 16px 18px; backdrop-filter: blur(6px); }
-      .panel-dark h3, .page h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 10px; }
-      .panel-dark h3 { font-size: 20px; display: flex; justify-content: space-between; align-items: baseline; }
-      .panel-dark h3 small { font-family: 'Barlow', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0; opacity: .6; text-transform: none; }
-      .objective { padding: 10px 0; border-top: 1px solid rgba(255,255,255,.07); }
+      .side { margin-left: auto; width: min(372px, 100%); display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; }
+      .panel-dark { background: var(--sheet); border: 1px solid var(--line); padding: 18px 20px; backdrop-filter: blur(10px); }
+      .panel-dark h3 { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .22em; text-transform: uppercase; margin: 0 0 6px; color: var(--muted);
+        display: flex; justify-content: space-between; align-items: baseline; }
+      .panel-dark h3 small { font-family: 'Barlow', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .02em; text-transform: none; }
+      .objective { padding: 9px 0; border-top: 1px solid var(--line); }
       .objective:first-of-type { border-top: 0; }
-      .objective .row { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 15px; }
-      .objective .reward { display: flex; align-items: center; gap: 4px; color: #ffd15a; font-weight: 800; white-space: nowrap; }
-      .objective .reward .coin { width: 15px; height: 15px; }
-      .objective .track { height: 6px; margin-top: 6px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; }
-      .objective .track i { display: block; height: 100%; background: linear-gradient(90deg, #ffb02e, #ffd75a); }
-      .objective .count { font-size: 12px; opacity: .6; margin-top: 3px; }
-      .objective.done .row { opacity: .6; }
-      .objective.done .track i { background: #6fd36a; }
-      .play-box { margin-top: auto; }
-      .mode-card { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 6px; background: linear-gradient(135deg, rgba(255,140,60,.25), rgba(0,0,0,.6)); border: 1px solid rgba(255,190,110,.35); margin-bottom: 10px; }
-      .mode-card .mode { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-style: italic; font-size: 26px; line-height: 1; }
-      .mode-card .meta { font-size: 13px; opacity: .8; margin-top: 3px; }
-      .field-label { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .6; margin-bottom: 4px; }
-      #name { width: 100%; padding: 12px 14px; font-size: 17px; font-weight: 700; border-radius: 4px; border: 1px solid rgba(255,255,255,.18);
-        background: rgba(0,0,0,.5); color: var(--ink); outline: none; font-family: inherit; }
-      #name:focus { border-color: #ffc23a; }
-      #play { margin-top: 10px; width: 100%; padding: 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 38px; font-weight: 900; font-style: italic; letter-spacing: 2px;
-        border: 0; border-radius: 4px; background: linear-gradient(#ffe066, #ffb81c); color: #2a1a00; cursor: pointer; box-shadow: 0 6px 0 #b77a00, 0 10px 30px rgba(255,180,30,.35);
-        transition: transform .08s; text-transform: uppercase; }
-      #play:hover { transform: translateY(-1px); filter: brightness(1.06); }
-      #play:active { transform: translateY(3px); box-shadow: 0 3px 0 #b77a00; }
-      #play:disabled { opacity: .6; cursor: wait; }
-      #loading { margin-top: 10px; font-size: 13px; opacity: .85; }
+      .objective .row { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; font-weight: 500; }
+      .objective .reward { display: flex; align-items: center; gap: 5px; color: var(--gold); font-weight: 600; white-space: nowrap; font-size: 14px; }
+      .objective .reward .coin { width: 13px; height: 13px; }
+      .objective .track { height: 2px; margin-top: 7px; background: rgba(235,230,218,.12); }
+      .objective .track i { display: block; height: 100%; background: var(--bone); }
+      .objective .count { font-size: 12px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+      .objective.done .row span:first-child { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(235,230,218,.35); }
+      .objective.done .track i { background: var(--gold); }
+      .play-box { margin-top: auto; padding: 0; }
+      .mode-card { padding: 16px 20px 14px; border-bottom: 1px solid var(--line); }
+      .mode-card .kicker { font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; }
+      .mode-card .mode { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 26px; letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; }
+      .mode-card .meta { font-size: 13px; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+      .mode-card .meta::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #7fae5a; box-shadow: 0 0 8px rgba(127,174,90,.7); }
+      .play-fields { padding: 12px 20px 18px; }
+      .field-label { font-size: 11px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-family: 'Barlow Condensed', sans-serif; }
+      #name { width: 100%; padding: 10px 0 8px; font-size: 18px; font-weight: 600; border: 0; border-bottom: 1px solid rgba(235,230,218,.28); border-radius: 0;
+        background: none; color: var(--bone); outline: none; font-family: inherit; letter-spacing: .02em; }
+      #name:focus { border-bottom-color: var(--rust); }
+      #play { margin-top: 14px; width: 100%; height: 58px; flex: none; font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 600; letter-spacing: .32em; text-indent: .32em;
+        border: 0; border-radius: 0; background: var(--rust); color: #fff; cursor: pointer; text-transform: uppercase; transition: background .15s; }
+      #play:hover { background: var(--rust-hi); }
+      #play:active { background: #b44c24; }
+      #play:disabled { background: #5a4a40; color: rgba(255,255,255,.6); cursor: wait; }
+      #loading { margin-top: 12px; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
       #loading[hidden] { display: none; }
-      #loading .bar { height: 5px; margin-top: 6px; border-radius: 3px; background: rgba(0,0,0,.45); overflow: hidden; }
-      #loading-fill { width: 0; height: 100%; background: #ffc23a; transition: width .2s; }
-      #join-error { min-height: 20px; margin-top: 8px; color: #ffb199; font-weight: 600; }
-      .lobby-hint { position: absolute; left: 28px; bottom: 22px; font-size: 13px; opacity: .65; line-height: 1.6; max-width: 46%; }
+      #loading .bar { height: 2px; margin-top: 6px; background: rgba(235,230,218,.12); overflow: hidden; }
+      #loading-fill { width: 0; height: 100%; background: var(--bone); transition: width .2s; }
+      #join-error { min-height: 0; margin-top: 8px; color: #e48a6e; font-size: 13px; font-weight: 600; }
+      #join-error:empty { display: none; }
+      .lobby-foot { position: absolute; left: 40px; bottom: 30px; font-family: 'Barlow Condensed', sans-serif; letter-spacing: .2em; text-transform: uppercase; font-size: 12px; color: var(--muted); }
+      .lobby-foot b { display: block; font-size: 44px; font-weight: 600; letter-spacing: .12em; color: var(--bone); line-height: 1; margin-bottom: 8px; text-shadow: 0 2px 24px rgba(0,0,0,.5); }
       /* Store */
-      .page.store { flex-direction: column; overflow-y: auto; }
-      .store-head { display: flex; align-items: baseline; gap: 14px; }
-      .page h2 { font-size: 40px; font-style: italic; font-weight: 900; margin: 4px 0 2px; }
-      .store-sub { opacity: .7; margin-bottom: 14px; }
-      .pack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
-      .pack { position: relative; border-radius: 6px; overflow: hidden; background: #15100c; border: 2px solid rgba(255,255,255,.1); display: flex; flex-direction: column; transition: transform .12s, border-color .12s; }
-      .pack:hover { transform: translateY(-3px); border-color: #ffc23a; }
-      .pack .art { height: 150px; position: relative; display: flex; align-items: flex-end; padding: 10px; }
-      .pack .art .chips { display: flex; gap: 6px; }
-      .pack .art .chips i { width: 30px; height: 30px; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,.6), inset 0 0 0 2px rgba(255,255,255,.4); }
-      .pack .tag { position: absolute; top: 10px; left: 10px; padding: 3px 8px; background: #ffc23a; color: #2a1a00; font-weight: 900; font-size: 11px; letter-spacing: 1px; border-radius: 3px; }
-      .pack .info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-      .pack .name { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 800; text-transform: uppercase; line-height: 1; }
-      .pack .blurb { font-size: 13px; opacity: .7; }
-      .pack button { margin-top: auto; padding: 9px; border: 0; border-radius: 4px; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 800; cursor: pointer;
-        display: flex; align-items: center; justify-content: center; gap: 6px; background: #ffc23a; color: #2a1a00; }
-      .pack button.owned { background: rgba(111,211,106,.2); color: #8ff08a; cursor: default; }
-      .pack button.short { background: rgba(255,255,255,.12); color: var(--ink); }
-      .bundles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 8px; }
-      .bundle { padding: 14px; border-radius: 6px; background: linear-gradient(160deg, #2a1d10, #120d09); border: 1px solid rgba(255,194,58,.25); text-align: center; }
-      .bundle .n { font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 6px; }
-      .bundle button { margin-top: 8px; width: 100%; padding: 7px; border: 0; border-radius: 4px; font-weight: 800; background: rgba(255,255,255,.1); color: rgba(255,255,255,.55); cursor: not-allowed; }
-      .store-note { font-size: 12px; opacity: .55; margin-top: 8px; }
-      .store-section { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 2px; text-transform: uppercase; margin: 22px 0 4px; }
+      .page.store { flex-direction: column; overflow-y: auto; max-width: 1240px; width: 100%; margin: 0 auto; }
+      .page h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 40px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; margin: 0; line-height: 1; }
+      .store-sub { color: var(--muted); margin: 8px 0 26px; font-size: 15px; }
+      .store-section { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .22em; text-transform: uppercase; color: var(--muted);
+        margin: 0 0 12px; display: flex; align-items: center; gap: 14px; }
+      .store-section::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+      .pack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+      .pack { position: relative; background: var(--sheet); border: 1px solid var(--line); display: flex; flex-direction: column; transition: border-color .15s; backdrop-filter: blur(10px); }
+      .pack:hover { border-color: rgba(235,230,218,.32); }
+      .pack .art { aspect-ratio: 16 / 9; position: relative; background: #1a1714 center / cover no-repeat; overflow: hidden; }
+      .pack .art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(13,12,10,.55), transparent 45%); }
+      .pack .rarity { position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 1; background: var(--rust); }
+      .pack.legend .rarity { background: var(--gold); }
+      .pack .chips { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 5px; z-index: 1; }
+      .pack .chips i { width: 14px; height: 14px; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+      .pack .info { padding: 14px 16px 16px; display: flex; flex-direction: column; flex: 1; }
+      .pack .tier { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); }
+      .pack.legend .tier { color: var(--gold); }
+      .pack .name { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; line-height: 1.1; margin-top: 2px; }
+      .pack .blurb { font-size: 13px; color: var(--muted); margin-top: 4px; min-height: 34px; }
+      .pack .buy { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+      .pack .price { display: flex; align-items: center; gap: 7px; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: .06em; }
+      .pack button { padding: 8px 18px; border: 1px solid var(--rust); background: var(--rust); color: #fff; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; cursor: pointer; }
+      .pack button:hover { background: var(--rust-hi); border-color: var(--rust-hi); }
+      .pack button.short { background: none; border-color: rgba(235,230,218,.25); color: var(--muted); }
+      .pack button.owned { background: none; border-color: transparent; color: var(--gold); cursor: default; padding-right: 0; }
+      .bundles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+      .bundle { padding: 16px; background: var(--sheet); border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; backdrop-filter: blur(10px); }
+      .bundle .n { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
+      .bundle .p { text-align: right; font-size: 13px; color: var(--muted); line-height: 1.3; }
+      .bundle .p small { display: block; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; }
+      .store-note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+      .store-gap { height: 30px; flex: none; }
       /* Locker (character) and garage (car) */
-      .locker .look-row { display: grid; grid-template-columns: 82px 34px 1fr 34px; align-items: center; gap: 4px; margin: 4px 0; font-size: 14px; }
-      .look-label { opacity: .7; font-weight: 700; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
-      .look-value { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
-      .look-row button, .look-buttons button, .garage-models button { height: 34px; border: 0; border-radius: 4px; background: rgba(255,255,255,.1); color: var(--ink); font-size: 18px; cursor: pointer; font-family: inherit; }
-      .look-row button:hover, .look-buttons button:hover, .garage-models button:hover { background: rgba(255,255,255,.2); }
-      .look-buttons { display: flex; gap: 8px; margin-top: 10px; }
-      .look-buttons button { flex: 1; font-size: 14px; font-weight: 700; }
-      .garage-models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .garage-models button { height: auto; padding: 8px 10px; text-align: left; outline: 2px solid transparent; }
-      .garage-models button b { display: block; font-size: 15px; }
-      .garage-models button span { font-size: 12px; opacity: .7; }
-      .garage-models button.on { outline-color: #ffc23a; background: rgba(255,194,58,.16); }
-      .garage-stats { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; font-size: 12px; margin-top: 10px; align-items: center; }
-      .garage-stats i { display: block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ffb02e, #ffd75a); }
-      #garage-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin-top: 6px; max-height: 34vh; overflow-y: auto; padding: 4px; }
-      #garage-swatches .paint-group { grid-column: 1 / -1; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .7; margin-top: 4px; }
-      #garage-swatches button { aspect-ratio: 1; border-radius: 50%; border: 0; cursor: pointer; background: rgba(255,255,255,.12); font-size: 9px; font-weight: 800; color: var(--ink);
-        outline: 3px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); position: relative; }
-      #garage-swatches button.on { outline-color: #fff; }
-      #garage-swatches button.locked { opacity: .45; }
-      #garage-swatches button.locked::after { content: '🔒'; position: absolute; right: -3px; bottom: -3px; font-size: 10px; }
-      .garage-note { font-size: 12px; opacity: .65; margin-top: 10px; line-height: 1.5; }
-      #lobby-toast { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); z-index: 5; padding: 10px 18px; border-radius: 4px; background: rgba(10,8,6,.9);
-        border-left: 4px solid #ffc23a; font-weight: 700; opacity: 0; transition: opacity .3s; pointer-events: none; }
+      .locker .look-row { display: grid; grid-template-columns: 92px 30px 1fr 30px; align-items: center; gap: 6px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
+      .locker .look-row:first-child { border-top: 0; }
+      .look-label { color: var(--muted); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; }
+      .look-value { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+      .look-row button { height: 30px; border: 1px solid transparent; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; font-family: inherit; }
+      .look-row button:hover { color: var(--bone); border-color: var(--line); }
+      .look-buttons { display: flex; gap: 10px; margin-top: 14px; }
+      .look-buttons button, .ghost { flex: 1; height: 38px; border: 1px solid rgba(235,230,218,.25); background: none; color: var(--bone); cursor: pointer;
+        font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      .look-buttons button:hover, .ghost:hover { border-color: var(--bone); }
+      .garage-models { display: flex; flex-direction: column; }
+      .garage-models button { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 8px 12px; text-align: left; cursor: pointer; font-family: inherit; color: var(--bone);
+        background: none; border: 0; border-left: 2px solid transparent; border-top: 1px solid var(--line); }
+      .garage-models button:first-child { border-top-color: transparent; }
+      .garage-models button:hover { background: rgba(235,230,218,.05); }
+      .garage-models button b { font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+      .garage-models button span { font-size: 12px; color: var(--muted); }
+      .garage-models button.on { border-left-color: var(--rust); background: rgba(201,86,42,.12); }
+      .garage-stats { display: grid; grid-template-columns: 78px 1fr; gap: 8px 12px; font-size: 11px; margin: 12px 0 4px; align-items: center; color: var(--muted);
+        font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      .garage-stats .meter { height: 4px; background: rgba(235,230,218,.12); }
+      .garage-stats i { display: block; height: 100%; background: var(--bone); }
+      .sub-head { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); margin: 14px 0 0; }
+      #garage-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; max-height: 26vh; overflow-y: auto; padding: 2px; }
+      #garage-swatches .paint-group, #paint-swatches .paint-group { grid-column: 1 / -1; font-size: 11px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); margin-top: 8px;
+        font-family: 'Barlow Condensed', sans-serif; display: flex; justify-content: space-between; }
+      #garage-swatches .paint-group em, #paint-swatches .paint-group em { font-style: normal; color: var(--gold); letter-spacing: .12em; }
+      #garage-swatches button, #paint-swatches button { aspect-ratio: 1; border-radius: 0; border: 0; cursor: pointer; background: rgba(235,230,218,.08); font-size: 9px; font-weight: 600; color: var(--muted);
+        outline: 2px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.4); position: relative; font-family: 'Barlow Condensed', sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+      #garage-swatches button:hover, #paint-swatches button:hover { outline-color: rgba(235,230,218,.35); }
+      #garage-swatches button.on, #paint-swatches button.on { outline-color: var(--bone); }
+      #garage-swatches button.locked, #paint-swatches button.locked { filter: saturate(.35) brightness(.55); }
+      #garage-swatches button.locked::after, #paint-swatches button.locked::after { content: ''; position: absolute; inset: 0; margin: auto; width: 10px; height: 12px;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M2.5 5V3.5a2.5 2.5 0 0 1 5 0V5' fill='none' stroke='%23fff' stroke-width='1.4'/%3E%3Crect x='1' y='5' width='8' height='6.5' fill='%23fff'/%3E%3C/svg%3E") center / contain no-repeat; }
+      .garage-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+      .garage-note b { color: var(--bone); font-weight: 600; }
+      #lobby-toast { position: absolute; left: 50%; top: 92px; transform: translateX(-50%); z-index: 5; padding: 12px 20px; background: rgba(13,12,10,.94); border: 1px solid var(--line);
+        border-left: 3px solid var(--rust); font-size: 14px; font-weight: 500; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: calc(100vw - 32px); }
       #lobby-toast.show { opacity: 1; }
       @media (max-width: 760px) {
-        .lobby-top { flex-wrap: wrap; gap: 8px 14px; padding: 10px 16px; }
-        #lobby-tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
-        #lobby-tabs button { font-size: 17px; padding: 6px 10px; }
-        .page { padding: 8px 16px 16px; }
+        .lobby-top { flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px 0; height: auto; }
+        .brand { font-size: 17px; }
+        #lobby-tabs { order: 3; flex-basis: 100%; overflow-x: auto; gap: 22px; height: 40px; }
+        #lobby-tabs button { font-size: 14px; }
+        .lobby-me { margin-left: auto; gap: 14px; }
+        #lobby-name-chip { display: none; }
+        .page { padding: 12px 16px 16px; }
         .side { width: 100%; margin-left: 0; margin-top: auto; }
-        .lobby-hint { display: none; }
+        .lobby-foot { display: none; }
         .page.play .side { max-height: 100%; overflow-y: auto; }
+        .lobby-shade { background: linear-gradient(to bottom, rgba(8,7,6,.7) 0%, transparent 20%, rgba(8,7,6,.55) 50%, rgba(8,7,6,.9) 100%); }
       }
 
       #hud[hidden] { display: none; }
@@ -237,67 +278,69 @@
       #code button { padding: 10px 20px; font-size: 16px; font-weight: 800; border: 0; border-radius: 10px; cursor: pointer; background: rgba(255,255,255,.12); color: var(--ink); }
       #code #code-ok { background: var(--accent); color: #1d120a; }
       /* ---------- Pause menu and objective banner ---------- */
-      #pause { position: fixed; inset: 0; z-index: 45; display: flex; gap: 40px; padding: 48px 56px;
-        background: linear-gradient(90deg, rgba(8,6,4,.92) 0%, rgba(8,6,4,.75) 45%, rgba(8,6,4,.45) 100%); backdrop-filter: blur(3px); font-family: 'Barlow', system-ui, sans-serif; }
+      #pause { position: fixed; inset: 0; z-index: 45; display: flex; gap: 56px; padding: 56px 64px;
+        background: linear-gradient(90deg, rgba(8,7,6,.94) 0%, rgba(8,7,6,.8) 40%, rgba(8,7,6,.55) 100%); backdrop-filter: blur(6px) saturate(.7); font-family: 'Barlow', system-ui, sans-serif; color: var(--bone); }
       #pause[hidden] { display: none; }
-      .pause-left { display: flex; flex-direction: column; gap: 4px; width: 280px; flex: none; }
-      .pause-left .brand { margin-bottom: 26px; font-size: 38px; }
-      .pause-left .brand span { font-size: 20px; }
-      .pause-left button { text-align: left; padding: 10px 14px; font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
-        color: rgba(255,255,255,.75); background: none; border: 0; border-left: 4px solid transparent; cursor: pointer; }
-      .pause-left button:hover { color: #fff; background: rgba(255,255,255,.06); }
-      .pause-left button.on { color: #fff; border-left-color: #ffc23a; background: rgba(255,194,58,.08); }
-      .pause-left .pause-big { margin-bottom: 14px; background: linear-gradient(#ffe066, #ffb81c); color: #2a1a00; border-radius: 3px; font-size: 30px; font-style: italic; }
-      .pause-left .pause-big:hover { background: linear-gradient(#ffe880, #ffc030); color: #2a1a00; }
-      #pause-leave { margin-top: auto; font-size: 18px !important; color: #ff9c86 !important; }
+      .pause-left { display: flex; flex-direction: column; width: 290px; flex: none; }
+      .pause-left .brand { margin-bottom: 40px; }
+      .pause-left button { text-align: left; padding: 13px 16px; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
+        color: var(--muted); background: none; border: 0; border-left: 2px solid transparent; cursor: pointer; transition: color .12s, background .12s; }
+      .pause-left button:hover { color: var(--bone); background: rgba(235,230,218,.05); }
+      .pause-left button.on { color: var(--bone); border-left-color: var(--rust); background: rgba(201,86,42,.1); }
+      .pause-left .pause-big { margin-bottom: 22px; background: var(--rust); color: #fff; border-left: 0; text-align: center; height: 56px; font-size: 22px; letter-spacing: .3em; }
+      .pause-left .pause-big:hover { background: var(--rust-hi); color: #fff; }
+      #pause-leave { margin-top: auto; font-size: 15px !important; letter-spacing: .2em; border-top: 1px solid var(--line) !important; padding-top: 18px !important; }
+      #pause-leave:hover { color: #e48a6e !important; background: none !important; }
       .pause-right { flex: 1; max-width: 560px; align-self: center; }
-      .pause-coins { margin-top: 12px; font-size: 13px; opacity: .8; display: flex; align-items: center; gap: 6px; }
-      .seg { display: inline-flex; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.15); }
-      .seg button { padding: 8px 18px; border: 0; background: none; color: var(--ink); font-weight: 700; cursor: pointer; font-family: inherit; }
-      .seg button.on { background: #ffc23a; color: #2a1a00; }
-      .pause-note { font-size: 13px; opacity: .65; }
+      .pause-coins { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+      .pause-coins b { color: var(--bone); font-weight: 600; }
+      .seg { display: inline-flex; border: 1px solid var(--line); }
+      .seg button { padding: 9px 22px; border: 0; background: none; color: var(--muted); cursor: pointer; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      .seg button:hover { color: var(--bone); }
+      .seg button.on { background: var(--bone); color: #141210; }
+      .pause-note { font-size: 13px; color: var(--muted); margin-top: 14px; }
       .keys { width: 100%; border-collapse: collapse; font-size: 14px; }
-      .keys td { padding: 6px 0; border-top: 1px solid rgba(255,255,255,.07); }
-      .keys td:last-child { text-align: right; opacity: .9; }
-      kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 3px; background: rgba(255,255,255,.12); border-bottom: 2px solid rgba(0,0,0,.4); font: 700 12px 'Barlow', sans-serif; text-align: center; }
-      #objective-banner { position: fixed; right: 16px; top: 120px; z-index: 30; min-width: 260px; padding: 10px 16px 10px 14px; border-left: 5px solid #ffc23a;
-        background: linear-gradient(90deg, rgba(20,14,8,.95), rgba(20,14,8,.75)); font-family: 'Barlow', sans-serif; transform: translateX(120%); transition: transform .35s cubic-bezier(.2,.9,.3,1.2); pointer-events: none; }
+      .keys td { padding: 8px 0; border-top: 1px solid var(--line); }
+      .keys tr:first-child td { border-top: 0; }
+      .keys td:first-child { color: var(--muted); }
+      .keys td:last-child { text-align: right; }
+      kbd { display: inline-block; min-width: 22px; padding: 2px 6px; border: 1px solid rgba(235,230,218,.28); background: rgba(235,230,218,.06); font: 600 12px 'Barlow', sans-serif; text-align: center; color: var(--bone); }
+      #objective-banner { position: fixed; right: 20px; top: 120px; z-index: 30; min-width: 280px; padding: 12px 18px 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--gold);
+        background: rgba(13,12,10,.92); font-family: 'Barlow', sans-serif; color: var(--bone); transform: translateX(130%); transition: transform .45s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
       #objective-banner.show { transform: none; }
-      #objective-banner small { display: block; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #ffc23a; }
-      #objective-banner b { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 800; }
-      #objective-banner .reward { display: flex; align-items: center; gap: 5px; color: #ffd15a; font-weight: 800; }
+      #objective-banner small { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--gold); }
+      #objective-banner b { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin: 2px 0; }
+      #objective-banner .reward { display: flex; align-items: center; gap: 6px; color: var(--gold); font-weight: 600; font-size: 14px; }
       @media (max-width: 760px) {
         #pause { flex-direction: column; padding: 20px 16px; gap: 12px; overflow-y: auto; }
         .pause-left { width: 100%; }
         .pause-left .brand { display: none; }
       }
-      #paint { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.35); z-index: 40; }
+      #paint { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8,7,6,.45); z-index: 40; }
       #paint[hidden] { display: none; }
-      #paint .card { background: var(--panel); backdrop-filter: blur(6px); border-radius: 16px; padding: 20px 24px; width: min(460px, calc(100vw - 32px)); max-width: none; text-align: left; }
-      #paint h2 { margin: 0 0 12px; font-size: 18px; }
-      #paint button { font-family: inherit; color: var(--ink); border: 0; cursor: pointer; }
-      #paint-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+      #paint .card { background: rgba(13,12,10,.95) !important; border: 1px solid var(--line) !important; border-top: 2px solid var(--rust) !important; border-radius: 0 !important;
+        padding: 20px 22px; width: min(460px, calc(100vw - 32px)); max-width: none; text-align: left; color: var(--bone); }
+      #paint h2 { margin: 0 0 14px; }
+      #paint button { font-family: inherit; color: var(--bone); border: 0; cursor: pointer; }
+      #paint-tabs { display: flex; gap: 22px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
       #paint-tabs[hidden], #paint-models[hidden], #paint-all-row[hidden] { display: none; }
-      #paint-tabs button { padding: 6px 12px; border-radius: 8px; background: rgba(255,255,255,.1); font-size: 13px; font-weight: 700; }
-      #paint-tabs button.on { background: var(--accent); color: #1d120a; }
-      #paint-preset { width: 100%; margin-bottom: 10px; padding: 9px 12px; border-radius: 6px; background: linear-gradient(90deg, rgba(255,194,58,.3), rgba(255,194,58,.1)) !important; font-weight: 800; text-align: left; }
+      #paint-tabs button { padding: 0 0 8px; background: none; border-bottom: 2px solid transparent !important; margin-bottom: -1px; color: var(--muted) !important;
+        font-family: 'Barlow Condensed', sans-serif !important; font-size: 14px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      #paint-tabs button.on { color: var(--bone) !important; border-bottom-color: var(--rust) !important; }
+      #paint-preset { width: 100%; margin-bottom: 12px; padding: 10px 12px; background: rgba(201,86,42,.14) !important; border-left: 2px solid var(--rust) !important; text-align: left;
+        font-family: 'Barlow Condensed', sans-serif !important; font-size: 15px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
       #paint-preset[hidden] { display: none; }
-      #paint-models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
-      #paint-models button { padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.08); text-align: left; outline: 2px solid transparent; }
-      #paint-models button b { display: block; font-size: 14px; }
-      #paint-models button span { font-size: 12px; opacity: .75; }
-      #paint-models button.on { outline-color: var(--accent); background: rgba(255,122,47,.18); }
-      #paint-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
-      #paint-swatches button { aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); font-size: 10px; font-weight: 800; outline: 3px solid transparent; outline-offset: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
-      #paint-swatches button.on { outline-color: var(--ink); }
-      #paint-swatches { max-height: 46vh; overflow-y: auto; padding: 4px; }
-      #paint-swatches .paint-group { grid-column: 1 / -1; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: .7; margin-top: 6px; }
-      #paint-swatches button.locked { opacity: .45; position: relative; }
-      #paint-swatches button.locked::after { content: '🔒'; position: absolute; right: -3px; bottom: -3px; font-size: 11px; }
-      #paint-name { margin-top: 10px; font-size: 13px; opacity: .8; }
+      #paint-models { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+      #paint-models button { padding: 8px 10px; background: rgba(235,230,218,.05); text-align: left; border-left: 2px solid transparent !important; }
+      #paint-models button b { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+      #paint-models button span { font-size: 12px; color: var(--muted); }
+      #paint-models button.on { border-left-color: var(--rust) !important; background: rgba(201,86,42,.12); }
+      #paint-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; max-height: 46vh; overflow-y: auto; padding: 2px; }
+      #paint-name { margin-top: 12px; font-size: 13px; color: var(--muted); }
       #paint-all-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; }
-      #paint .row { display: flex; justify-content: flex-end; margin-top: 14px; }
-      #paint-done { padding: 9px 20px; font-size: 15px; font-weight: 800; border-radius: 10px; background: var(--accent) !important; color: #1d120a !important; }
+      #paint .row { display: flex; justify-content: flex-end; margin-top: 16px; }
+      #paint-done { padding: 10px 26px; background: var(--rust) !important; color: #fff !important; border-radius: 0 !important;
+        font-family: 'Barlow Condensed', sans-serif !important; font-size: 15px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase; }
       #respawn { padding: 12px 26px; font-size: 18px; font-weight: 800; border: 0; border-radius: 12px; background: var(--accent); color: #1d120a; cursor: pointer; }
       #belt { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
       .slot { position: relative; width: 64px; height: 64px; background: rgba(24, 20, 16, 0.62); border: 2px solid rgba(255,255,255,.08);
@@ -412,44 +455,49 @@
       #disconnected { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7);
         font-size: 20px; font-weight: 700; }
       #disconnected[hidden] { display: none; }
-      /* ---------- In-game theme: sharper, darker panels like Rust and COD ---------- */
-      :root { --panel: rgba(12, 10, 8, 0.78); --accent: #ffc23a; }
+      /* ---------- In-game theme: the main menu's flat, dark panels and rust accent ---------- */
+      :root { --panel: rgba(13, 12, 10, 0.8); --accent: #c9562a; --ink: #ebe6da; }
       html, body { font-family: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif; }
-      #top-left, #target, .res, .kill, .pickup, #vitals, #ammo, #map .card, #notice, #tooltip { border-radius: 4px; border: 1px solid rgba(255,255,255,.07); }
-      #top-left { border-left: 3px solid var(--accent); }
-      #land-name { font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
-      #ammo b { font-family: 'Barlow Condensed', sans-serif; font-size: 34px; font-weight: 800; }
-      .vital .bar { border-radius: 2px; }
-      .slot { border-radius: 4px; background: rgba(12,10,8,.72); }
-      .slot.active { border-color: var(--accent); background: rgba(255,194,58,.16); box-shadow: 0 0 0 1px rgba(255,194,58,.35), 0 0 18px rgba(255,194,58,.18); }
-      #screen { background: radial-gradient(ellipse at center, rgba(10,8,6,.55), rgba(5,4,3,.88)); backdrop-filter: blur(4px); }
-      .panel { background: rgba(14,11,9,.92); border: 1px solid rgba(255,255,255,.08); border-top: 3px solid var(--accent); border-radius: 4px; }
-      .panel h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: 2px; opacity: 1; }
-      .panel h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 800; letter-spacing: 1.5px; opacity: .7; }
-      .tabs button { border-radius: 3px; font-family: 'Barlow Condensed', sans-serif; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; }
-      .tabs button.on { background: var(--accent); color: #2a1a00; }
-      .recipe { border-radius: 3px; border-left: 3px solid transparent; }
+      #top-left, #target, .res, .kill, .pickup, #vitals, #ammo, #map .card, #notice, #tooltip { border-radius: 0; border: 1px solid rgba(235,230,218,.08); }
+      #top-left { border-left: 2px solid var(--accent); }
+      #land-name { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      #ammo b { font-family: 'Barlow Condensed', sans-serif; font-size: 34px; font-weight: 600; }
+      .vital .bar { border-radius: 0; }
+      .slot { border-radius: 0; background: rgba(13,12,10,.72); border-width: 1px; }
+      .slot.active { border-color: var(--bone); background: rgba(235,230,218,.12); box-shadow: inset 0 -2px 0 var(--accent); }
+      #screen { background: radial-gradient(ellipse at center, rgba(10,9,8,.55), rgba(6,5,4,.9)); backdrop-filter: blur(5px) saturate(.7); }
+      .panel { background: rgba(13,12,10,.93); border: 1px solid rgba(235,230,218,.1); border-top: 2px solid var(--accent); border-radius: 0; }
+      .panel h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; opacity: 1; }
+      .panel h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); opacity: 1; }
+      .tabs button { border-radius: 0; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; padding: 5px 12px; }
+      .tabs button.on { background: var(--bone); color: #141210; }
+      .recipe { border-radius: 0; border-left: 2px solid transparent; }
       .recipe.on { border-left-color: var(--accent); }
-      #notice { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: .5px; border-left: 4px solid var(--accent); }
-      #death { background: radial-gradient(ellipse at center, rgba(60,8,4,.55), rgba(10,2,1,.9)); }
-      #death .card { border-radius: 4px; border-top: 3px solid #ff5a3c; }
-      #death h1 { font-family: 'Barlow Condensed', sans-serif; font-style: italic; font-weight: 900; font-size: 64px; }
-      #bags button, #paint .card, #code .card { border-radius: 4px; }
-      #paint .card, #code .card { background: rgba(14,11,9,.95); border-top: 3px solid var(--accent); }
-      #paint h2, #code h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: 1.5px; text-transform: uppercase; }
-      #paint-tabs button { border-radius: 3px; }
-      #paint-done, #code #code-ok { border-radius: 4px !important; }
-      #help { border-radius: 4px; }
+      #notice { font-family: 'Barlow Condensed', sans-serif; font-size: 19px; font-weight: 600; letter-spacing: .08em; border-left: 3px solid var(--accent); }
+      #death { background: radial-gradient(ellipse at center, rgba(50,10,6,.55), rgba(8,3,2,.92)); }
+      #death .card { border-radius: 0; border-top: 2px solid #b8402a; }
+      #death h1 { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 64px; letter-spacing: .24em; }
+      #bags button, #code .card, #help { border-radius: 0; }
+      #code .card { background: rgba(13,12,10,.95); border-top: 2px solid var(--accent); }
+      #paint h2, #code h2 { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 20px; letter-spacing: .2em; text-transform: uppercase; }
+      #code #code-ok, #respawn { border-radius: 0 !important; background: var(--accent) !important; color: #fff !important; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      #code button { border-radius: 0 !important; }
+      #recipe-detail .actions button { border-radius: 0 !important; background: transparent !important; border: 1px solid rgba(235,230,218,.25) !important; color: var(--bone) !important;
+        font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+      #recipe-detail .actions button:first-child { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+      #recipe-detail .actions button:disabled { opacity: .4; }
+      .ing, #recipe-detail .ing { border-radius: 0 !important; }
     </style>
   </head>
   <body>
     <div id="game"></div>
 
     <div id="join">
-      <canvas id="look-preview"></canvas>
+      <div class="lobby-shade"></div>
+      <div class="lobby-veil"></div>
       <div class="lobby-ui">
         <header class="lobby-top">
-          <div class="brand">PRIMAL<span>FRONTIER</span></div>
+          <div class="brand">PRIMAL <span>FRONTIER</span></div>
           <nav id="lobby-tabs">
             <button data-tab="play" class="on">Play</button>
             <button data-tab="store">Store</button>
@@ -460,38 +508,42 @@
         </header>
 
         <section class="page play on" data-page="play">
-          <div class="lobby-hint">WASD move · Shift sprint · Space jump · Mouse look<br />Left click hit, build or shoot · Right click aim · R reload · Tab inventory · E use · P paint · Esc menu</div>
+          <div class="lobby-foot"><b id="land-title">The Wasteland</b><span id="land-sub">Survive · build · raid</span></div>
           <div class="side">
             <div class="panel-dark objectives">
-              <h3>Daily objectives <small id="objective-reset"></small></h3>
+              <h3>Daily challenges <small id="objective-reset"></small></h3>
               <div id="objective-list"><div class="objective"><div class="row">Connecting…</div></div></div>
             </div>
             <div class="play-box panel-dark">
-              <div class="mode-card"><div><div class="mode">WASTELAND SURVIVAL</div><div class="meta" id="server-meta">Finding the server…</div></div></div>
-              <div class="field-label">Survivor name</div>
-              <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
-              <button id="play">Play</button>
-              <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
-              <div id="join-error"></div>
+              <div class="mode-card"><div class="kicker">Survival · official</div><div class="mode">Wasteland</div><div class="meta" id="server-meta">Finding the server…</div></div>
+              <div class="play-fields">
+                <div class="field-label">Survivor name</div>
+                <input id="name" maxlength="16" placeholder="Your survivor name" autocomplete="off" />
+                <button id="play">Play</button>
+                <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
+                <div id="join-error"></div>
+              </div>
             </div>
           </div>
         </section>
 
         <section class="page store" data-page="store">
-          <div class="store-head"><h2>Item shop</h2></div>
-          <div class="store-sub">Packs of paint finishes for your cars, bases, guns and tools. Earn coins by finishing daily objectives.</div>
+          <h2>Store</h2>
+          <div class="store-sub">Finishes for your cars, bases, guns and tools. Earn coins from daily challenges.</div>
+          <div class="store-section">Paint packs</div>
           <div class="pack-grid" id="store-packs"></div>
-          <div class="store-section">Get coins</div>
+          <div class="store-gap"></div>
+          <div class="store-section">Coins</div>
           <div class="bundles" id="coin-bundles"></div>
-          <div class="store-note" id="bundle-note">Buying coins with real money is coming soon.</div>
+          <div class="store-note" id="bundle-note">Buying coins is not open yet.</div>
         </section>
 
         <section class="page character" data-page="character">
           <div class="side">
             <div class="panel-dark locker">
-              <h3>Locker</h3>
+              <h3>Survivor</h3>
               <div id="look-rows"></div>
-              <div class="look-buttons"><button type="button" id="look-random">Random</button><button type="button" id="look-reset">As scanned</button></div>
+              <div class="look-buttons"><button type="button" id="look-random">Randomise</button><button type="button" id="look-reset">Reset</button></div>
             </div>
           </div>
         </section>
@@ -502,8 +554,9 @@
               <h3>Garage</h3>
               <div class="garage-models" id="garage-models"></div>
               <div class="garage-stats" id="garage-stats"></div>
+              <div class="sub-head">Paint</div>
               <div id="garage-swatches"></div>
-              <div class="garage-note">This is your car style. In the game, stand by any car, press <b>P</b> and pick <b>My style</b> to make it yours.</div>
+              <div class="garage-note">Your car style. In the game, stand by any car, press <b>P</b> and choose <b>My style</b>.</div>
             </div>
           </div>
         </section>
@@ -539,21 +592,21 @@
       <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><div id="bags"></div><button id="respawn">Respawn somewhere random</button></div></div>
       <div id="code" hidden><div class="card"><h2 id="code-title">Enter the code</h2><input id="code-input" inputmode="numeric" maxlength="4" autocomplete="off" /><div class="row"><button id="code-cancel">Cancel</button><button id="code-ok">OK</button></div></div></div>
       <div id="paint" hidden><div class="card"><div id="paint-tabs"></div><h2 id="paint-title">Paint</h2><button id="paint-preset" hidden></button><div id="paint-models"></div><div id="paint-swatches"></div><div id="paint-name"></div><label id="paint-all-row"><input type="checkbox" id="paint-all" /> Paint the whole base around it</label><div class="row"><button id="paint-done">Done</button></div></div></div>
-      <div id="objective-banner"><small>Objective complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin"></span><span id="objective-banner-reward"></span></span></div>
+      <div id="objective-banner"><small>Challenge complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin"></span><span id="objective-banner-reward"></span></span></div>
       <div id="pause" hidden>
         <div class="pause-left">
-          <div class="brand">PRIMAL<span>FRONTIER</span></div>
+          <div class="brand">PRIMAL <span>FRONTIER</span></div>
           <button id="pause-resume" class="pause-big">Resume</button>
-          <button data-section="objectives" class="on">Objectives</button>
+          <button data-section="objectives" class="on">Challenges</button>
           <button data-section="settings">Settings</button>
           <button data-section="controls">Controls</button>
           <button id="pause-leave">Leave to main menu</button>
         </div>
         <div class="pause-right">
           <div class="panel-dark pause-page" data-page="objectives">
-            <h3>Daily objectives <small id="pause-reset"></small></h3>
+            <h3>Daily challenges <small id="pause-reset"></small></h3>
             <div id="pause-objectives"></div>
-            <div class="pause-coins"><span class="coin"></span><b id="pause-coins">–</b> coins · spend them in the store on the main menu</div>
+            <div class="pause-coins"><span class="coin"></span><b id="pause-coins">–</b> coins to spend in the store on the main menu</div>
           </div>
           <div class="panel-dark pause-page" data-page="settings" hidden>
             <h3>Graphics</h3>

@@ -140,7 +140,7 @@ export type ServerMessage =
       account?: AccountView;
     }
   /** The main menu's view: your account (if your browser has a token) and the server. */
-  | { t: 'lobby'; account: AccountView | null; online: number; max: number; wipeIn: number }
+  | { t: 'lobby'; account: AccountView | null; online: number; max: number; wipeIn: number; seed: number; now: number }
   | { t: 'account'; account: AccountView }
   /** You finished one of today's objectives. */
   | { t: 'objectiveDone'; label: string; reward: number }

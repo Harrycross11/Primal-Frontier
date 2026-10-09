@@ -170,7 +170,7 @@ wss.on('connection', (ws) => {
           send(ws, { t: 'notice', text: result.text });
         }
         const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
-        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn });
+        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
         return;
       }
       if (msg.t !== 'join') return;

@@ -4,7 +4,7 @@
 import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { COIN_BUNDLES, PACKS, type AccountView } from '../../shared/shop.ts';
 import { VEHICLES, VEHICLE_KINDS, type VehicleKind } from '../../shared/vehicles.ts';
-import type { LookPicker } from './lookPicker.ts';
+import type { MenuStage } from './menuStage.ts';
 import { swatch } from './paint.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -41,7 +41,7 @@ export function renderObjectives(el: HTMLElement, account: AccountView | null) {
       const row = document.createElement('div');
       row.className = `objective${o.done ? ' done' : ''}`;
       const shown = o.stat === 'drive' ? `${(o.progress / 1000).toFixed(1)} / ${o.goal / 1000} km` : `${o.progress} / ${o.goal}`;
-      row.innerHTML = `<div class="row"><span></span><span class="reward"><span class="coin"></span>${o.done ? '✓' : o.reward}</span></div><div class="track"><i style="width:${Math.round((o.progress / o.goal) * 100)}%"></i></div><div class="count">${o.done ? 'Complete' : shown}</div>`;
+      row.innerHTML = `<div class="row"><span></span><span class="reward">${o.done ? 'Done' : `<span class="coin"></span>${o.reward}`}</span></div><div class="track"><i style="width:${Math.round((o.progress / o.goal) * 100)}%"></i></div><div class="count">${o.done ? 'Reward collected' : shown}</div>`;
       row.querySelector('.row span')!.textContent = o.label;
       return row;
     }),
@@ -56,7 +56,11 @@ export class Lobby {
   /** Asks the server to unlock a pack. */
   onBuy: (pack: string) => void = () => {};
 
-  constructor(private stage: LookPicker) {
+  private stage: MenuStage | null = null;
+  /** The store's pictures of each pack, rendered from the menu's stage. */
+  private art: Record<string, string> = {};
+
+  constructor() {
     for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-tabs button')) b.addEventListener('click', () => this.show(b.dataset.tab as Tab));
     const name = $('name') as HTMLInputElement;
     const chip = () => ($('lobby-name-chip').textContent = name.value.trim() || 'Survivor');
@@ -71,7 +75,30 @@ export class Lobby {
     this.tab = tab;
     for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
     for (const p of document.querySelectorAll<HTMLElement>('#join .page')) p.classList.toggle('on', p.dataset.page === tab);
-    this.stage.show(tab === 'car' ? 'car' : tab === 'store' ? 'none' : 'survivor', this.style);
+    $('join').classList.toggle('store', tab === 'store');
+    this.stage?.show(tab);
+  }
+
+  /** The live world behind the menus has loaded: show it, and picture the packs in it. */
+  attach(stage: MenuStage) {
+    this.stage = stage;
+    $('land-title').textContent = stage.place.landmark;
+    $('land-sub').textContent = stage.place.land;
+    stage.setCar(this.style);
+    stage.show(this.tab);
+    stage.onReady = () => {
+      $('join').classList.add('live');
+      // A moment later, so the first frames of the world come first.
+      setTimeout(() => {
+        this.art = stage.packArt(PACKS.map((p) => p.id));
+        this.renderStore();
+      }, 400);
+    };
+  }
+
+  /** The car style picked in the garage. */
+  get car() {
+    return this.style;
   }
 
   /** The server's answer to hello: coins, objectives and how full it is. */
@@ -79,9 +106,9 @@ export class Lobby {
     this.account = account;
     $('coin-count').textContent = account ? account.coins.toLocaleString() : '–';
     renderObjectives($('objective-list'), account);
-    $('objective-reset').textContent = account ? `new in ${timeLeft(account.resetIn)}` : '';
+    $('objective-reset').textContent = account ? `Resets in ${timeLeft(account.resetIn)}` : '';
     if (online !== undefined && max !== undefined) {
-      $('server-meta').textContent = `${online} of ${max} survivors online${wipeIn !== undefined ? ` · wipes in ${timeLeft(wipeIn)}` : ''}`;
+      $('server-meta').textContent = `${online} / ${max} online${wipeIn !== undefined ? ` · wipe in ${timeLeft(wipeIn)}` : ''}`;
     }
     this.renderStore();
     this.renderGarage();
@@ -101,23 +128,30 @@ export class Lobby {
     $('store-packs').replaceChildren(
       ...PACKS.map((pack) => {
         const card = document.createElement('div');
-        card.className = 'pack';
+        const legend = pack.price >= 1000;
+        card.className = `pack${legend ? ' legend' : ''}`;
         const has = owned.includes(pack.id);
         const chips = PAINTS.flatMap((p, n) => (p.pack === pack.id ? [`<i style="background:${swatch(n)}"></i>`] : [])).join('');
-        card.innerHTML = `<div class="art" style="background:${pack.art}">${pack.price >= 1000 ? '<span class="tag">LEGENDARY</span>' : ''}<div class="chips">${chips}</div></div>
-          <div class="info"><div class="name"></div><div class="blurb"></div><button></button></div>`;
+        card.innerHTML = `<div class="art"><div class="rarity"></div><div class="chips">${chips}</div></div>
+          <div class="info"><div class="tier">${legend ? 'Legendary' : 'Pack'} · 4 finishes</div><div class="name"></div><div class="blurb"></div>
+          <div class="buy"><div class="price"></div><button></button></div></div>`;
+        const art = card.querySelector<HTMLElement>('.art')!;
+        if (this.art[pack.id]) art.style.backgroundImage = `url(${this.art[pack.id]})`;
         card.querySelector('.name')!.textContent = pack.name;
         card.querySelector('.blurb')!.textContent = pack.blurb;
+        const price = card.querySelector('.price')!;
         const buy = card.querySelector('button')!;
         if (has) {
           buy.className = 'owned';
           buy.textContent = 'Owned';
+          price.textContent = '';
         } else {
+          price.innerHTML = `<span class="coin"></span>${pack.price.toLocaleString()}`;
           buy.className = coins >= pack.price ? '' : 'short';
-          buy.innerHTML = `<span class="coin"></span>${pack.price.toLocaleString()}`;
+          buy.textContent = 'Buy';
           buy.onclick = () => {
             if (!this.account) return this.toast('The store needs this browser to allow storage');
-            if (this.account.coins < pack.price) return this.toast(`You need ${(pack.price - this.account.coins).toLocaleString()} more coins: finish daily objectives to earn them`);
+            if (this.account.coins < pack.price) return this.toast(`You need ${(pack.price - this.account.coins).toLocaleString()} more coins. Finish daily challenges to earn them.`);
             this.onBuy(pack.id);
           };
         }
@@ -131,7 +165,7 @@ export class Lobby {
       ...COIN_BUNDLES.map((b) => {
         const el = document.createElement('div');
         el.className = 'bundle';
-        el.innerHTML = `<div class="n"><span class="coin"></span>${b.coins.toLocaleString()}</div><button disabled>${b.price} · Soon</button>`;
+        el.innerHTML = `<div class="n"><span class="coin"></span>${b.coins.toLocaleString()}</div><div class="p">${b.price}<small>Not open yet</small></div>`;
         return el;
       }),
     );
@@ -146,7 +180,7 @@ export class Lobby {
       } catch {
         /* storage unavailable */
       }
-      this.stage.show(this.tab === 'car' ? 'car' : this.tab === 'store' ? 'none' : 'survivor', style);
+      this.stage?.setCar(style);
       this.renderGarage();
     };
     $('garage-models').replaceChildren(
@@ -169,14 +203,15 @@ export class Lobby {
       ['Handling', info.turn / best((v) => v.turn)],
       ['Fuel tank', info.tank / best((v) => v.tank)],
     ];
-    $('garage-stats').innerHTML = stats.map(([label, f]) => `<span>${label}</span><i style="width:${Math.round(f * 100)}%"></i>`).join('');
+    $('garage-stats').innerHTML = stats.map(([label, f]) => `<span>${label}</span><div class="meter"><i style="width:${Math.round(f * 100)}%"></i></div>`).join('');
     const groups: { title: string; pack?: string; paints: number[] }[] = [{ title: 'Colours', paints: PAINTS.flatMap((p, n) => (p.pack ? [] : [n])) }];
     for (const pack of PACKS) groups.push({ title: pack.name, pack: pack.id, paints: PAINTS.flatMap((p, n) => (p.pack === pack.id ? [n] : [])) });
     $('garage-swatches').replaceChildren(
       ...groups.flatMap((g) => {
         const head = document.createElement('div');
         head.className = 'paint-group';
-        head.textContent = g.pack && !owned.includes(g.pack) ? `${g.title} · in the store` : g.title;
+        head.textContent = g.title;
+        if (g.pack && !owned.includes(g.pack)) head.insertAdjacentHTML('beforeend', '<em>Store</em>');
         return [
           head,
           ...g.paints.map((n) => {
@@ -184,7 +219,7 @@ export class Lobby {
             b.title = PAINTS[n].name;
             b.className = `${n === this.style.paint ? 'on' : ''} ${paintOwned(n, owned) ? '' : 'locked'}`;
             b.style.background = n === 0 ? '' : swatch(n);
-            if (n === 0) b.textContent = 'None';
+            if (n === 0) b.textContent = 'Bare';
             b.onclick = () => {
               if (!paintOwned(n, owned)) {
                 this.toast(`${PAINTS[n].name} comes in the ${PACKS.find((p) => p.id === PAINTS[n].pack)?.name}: get it in the store`);

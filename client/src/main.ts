@@ -43,6 +43,7 @@ import { PauseMenu } from './pauseMenu.ts';
 import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
+import { MenuStage } from './menuStage.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
@@ -120,13 +121,33 @@ function survivorToken(): string | undefined {
 
 // Start loading the scanned models straight away; joining waits for them.
 const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
-const picker = new LookPicker(modelsReady);
-const lobby = new Lobby(picker);
+const picker = new LookPicker();
+const lobby = new Lobby();
+/** The live world behind the main menu, built once the server says which world it is. */
+let stage: MenuStage | null = null;
+let staging = false;
+picker.onChange = (look) => stage?.setLook(look);
 
 // The main menu talks to the server before you play: your coins, objectives and the store.
 let net = new Net();
 const lobbyMessages = (m: ServerMessage) => {
-  if (m.t === 'lobby') lobby.update(m.account, m.online, m.max, m.wipeIn);
+  if (m.t === 'lobby') {
+    lobby.update(m.account, m.online, m.max, m.wipeIn);
+    if (!staging) {
+      staging = true;
+      const { seed, now } = m;
+      modelsReady.then(() => {
+        try {
+          stage = new MenuStage(seed, now, picker.look, lobby.car);
+          lobby.attach(stage);
+          (window as unknown as { __menu: MenuStage }).__menu = stage;
+        } catch (e) {
+          // No WebGL, say: the menu still works over a plain background.
+          console.warn('menu stage failed', e);
+        }
+      });
+    }
+  }
   if (m.t === 'notice') lobby.toast(m.text);
 };
 net.onMessage = lobbyMessages;
@@ -168,23 +189,34 @@ hud.onPlay(async (name) => {
   }
   clearInterval(lobbyTimer);
   await modelsReady;
-  picker.dispose();
   hud.hideJoin();
-  startGame(net, welcome);
+  // The menu's world is the one being joined, so the game carries on in it.
+  const ready = stage?.seed === welcome.seed ? stage.handOver(welcome.now) : null;
+  if (!ready) stage?.dispose();
+  stage = null;
+  startGame(net, welcome, ready);
 });
 
-function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) {
-  const world = new World(welcome.seed);
-  const gfx = new Graphics(document.getElementById('game')!, world.scene);
+function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, ready: ReturnType<MenuStage['handOver']> | null) {
+  const world = ready?.world ?? new World(welcome.seed);
+  const gfx = ready?.gfx ?? new Graphics(document.getElementById('game')!, world.scene);
   const camera = gfx.camera;
   hud.setQuality(gfx.quality);
 
   const resources = welcome.resources;
-  world.addResources(resources);
+  if (ready) {
+    // The menu drew the world as freshly generated; bring it in line with the server's.
+    const live = new Set(resources.map((r) => r.id));
+    for (const id of world.resourceMeshes.keys()) if (!live.has(id)) world.setResourceAmount(id, 0);
+    const fresh = resources.filter((r) => !world.resourceMeshes.has(r.id));
+    world.addResources(fresh);
+    // Only the used-up ones and the water barrels differ from fresh (setting the rest would bounce them).
+    for (const r of resources) if (r.amount <= 0 || world.resourceMeshes.get(r.id)?.userData.keep) world.setResourceAmount(r.id, r.amount);
+  } else world.addResources(resources);
   for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
   for (const d of welcome.deployables) world.setDeployable(d.id, d);
 
-  const dayNight = new DayNight(world, gfx, welcome.seed, welcome.now);
+  const dayNight = ready?.dayNight ?? new DayNight(world, gfx, welcome.seed, welcome.now);
   world.serverNow = () => dayNight.now;
   const clock = document.getElementById('clock')!;
   let clockIn = 0;

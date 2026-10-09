@@ -105,7 +105,8 @@ export class PaintPanel {
         const head = document.createElement('div');
         head.className = 'paint-group';
         const locked = !!g.pack && !this.owned.includes(g.pack);
-        head.textContent = locked ? `${g.title} · in the store` : g.title;
+        head.textContent = g.title;
+        if (locked) head.insertAdjacentHTML('beforeend', '<em>Store</em>');
         return [
           head,
           ...g.paints.map((n) => {

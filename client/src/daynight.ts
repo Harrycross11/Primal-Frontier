@@ -63,6 +63,11 @@ export class DayNight {
     this.offset += (((phase - dayPhase(now)) % 1) + 1) % 1 * DAY_MS;
   }
 
+  /** Sets the clock from the server's time again (the menu's sky carries on into the game). */
+  resync(serverNow: number) {
+    this.offset = serverNow - Date.now();
+  }
+
   get now(): number {
     return Date.now() + this.offset;
   }

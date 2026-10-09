@@ -60,7 +60,7 @@ export class PauseMenu {
     for (const el of document.querySelectorAll<HTMLElement>('#pause .pause-page')) el.hidden = el.dataset.page !== this.section;
     renderObjectives($('pause-objectives'), this.account);
     $('pause-coins').textContent = this.account ? this.account.coins.toLocaleString() : '–';
-    $('pause-reset').textContent = this.account ? `new in ${timeLeft(this.account.resetIn)}` : '';
+    $('pause-reset').textContent = this.account ? `Resets in ${timeLeft(this.account.resetIn)}` : '';
     for (const b of document.querySelectorAll<HTMLButtonElement>('#pause-quality button')) b.classList.toggle('on', b.dataset.q === this.quality);
   }
 }
