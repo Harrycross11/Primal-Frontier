@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import './atmosphere.ts';
 import { BUILD_RANGE, GATHER_RANGE } from '../../shared/constants.ts';
 import {
+  DOOR_HP,
+  DOOR_KINDS,
   MAX_HP,
   PIECE_COST,
   STOREY,
@@ -11,29 +13,47 @@ import {
   pieceBounds,
   pieceKey,
   pieceSupported,
+  type DoorKind,
   type Piece,
   type PieceKind,
+  PIECE_KINDS,
 } from '../../shared/building.ts';
-import { DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
+import { BIOMES, biomeAt } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
+import { ASHHOUND, MOUNT_RANGE, SPECIES } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
+import { atLandmark } from '../../shared/landmarks.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
-import { MATERIALS, RESOURCE_INFO, type Material, type ResourceNode } from '../../shared/world.ts';
+import { MATERIALS, RESOURCE_INFO, generateDecor, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
 import { distanceToBox, inReach, proposePiece, type AimHit } from './build.ts';
 import { Controller } from './controller.ts';
+import { Creatures } from './creatures.ts';
+import { Vehicles } from './vehicles.ts';
+import { VEHICLES, VEHICLE_KINDS, VEHICLE_RANGE, axes, touchesVehicle, type VehicleKind } from '../../shared/vehicles.ts';
+import { DayNight, type Fire } from './daynight.ts';
 import { Graphics, QUALITIES } from './graphics.ts';
 import { Hud } from './hud.ts';
+import { Lobby, carStyle, renderObjectives, timeLeft } from './lobby.ts';
+import { PaintPanel, type PaintTarget } from './paintPanel.ts';
+import { PauseMenu } from './pauseMenu.ts';
+import { PAINTS, paintOwned } from '../../shared/paint.ts';
+import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
+import { MenuStage } from './menuStage.ts';
 import { loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi } from './inventory.ts';
 import { Net } from './net.ts';
-import { buildDeployable } from './props.ts';
+import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.ts';
+import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { itemIconUrl } from './itemIcons.ts';
+import { ViewModel } from './viewModel.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -47,9 +67,10 @@ const RESOURCE_NAMES = {
   mushroom: 'Mushrooms',
   waterBarrel: 'Rain barrel',
 } as const;
-const PIECE_NAMES: Record<PieceKind, string> = { wall: 'Wall', floor: 'Floor', stairs: 'Stairs' };
-const PIECE_KINDS: PieceKind[] = ['wall', 'floor', 'stairs'];
+const PIECE_NAMES: Record<PieceKind, string> = { foundation: 'Foundation', wall: 'Wall', floor: 'Floor', stairs: 'Stairs', ramp: 'Ramp', roof: 'Roof' };
 const SCOPED: ItemId[] = ['boltRifle', 'l96', 'svd', 'm82'];
+/** Guns that keep their spent cases (or have none to throw out): revolvers, break-actions, pipe guns and bows. */
+const NO_CASES: ItemId[] = ['revolver', 'eoka', 'waterpipe', 'doubleBarrel', 'crossbow'];
 /** How close you must be to open a furnace or box (the server allows a little more). */
 const OPEN_RANGE = 3;
 /** What each resource sounds like and sheds when hit. */
@@ -65,8 +86,22 @@ const RESOURCE_SURFACE: Record<ResourceNode['kind'], Surface> = {
   mushroom: 'hemp',
   waterBarrel: 'dirt',
 };
-const SURVIVAL_DEATHS = { starvation: 'You starved to death.', thirst: 'You died of thirst.', radiation: 'Radiation poisoning killed you.' } as const;
-const SURVIVAL_FEED = { starvation: 'starved', thirst: 'died of thirst', radiation: 'died of radiation poisoning' } as const;
+const SURVIVAL_DEATHS = {
+  starvation: 'You starved to death.',
+  thirst: 'You died of thirst.',
+  radiation: 'Radiation poisoning killed you.',
+  ashhound: 'An Ashhound pack tore you apart.',
+  explosion: 'You were caught in an explosion.',
+} as const;
+const SURVIVAL_FEED = {
+  starvation: 'starved',
+  thirst: 'died of thirst',
+  radiation: 'died of radiation poisoning',
+  ashhound: 'was killed by Ashhounds',
+  explosion: 'blew up',
+} as const;
+/** Seconds before a sleeping bag can be woken up in again (the server holds the real timer). */
+const BAG_COOLDOWN = 60;
 
 interface Remote {
   state: PlayerState;
@@ -89,46 +124,137 @@ function survivorToken(): string | undefined {
 
 // Start loading the scanned models straight away; joining waits for them.
 const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
-const picker = new LookPicker(modelsReady);
+const picker = new LookPicker();
+const lobby = new Lobby();
+/** The live world behind the main menu, built once the server says which world it is. */
+let stage: MenuStage | null = null;
+let staging = false;
+picker.onChange = (look) => stage?.setLook(look);
+
+// The main menu talks to the server before you play: your coins, objectives and the store.
+let net = new Net();
+const lobbyMessages = (m: ServerMessage) => {
+  if (m.t === 'lobby') {
+    lobby.update(m.account, m.online, m.max, m.wipeIn);
+    if (!staging) {
+      staging = true;
+      const { seed, now } = m;
+      modelsReady.then(() => {
+        try {
+          stage = new MenuStage(seed, now, picker.look, lobby.car);
+          lobby.attach(stage);
+          (window as unknown as { __menu: MenuStage }).__menu = stage;
+        } catch (e) {
+          // No WebGL, say: the menu still works over a plain background.
+          console.warn('menu stage failed', e);
+        }
+      });
+    }
+  }
+  if (m.t === 'notice') lobby.toast(m.text);
+};
+net.onMessage = lobbyMessages;
+lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
+net
+  .opened()
+  .then(() => net.send({ t: 'hello', token: survivorToken() }))
+  .catch(() => lobby.update(null));
+// Keep the server count and objectives fresh while the menu is open.
+const lobbyTimer = setInterval(() => net.send({ t: 'hello', token: survivorToken() }), 20000);
 
 hud.onPlay(async (name) => {
-  const net = new Net();
   try {
     await net.opened();
-  } catch (e) {
-    hud.showJoinError((e as Error).message);
-    return;
+  } catch {
+    // The menu's connection dropped: try a fresh one.
+    net = new Net();
+    net.onMessage = lobbyMessages;
+    try {
+      await net.opened();
+    } catch (e) {
+      hud.showJoinError((e as Error).message);
+      return;
+    }
   }
   net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);
+      else lobbyMessages(m);
     };
   });
   if (welcome.t === 'full') {
     hud.showJoinError('This server is full (8 players). Try again later.');
+    // The server closes a full connection; the menu needs a new one.
+    net = new Net();
+    net.onMessage = lobbyMessages;
     return;
   }
+  clearInterval(lobbyTimer);
   await modelsReady;
-  picker.dispose();
   hud.hideJoin();
-  startGame(net, welcome);
+  // The menu's world is the one being joined, so the game carries on in it.
+  const ready = stage?.seed === welcome.seed ? stage.handOver(welcome.now) : null;
+  if (!ready) stage?.dispose();
+  stage = null;
+  startGame(net, welcome, ready);
 });
 
-function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) {
-  const world = new World(welcome.seed);
-  const gfx = new Graphics(document.getElementById('game')!, world.scene);
+function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, ready: ReturnType<MenuStage['handOver']> | null) {
+  const world = ready?.world ?? new World(welcome.seed);
+  const gfx = ready?.gfx ?? new Graphics(document.getElementById('game')!, world.scene);
   const camera = gfx.camera;
   hud.setQuality(gfx.quality);
 
   const resources = welcome.resources;
-  world.addResources(resources);
+  if (ready) {
+    // The menu drew the world as freshly generated; bring it in line with the server's.
+    const live = new Set(resources.map((r) => r.id));
+    for (const id of world.resourceMeshes.keys()) if (!live.has(id)) world.setResourceAmount(id, 0);
+    const fresh = resources.filter((r) => !world.resourceMeshes.has(r.id));
+    world.addResources(fresh);
+    // Only the used-up ones and the water barrels differ from fresh (setting the rest would bounce them).
+    for (const r of resources) if (r.amount <= 0 || world.resourceMeshes.get(r.id)?.userData.keep) world.setResourceAmount(r.id, r.amount);
+  } else world.addResources(resources);
   for (const p of welcome.pieces) world.setPiece(pieceKey(p), p);
   for (const d of welcome.deployables) world.setDeployable(d.id, d);
+
+  const dayNight = ready?.dayNight ?? new DayNight(world, gfx, welcome.seed, welcome.now);
+  world.serverNow = () => dayNight.now;
+  const clock = document.getElementById('clock')!;
+  let clockIn = 0;
+  /** Everything burning that could light the dark: torches in hand and lit furnaces. */
+  const fires = (): Fire[] => {
+    const out: Fire[] = [];
+    const own = dead ? null : me.flamePosition();
+    if (own) out.push({ at: own, strength: 1 });
+    for (const r of remotes.values()) {
+      const at = r.avatar.flamePosition();
+      if (at) out.push({ at, strength: 1 });
+    }
+    for (const d of world.deployables.values()) {
+      if (d.kind === 'furnace' && d.on) out.push({ at: new THREE.Vector3(d.x, d.y + 0.9, d.z), strength: 0.7 });
+    }
+    return out;
+  };
 
   const effects = new Effects(world.scene);
   effects.listener = camera;
   effects.startAmbience();
+  const creatures = new Creatures(world.scene, effects);
+  const vehicles = new Vehicles(world.scene, effects, welcome.seed);
+  vehicles.sync(welcome.vehicles);
+  const map = new WorldMap(welcome.seed, generateDecor(welcome.seed), () => world.aerial(gfx.renderer, [gfx.sky]));
+  const mapMarks = () => ({
+    x: controller.position.x,
+    z: controller.position.z,
+    yaw: controller.yaw,
+    hounds: [...creatures.views.values()].filter((v) => v.state.owner === welcome.you.id && v.state.anim !== 'dead').map((v) => v.root.position),
+    drops: [...world.deployables.values()].filter((d) => d.kind === 'supplyDrop'),
+    cars: [...vehicles.views.values()].map((v) => v.root.position),
+    mates: mates().map((r) => ({ x: r.avatar.root.position.x, z: r.avatar.root.position.z, name: r.state.name })),
+  });
+  creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
@@ -136,6 +262,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
   me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint);
   controller.onLand = (speed) => effects.landSound(surfaceUnder(controller.position), speed);
+  controller.onCrash = (speed) => effects.crash(controller.position.clone(), speed);
+  controller.vehicles = () => vehicles.solid();
 
   /** What a survivor is standing on: a floor or stairs of some material, or the bare ground. */
   function surfaceUnder(p: THREE.Vector3): Surface {
@@ -150,6 +278,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   }
 
   const remotes = new Map<number, Remote>();
+  /** Everyone on your team (you too, online or not), and who on it is online. */
+  let teamIds: number[] = welcome.team;
+  const mates = () => [...remotes.values()].filter((r) => teamIds.includes(r.state.id));
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
     const avatar = new Avatar(p.color, p.name, p.look);
@@ -157,8 +288,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint);
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
+    if (teamIds.includes(p.id)) avatar.setTag(p.name, p.color, true);
   };
   welcome.players.forEach(addRemote);
+  /** Who last asked you onto their team. */
+  let invitedBy: string | null = null;
 
   // Health and combat.
   let hp = welcome.hp;
@@ -172,12 +306,58 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aiming = false;
   let lastAttack = 0;
   let reloadingUntil = 0;
+  /** When each of your sleeping bags can next be woken up in (performance.now ms). */
+  const bagReadyAt = new Map<number, number>();
   const baseFov = camera.fov;
+  /** Looking out of your own eyes, with your hands and gun in view, rather than over the shoulder. V switches. */
+  let firstPerson = (() => {
+    try {
+      return localStorage.getItem('pf-view') !== 'third';
+    } catch {
+      return true;
+    }
+  })();
+  const view = new ViewModel();
+  camera.add(view.root);
+  if (!camera.parent) world.scene.add(camera);
+  /** Extra upward tilt from recoil that settles back by itself, on top of the climb you pull down. */
+  let viewKick = 0;
+  /** Whether the view is first person this frame (never in a car, in the saddle or dead). */
+  let inFirst = false;
 
   // Inventory and what is in your hands.
   let slots: Slots = welcome.slots;
   let pieceKind: PieceKind = 'wall';
   let material: Material = 'wood';
+  /** The paint new building pieces go up in. */
+  let buildPaint = 0;
+  const paintPanel = new PaintPanel();
+  paintPanel.onClose = () => canvas.requestPointerLock?.();
+  paintPanel.onLocked = (pack) => hud.notice(`That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu`, 3);
+  // Coins, store packs and today's objectives.
+  let account = welcome.account ?? null;
+  paintPanel.owned = account?.packs ?? [];
+  const pause = new PauseMenu();
+  pause.setAccount(account);
+  pause.quality = gfx.quality;
+  pause.onResume = () => {
+    pause.hide();
+    canvas.requestPointerLock?.();
+  };
+  pause.onOpen = () => net.send({ t: 'getAccount' });
+  pause.onQuality = (q) => {
+    gfx.setQuality(q);
+    hud.setQuality(gfx.quality);
+  };
+  gfx.onAutoQuality = (q) => {
+    hud.setQuality(q);
+    pause.quality = q;
+  };
+  // Letting go of the mouse (Esc) in the middle of play brings up the menu.
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) return pause.hide();
+    if (!ui.open && !paintPanel.isOpen && !hud.codeOpen && !dead) pause.showMenu();
+  });
   const held = (): ItemId | null => slots[ui.active]?.item ?? null;
   const ui = new InventoryUi({
     move: (from, to, count) => {
@@ -200,7 +380,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   ui.slots = slots;
   ui.wear = welcome.wear;
   ui.render();
-  const refreshPlayers = () => hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => r.state.name)]);
+  const refreshPlayers = () =>
+    hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
   refreshPlayers();
 
   const sendMove = () => {
@@ -217,6 +398,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
           r.state = p;
           r.target.set(p.x, p.y, p.z);
         }
+        creatures.sync(m.creatures);
+        vehicles.sync(m.vehicles);
         break;
       case 'joined':
         addRemote(m.player);
@@ -284,7 +467,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'deployable': {
         const old = world.deployables.get(m.id);
         world.setDeployable(m.id, m.d);
-        if (m.d?.kind !== 'lootBag' && old?.kind !== 'lootBag') deployableEffects(old ?? null, m.d);
+        const kind = (m.d ?? old)?.kind;
+        if (kind && kind !== 'lootBag' && kind !== 'supplySignal' && !CHARGE_KINDS.includes(kind) && !CRATE_KINDS.includes(kind)) deployableEffects(old ?? null, m.d);
+        if (!old && (m.d?.kind === 'beancan' || m.d?.kind === 'supplySignal')) {
+          // The grenade or signal flies there from the thrower's hand before it shows where it landed.
+          const thrower = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
+          const mesh = world.deployableMeshes.get(m.id);
+          if (thrower && mesh) {
+            mesh.visible = false;
+            const from = thrower.root.position.clone().setY(thrower.root.position.y + 1.6);
+            const flying = m.d.kind === 'beancan' ? buildCharge('beancan', true) : buildSignal(true);
+            effects.toss(flying, from, new THREE.Vector3(m.d.x, m.d.y, m.d.z), () => (mesh.visible = true));
+          }
+        }
         if (ui.container?.id === m.id) {
           if (m.d) {
             ui.container = m.d;
@@ -297,10 +492,44 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       case 'correct':
         controller.teleport(m.x, m.y, m.z);
         break;
+      case 'driving': {
+        driving = m.id;
+        const view = m.id === null ? undefined : vehicles.views.get(m.id);
+        // Swapped for another model from the driver's seat.
+        if (view && m.kind) view.sync({ ...view.state, kind: m.kind });
+        const info = view ? VEHICLES[view.state.kind] : undefined;
+        controller.car = view && info ? { ...info, fuel: () => vehicles.views.get(view.state.id)?.state.fuel ?? 0 } : null;
+        controller.carSpeed = 0;
+        controller.climbSpeed = 0;
+        if (!controller.car) driving = null;
+        controller.yaw = m.yaw;
+        controller.teleport(m.x, m.y, m.z);
+        vehicles.mine = driving;
+        if (driving !== null) {
+          const how = info!.flies
+            ? 'W and S to fly forward and back, A and D to turn, Space to climb, Shift to descend, E to get out'
+            : 'W and S to drive, A and D to steer, E to get out';
+          hud.notice(view!.state.fuel > 0 ? how : 'The tank is empty: fill it with low grade fuel', 5);
+        }
+        break;
+      }
+      case 'mounted': {
+        riding = m.id;
+        const view = m.id === null ? undefined : creatures.views.get(m.id);
+        const ride = view ? SPECIES[view.species].ride : undefined;
+        controller.mount = ride ?? null;
+        if (m.id === null || !ride) riding = null;
+        controller.teleport(m.x, m.y + (ride?.seat ?? 0), m.z);
+        creatures.mine = riding;
+        if (riding !== null) hud.notice('E to get off, Shift to gallop');
+        break;
+      }
       case 'shot': {
         const shooter = m.by === welcome.id ? me : remotes.get(m.by)?.avatar;
-        const muzzle = shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
-        effects.shot(muzzle, m.ends.map((e) => new THREE.Vector3(...e)), m.item);
+        const muzzle = shooter === me && inFirst ? view.muzzleWorld() : shooter ? shooter.muzzlePosition() : new THREE.Vector3(...m.from);
+        const ends = m.ends.map((e) => new THREE.Vector3(...e));
+        effects.shot(muzzle, ends, m.item);
+        if (ITEMS[m.item].weapon?.class === 'gun') for (const end of ends) bulletImpact(muzzle, end);
         if (shooter && shooter !== me) {
           shooter.recoil();
           effects.muzzle(muzzle, m.item);
@@ -330,20 +559,78 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         if (dead && hp > 0) {
           dead = false;
           me.setDead(false);
+          hud.hideDeath();
         }
         break;
       case 'died': {
         dead = true;
         triggerHeld = aiming = false;
+        // Thrown off whatever you were riding or driving.
+        riding = driving = vehicles.mine = creatures.mine = null;
+        controller.mount = controller.car = null;
         me.setDead(true);
         ui.hide();
         document.exitPointerLock?.();
-        const how = m.item ? ` with a ${ITEMS[m.item].name}` : '';
-        hud.showDeath(m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.', () => net.send({ t: 'respawn' }));
+        const how = m.item ? ` with their ${ITEMS[m.item].name}` : '';
+        const bags = [...world.deployables.values()]
+          .filter((d) => d.kind === 'sleepingBag' && d.owner === welcome.id)
+          .map((d, n) => ({
+            id: d.id,
+            label: `sleeping bag ${n + 1} (${BIOMES[biomeAt(world.seed, d.x, d.z)].name}, ${Math.round(Math.hypot(d.x - controller.position.x, d.z - controller.position.z))} m away)`,
+            wait: () => Math.max(0, Math.ceil(((bagReadyAt.get(d.id) ?? 0) - performance.now()) / 1000)),
+          }));
+        hud.showDeath(
+          m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.',
+          () => net.send({ t: 'respawn' }),
+          bags,
+          (bag) => {
+            net.send({ t: 'respawn', bag });
+            bagReadyAt.set(bag, performance.now() + BAG_COOLDOWN * 1000);
+          },
+        );
         break;
       }
       case 'notice':
         hud.notice(m.text);
+        break;
+      case 'account':
+        account = m.account;
+        paintPanel.owned = account.packs;
+        pause.setAccount(account);
+        break;
+      case 'objectiveDone':
+        hud.objectiveDone(m.label, m.reward);
+        effects.objective();
+        break;
+      case 'plane': {
+        const from = new THREE.Vector3(m.from[0], m.y, m.from[1]);
+        const to = new THREE.Vector3(m.to[0], m.y, m.to[1]);
+        effects.plane(buildPlane(), from, to, m.speed, Math.max(0, (dayNight.now - m.start) / 1000));
+        break;
+      }
+      case 'explosion': {
+        const at = new THREE.Vector3(...m.at);
+        effects.explosion(at, m.item, terrainHeight(world.seed, at.x, at.z));
+        break;
+      }
+      case 'team': {
+        const was = teamIds;
+        teamIds = m.members.length ? m.members : [welcome.id];
+        for (const r of remotes.values()) {
+          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id));
+        }
+        refreshPlayers();
+        break;
+      }
+      case 'invited':
+        invitedBy = m.from;
+        hud.notice(`${m.from} invited you to their team. Press Y to join`, 8);
+        break;
+      case 'codeNeeded':
+        hud.askCode('This door is locked. Enter its code', (code) => {
+          if (code) net.send({ t: 'code', key: m.key, code });
+          canvas.requestPointerLock?.();
+        });
         break;
       case 'kill': {
         const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
@@ -361,6 +648,25 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const b = pieceBounds(p);
     const at = new THREE.Vector3((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
     const surface: Surface = p.material;
+    const was = old?.door;
+    const now = piece?.door;
+    if (old && piece && (was || now)) {
+      const metal = (now ?? was)!.kind === 'metalDoor';
+      const doorAt = new THREE.Vector3(at.x, b.min[1] + 1.1, at.z);
+      if (!was && now) return effects.buildSound(metal ? 'scrap' : 'wood', doorAt);
+      if (was && !now) {
+        effects.breakSound(metal ? 'scrap' : 'wood', doorAt);
+        effects.chipsAt(doorAt, metal ? 'scrap' : 'wood', b.min[1], 18, 1.4);
+        return;
+      }
+      if (was && now && was.open !== now.open) return effects.doorSound(now.open, metal, doorAt);
+      if (was && now && now.hp < was.hp) {
+        effects.gatherSound(metal ? 'scrap' : 'wood', doorAt);
+        effects.chipsAt(doorAt, metal ? 'scrap' : 'wood', b.min[1], 6);
+        return;
+      }
+      if (was && now && was.locked !== now.locked) return effects.uiSound('click');
+    }
     if (!old && piece) {
       effects.buildSound(piece.material, at);
       world.popPiece(pieceKey(piece));
@@ -425,12 +731,23 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     selectSlot((ui.active + (e.deltaY > 0 ? 1 : -1) + 6) % 6);
   });
   addEventListener('keydown', (e) => {
+    if (hud.codeOpen) return;
+    if (pause.open) {
+      if (e.code === 'Escape') pause.onResume();
+      return;
+    }
+    if (paintPanel.isOpen) {
+      if (e.code === 'Escape' || e.code === 'KeyP') paintPanel.close();
+      return;
+    }
     if (e.code === 'Tab' || e.code === 'KeyI') {
       e.preventDefault();
       return ui.open ? closeScreen() : openScreen(null);
     }
     if (e.code === 'Escape' && ui.open) return closeScreen();
+    if (e.code === 'Escape' && map.open) return map.close();
     if (ui.open || dead) return;
+    if (e.code === 'KeyM') map.toggle(mapMarks());
     const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
     if (n >= 0) selectSlot(n);
     if (e.code === 'KeyR' && held() === 'buildingPlan') material = MATERIALS[(MATERIALS.indexOf(material) + 1) % MATERIALS.length];
@@ -438,6 +755,29 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyV') {
+      firstPerson = !firstPerson;
+      try {
+        localStorage.setItem('pf-view', firstPerson ? 'first' : 'third');
+      } catch {
+        // Not remembered; it still switches.
+      }
+    }
+    if (e.code === 'KeyP') openPaint();
+    if (e.code === 'KeyT') {
+      if (!aimPlayer) hud.notice('Look at someone to invite them to your team');
+      else if (teamIds.includes(aimPlayer.state.id)) hud.notice(`${aimPlayer.state.name} is on your team`);
+      else net.send({ t: 'invite', id: aimPlayer.state.id });
+    }
+    if (e.code === 'KeyY') {
+      if (!invitedBy) hud.notice('No team invite to answer');
+      else net.send({ t: 'acceptInvite' });
+      invitedBy = null;
+    }
+    if (e.code === 'KeyL') {
+      if (teamIds.length < 2) hud.notice("You aren't on a team");
+      else net.send({ t: 'leaveTeam' });
+    }
     if (e.code === 'KeyO') {
       gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
@@ -478,6 +818,51 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     return w && w.class !== 'melee' ? w : null;
   }
 
+  /** How far it is from your eyes to whatever is straight ahead, up to a metre and a half. */
+  const roomRay = new THREE.Raycaster();
+  function roomAhead(): number {
+    roomRay.set(camera.position, camera.getWorldDirection(new THREE.Vector3()));
+    roomRay.far = 1.5;
+    return roomRay.intersectObjects(world.cameraBlockers, true)[0]?.distance ?? 1.5;
+  }
+
+  /** What a bullet struck at `end`, fired from `from`: a hole, dust and chips, or a spray of blood. */
+  const impactRay = new THREE.Raycaster();
+  function bulletImpact(from: THREE.Vector3, end: THREE.Vector3) {
+    if (end.distanceTo(camera.position) > 140) return;
+    const body = [...remotes.values()].some((r) => !r.state.dead && r.avatar.root.position.distanceTo(end) < 1.3 && end.y > r.avatar.root.position.y - 0.1) || creatures.near(end, 1.4);
+    const dir = end.clone().sub(from);
+    const length = dir.length();
+    impactRay.set(from, dir.normalize());
+    impactRay.near = Math.max(0, length - 1.5);
+    impactRay.far = length + 0.4;
+    const hit = impactRay.intersectObjects(world.pickables, true).find((h) => isVisible(h.object));
+    if (!hit) {
+      if (body) effects.blood(end);
+      return;
+    }
+    if (body && hit.distance > length + 0.2) return effects.blood(end);
+    const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : dir.clone().negate();
+    if (normal.dot(dir) > 0) normal.negate();
+    effects.impact(hit.point, normal, surfaceOf(hit.object), terrainHeight(world.seed, hit.point.x, hit.point.z));
+  }
+
+  /** What something in the world is made of, for bullet holes and chips. */
+  function surfaceOf(o: THREE.Object3D): Surface {
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+      const u = p.userData;
+      if (u.resourceId !== undefined) {
+        const node = resources.find((r) => r.id === u.resourceId);
+        if (node) return RESOURCE_SURFACE[node.kind];
+      }
+      if (u.pieceKey !== undefined) return world.pieces.get(u.pieceKey)?.material ?? 'stone';
+      if (u.door) return 'wood';
+      if (p === world.terrain) return 'dirt';
+    }
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    return m && !Array.isArray(m) && (m.metalness ?? 0) > 0.4 ? 'scrap' : 'stone';
+  }
+
   /** Where the crosshair points, out to `range` metres: the first thing hit, or empty air. */
   function aimTarget(range: number): THREE.Vector3 {
     const ray = new THREE.Raycaster();
@@ -496,6 +881,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, t);
       if (hit) t = hit.t;
     }
+    const hound = creatures.ray([o.x, o.y, o.z], [d.x, d.y, d.z], t);
+    if (hound) t = hound.t;
     return o.clone().addScaledVector(d, t);
   }
 
@@ -527,12 +914,20 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     stack.ammo -= 1;
     ui.render();
     net.send({ t: 'fire', slot: ui.active, d: dirTo(aimTarget(w.range)), aim: aiming });
-    // Kick the view up and a little to the side.
+    // Kick the view up and a little to the side: part of it stays (pull down to hold on target),
+    // and part springs back by itself.
     const kick = (w.recoil ?? 0) * (aiming ? 0.6 : 1);
-    controller.pitch = Math.min(1.1, controller.pitch + kick);
+    controller.pitch = Math.min(1.1, controller.pitch + kick * 0.6);
+    viewKick += kick * 0.4;
     controller.yaw += (Math.random() - 0.5) * kick * 0.6;
     me.recoil();
-    effects.muzzle(me.muzzlePosition(), item);
+    view.fire();
+    effects.muzzle(inFirst ? view.muzzleWorld() : me.muzzlePosition(), item, inFirst ? 0.5 : 1);
+    if (w.class === 'gun' && !NO_CASES.includes(item)) {
+      const from = inFirst ? view.ejectWorld() : me.muzzlePosition();
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+      effects.shell(from, right, controller.position.y, w.damage > 45);
+    }
     effects.sound(item, 0);
     if (!w.auto) triggerHeld = false;
   }
@@ -546,6 +941,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     net.send({ t: 'reload', slot: ui.active });
     reloadingUntil = performance.now() + (w.reload ?? 1) * 1000;
     me.reloadAnim(w.reload ?? 1);
+    view.reload(w.reload ?? 1);
     if (w.class === 'gun') effects.reloadSound(w.reload ?? 1);
   }
 
@@ -558,6 +954,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     lastAttack = now;
     net.send({ t: 'melee', slot: ui.active, d: dirTo(aimTarget(w.range + 2)) });
     me.swing();
+    view.swing();
     effects.swingSound(w.damage > 40, item);
   }
 
@@ -567,7 +964,18 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   let aimDeployable: Deployable | null = null;
   /** The survivor under the crosshair within a few metres, for melee. */
   let aimPlayer: Remote | null = null;
+  /** Likewise an Ashhound, for melee and feeding. */
+  let aimHound: ReturnType<Creatures['ray']> = null;
+  /** The animal you are riding, if you are. */
+  let riding: number | null = null;
+  /** The car you are driving, if you are. */
+  let driving: number | null = null;
+  /** A car under the crosshair. */
+  let aimVehicle: ReturnType<Vehicles['ray']> = null;
   let aimSurface: { point: THREE.Vector3; y: number } | null = null;
+  /** The face the crosshair is on (world space), and whether it is a door rather than its wall. */
+  let aimNormal: THREE.Vector3 | null = null;
+  let aimDoor = false;
   let proposal: Piece | null = null;
 
   function updateAim() {
@@ -577,6 +985,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     aimResource = null;
     aimDeployable = null;
     aimSurface = null;
+    aimNormal = null;
+    aimDoor = false;
     for (const h of raycaster.intersectObjects(world.pickables, true)) {
       if (!isVisible(h.object)) continue;
       // Ignore things between the camera and the player's back.
@@ -588,9 +998,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const key = h.object.userData.pieceKey as string | undefined;
       const piece = key ? (world.pieces.get(key) ?? null) : null;
       aim = { point: h.point.clone(), piece };
+      aimDoor = !!h.object.userData.door && !!piece?.door;
+      if (h.face) aimNormal = h.face.normal.clone().transformDirection(h.object.matrixWorld);
       // Somewhere a workbench, furnace or box could stand: open ground or the top of a floor.
       if (h.object.name === 'terrain') aimSurface = { point: h.point.clone(), y: terrainHeight(world.seed, h.point.x, h.point.z) };
-      else if (piece?.kind === 'floor' && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
+      else if ((piece?.kind === 'floor' || piece?.kind === 'foundation') && Math.abs(h.point.y - piece.y) < 0.05) aimSurface = { point: h.point.clone(), y: piece.y };
       break;
     }
     // A survivor in front of whatever else the crosshair is on.
@@ -608,11 +1020,32 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
         aimDeployable = null;
       }
     }
+    aimHound = creatures.ray([o.x, o.y, o.z], [d.x, d.y, d.z], best);
+    if (aimHound) {
+      aimPlayer = null;
+      aimResource = null;
+      aimDeployable = null;
+      best = aimHound.t;
+    }
+    aimVehicle = vehicles.ray([o.x, o.y, o.z], [d.x, d.y, d.z], best);
+    if (aimVehicle) {
+      aimPlayer = null;
+      aimHound = null;
+      aimResource = null;
+      aimDeployable = null;
+      aim = null;
+    }
   }
 
   function isVisible(o: THREE.Object3D): boolean {
     for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
     return true;
+  }
+
+  /** Close enough to an animal to feed it (or, with `range`, to climb on). */
+  function houndInReach(at: THREE.Vector3, range: number = ASHHOUND.feedRange) {
+    const length = aimHound ? SPECIES[aimHound.view.species].length : 1.5;
+    return Math.hypot(at.x - controller.position.x, at.z - controller.position.z) - length / 2 + 0.75 < range;
   }
 
   function resourceInRange(node: ResourceNode) {
@@ -627,18 +1060,51 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const item = held();
     if (heldGun()) return fire();
     if (item && ITEMS[item].armour) return net.send({ t: 'use', slot: ui.active });
+    if (item === 'feedSack') {
+      net.send({ t: 'use', slot: ui.active });
+      return me.swing();
+    }
     if (item && (ITEMS[item].heal || ITEMS[item].consume)) {
       net.send({ t: 'use', slot: ui.active });
       me.swing();
       const c = ITEMS[item].consume;
+      // Held out to an animal rather than eaten.
+      if (item === 'cookedMeat' && aimHound && SPECIES[aimHound.view.species].food === item && houndInReach(aimHound.view.root.position)) return;
       if (c) effects.consumeSound(c.rads ? 'pills' : c.food ? 'eat' : 'drink', null);
       return;
     }
-    if (aimPlayer && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
+    if (item && isExplosive(item)) return useExplosive(item);
+    if (item === 'supplySignal') return throwHeld();
+    if (item === 'lowGradeFuel') {
+      if (!aimVehicle) return hud.notice('Aim at a car to fill it up');
+      if (!carInReach(aimVehicle.view.state)) return hud.notice('Get closer to fill it up');
+      net.send({ t: 'refuel', id: aimVehicle.view.state.id, slot: ui.active });
+      return me.swing();
+    }
+    if (item && DOOR_KINDS.includes(item as DoorKind)) {
+      const p = aim?.piece;
+      if (p?.kind !== 'wall' || p.edit !== 'door') return hud.notice('Aim at a doorway: press G on a wall to make one');
+      if (p.door) return hud.notice('There is already a door here');
+      if (!inReach(controller.eye, p)) return hud.notice('Too far away');
+      net.send({ t: 'hangDoor', key: pieceKey(p), slot: ui.active });
+      me.swing();
+      return;
+    }
+    if (item === 'codeLock') {
+      const p = aim?.piece;
+      if (!p?.door) return hud.notice('Aim at a door to fit the lock');
+      if (p.door.locked) return hud.notice('This door already has a lock');
+      const slot = ui.active;
+      return hud.askCode('Pick a 4-digit code for this door', (code) => {
+        if (code) net.send({ t: 'lock', key: pieceKey(p), slot, code });
+        canvas.requestPointerLock?.();
+      });
+    }
+    if ((aimPlayer || aimHound || aimVehicle) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
       if (!proposal) return;
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
-      net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material });
+      net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material, ...(buildPaint && { paint: buildPaint }) });
       me.swing();
       return;
     }
@@ -649,6 +1115,43 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return;
     }
     hitTarget();
+  }
+
+  /** Lobs the beancan or supply signal in your hands a little above where you look. */
+  function throwHeld() {
+    const now = performance.now();
+    if (now - lastAttack < 800) return;
+    lastAttack = now;
+    const look = new THREE.Vector3();
+    camera.getWorldDirection(look);
+    look.y += 0.18;
+    look.normalize();
+    net.send({ t: 'throw', slot: ui.active, d: [look.x, look.y, look.z] });
+    me.swing();
+    effects.swingSound(false, null);
+  }
+
+  /** Throws a beancan, or sticks a satchel or C4 to whatever the crosshair is on. */
+  function useExplosive(item: ExplosiveId) {
+    const now = performance.now();
+    if (now - lastAttack < 800) return;
+    if (item === 'beancan') return throwHeld();
+    const spot = plantSpot(item);
+    if (!spot) return hud.notice('Get closer to a wall, a door or the ground to stick it on');
+    lastAttack = now;
+    net.send({ t: 'plant', slot: ui.active, at: spot, ...(aim?.piece && { key: pieceKey(aim.piece), door: aimDoor }) });
+    me.swing();
+  }
+
+  /** Where a satchel or C4 would sit on the surface under the crosshair, if it is close enough. */
+  function plantSpot(item: 'satchel' | 'c4'): Vec3 | null {
+    if (!aim || !aimNormal || aim.point.distanceTo(controller.eye) > PLANT_RANGE) return null;
+    const [, h, depth] = DEPLOYABLE_INFO[item].size;
+    const p = aim.point.clone();
+    // Stood up on a floor or the ground; against a wall or door, its back to the surface.
+    if (aimNormal.y > 0.7) p.y += h / 2;
+    else p.addScaledVector(aimNormal, depth / 2 + 0.01);
+    return [p.x, p.y, p.z];
   }
 
   function hitTarget() {
@@ -663,15 +1166,45 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       me.swing();
     } else if (aim?.piece) {
       if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
-      net.send({ t: 'hit', key: pieceKey(aim.piece) });
+      net.send({ t: 'hit', key: pieceKey(aim.piece), ...(aimDoor && { door: true }) });
       me.swing();
     } else melee();
   }
 
-  /** E: open a furnace or box, or pick a hemp plant. */
+  /** E: open a furnace, box or door, authorise yourself on a tool cupboard, or pick a hemp plant. */
+  /** Close enough to a car to get in or fill it up. */
+  function carInReach(v: { kind: keyof typeof VEHICLES; x: number; z: number; yaw: number }) {
+    const view = vehicles.views.get((v as { id?: number }).id ?? -1);
+    const at = view ? { ...v, x: view.root.position.x, z: view.root.position.z, yaw: view.root.rotation.y } : v;
+    return touchesVehicle({ ...at, id: 0, y: 0, hp: 1, fuel: 0, paint: 0 }, controller.position.x, controller.position.z, VEHICLE_RANGE - VEHICLES[v.kind].width / 2 - 0.2);
+  }
+
   function interact() {
+    if (driving !== null) return net.send({ t: 'drive', id: null });
+    if (riding !== null) return net.send({ t: 'ride', id: null });
+    if (aimVehicle) {
+      const s = aimVehicle.view.state;
+      if (s.driver !== undefined) return hud.notice('Someone is driving it');
+      if (!carInReach(s)) return hud.notice('Get closer to get in');
+      return net.send({ t: 'drive', id: s.id });
+    }
+    const animal = aimHound?.view;
+    if (animal && animal.state.owner === welcome.id && SPECIES[animal.species].ride && animal.state.anim !== 'dead') {
+      if (!houndInReach(animal.root.position, MOUNT_RANGE)) return hud.notice('Get closer to climb on');
+      return net.send({ t: 'ride', id: animal.state.id });
+    }
+    if (aimDeployable?.kind === 'toolCupboard') {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
+      if (aimDeployable.auth?.includes(welcome.id)) return hud.notice('You are already authorised here. G clears everyone else');
+      return net.send({ t: 'authorize', id: aimDeployable.id });
+    }
+    if (aim?.piece?.door) {
+      if (!inReach(controller.eye, aim.piece)) return hud.notice('Too far away');
+      return net.send({ t: 'door', key: pieceKey(aim.piece) });
+    }
     if (aimDeployable && aimDeployable.slots.length > 0) {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
+      if (falling(aimDeployable)) return hud.notice("Wait for it to land");
       return openScreen(aimDeployable);
     }
     if (aimResource && RESOURCE_INFO[aimResource.kind].tool === 'pickup' && resourceInRange(aimResource)) {
@@ -681,11 +1214,67 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   }
 
   function editTarget() {
+    if (aimDeployable?.kind === 'toolCupboard') {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
+      return net.send({ t: 'clearAuth', id: aimDeployable.id });
+    }
     const piece = aim?.piece;
     if (!piece || piece.kind !== 'wall') return hud.notice('Look at a wall to edit it');
     if (!inReach(controller.eye, piece)) return hud.notice('Too far away');
     const next = WALL_EDITS[(WALL_EDITS.indexOf(piece.edit) + 1) % WALL_EDITS.length];
     net.send({ t: 'edit', key: pieceKey(piece), edit: next });
+  }
+
+  /**
+   * P: paint whatever is to hand. The car you drive or stand by (and its model), the building piece
+   * you look at, the gun or tool in your hands, or with a building plan the pieces you place next.
+   */
+  function openPaint() {
+    const targets: PaintTarget[] = [];
+    const car = driving !== null ? vehicles.views.get(driving) : aimVehicle && carInReach(aimVehicle.view.state) && aimVehicle.view.state.driver === undefined ? aimVehicle.view : undefined;
+    if (car) {
+      const s = car.state;
+      const style = carStyle();
+      targets.push({
+        label: VEHICLES[s.kind].name,
+        paint: s.paint,
+        model: s.kind,
+        preset: paintOwned(style.paint, account?.packs ?? []) ? { label: `My style: ${PAINTS[style.paint].name} ${VEHICLES[style.kind].name}`, paint: style.paint, model: style.kind } : undefined,
+        // The minicopter only takes a new colour; cars can also swap model.
+        models: VEHICLES[s.kind].flies ? undefined : VEHICLE_KINDS.map((k) => ({ id: k, name: VEHICLES[k].name, blurb: VEHICLES[k].blurb })),
+        apply: (paint, model) => {
+          // Shown at once; the server's next update confirms it.
+          car.sync({ ...car.state, paint, kind: (model ?? s.kind) as VehicleKind });
+          net.send({ t: 'customiseCar', id: s.id, kind: (model ?? s.kind) as VehicleKind, paint });
+        },
+      });
+    }
+    const item = held();
+    const stack = slots[ui.active];
+    if (!car && stack && (ITEMS[stack.item].kind === 'weapon' || ITEMS[stack.item].kind === 'tool')) {
+      const slot = ui.active;
+      targets.push({ label: ITEMS[stack.item].name, paint: stack.paint ?? 0, apply: (paint) => net.send({ t: 'paintItem', slot, paint }) });
+    }
+    const piece = !car && aim?.piece && inReach(controller.eye, aim.piece) ? aim.piece : undefined;
+    if (piece) {
+      const key = pieceKey(piece);
+      const name = `${ITEMS[piece.material].name} ${PIECE_NAMES[piece.kind].toLowerCase()}`;
+      const entry: PaintTarget = {
+        label: name,
+        paint: piece.paint ?? 0,
+        wholeBase: true,
+        apply: (paint, _, all) => {
+          if (item === 'buildingPlan') buildPaint = paint;
+          net.send({ t: 'paintPiece', key, paint, ...(all && { all: true }) });
+        },
+      };
+      // With a plan in hand the piece comes first; otherwise what you hold does.
+      if (item === 'buildingPlan') targets.unshift(entry);
+      else targets.push(entry);
+    }
+    if (item === 'buildingPlan') targets.push({ label: 'New pieces', paint: buildPaint, apply: (paint) => (buildPaint = paint) });
+    if (!targets.length) return hud.notice('Get next to a car, look at a building piece, or hold a gun or tool to paint it');
+    paintPanel.open(targets);
   }
 
   // Blue see-through preview of the piece about to be placed, red if it can't go there.
@@ -713,7 +1302,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       ghostKey = key;
     }
     if (proposal) {
-      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values());
+      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values()) && !blockedAt(pieceBounds(proposal));
       ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
       ghostEdgeMat.color.set(ok ? 0xbfe6ff : 0xffb0a0);
       // A slow pulse, so the preview reads as a preview and not a built piece.
@@ -751,11 +1340,44 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     deployGhost.position.set(aimSurface.point.x, aimSurface.y, aimSurface.point.z);
     deployGhost.rotation.y = controller.yaw;
     deployGhost.visible = true;
-    ghostMat.color.set(0x4fb3ff);
+    ghostMat.color.set(blockedAt(box) ? 0xff5a4a : 0x4fb3ff);
+  }
+
+  /** True inside the range of a tool cupboard that doesn't trust you, or on a landmark's ground. */
+  function blockedAt(b: { min: number[]; max: number[] }): boolean {
+    if (atLandmark(world.seed, (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, 4)) return true;
+    return privilege(world.deployables.values(), (b.min[0] + b.max[0]) / 2, (b.min[2] + b.max[2]) / 2, teamIds) === 'blocked';
+  }
+
+  /** A supply drop still under its parachute. */
+  function falling(d: Deployable): boolean {
+    return !!d.fall && dayNight.now < d.fall.land;
   }
 
   function describeTarget(): { text: string; health?: number } {
     const item = held();
+    const mine = driving === null ? undefined : vehicles.views.get(driving);
+    if (mine) {
+      const s = mine.state;
+      const info = VEHICLES[s.kind];
+      const kmh = Math.round(Math.abs(controller.carSpeed) * 3.6);
+      const fuel = s.fuel > 0 ? `Fuel ${Math.ceil(s.fuel)}/${info.tank}` : 'Out of fuel: get out and fill it with low grade fuel';
+      const height = info.flies ? `  ·  ${Math.max(0, Math.round(controller.position.y - info.seat.y - terrainHeight(world.seed, controller.position.x, controller.position.z)))} m up` : '';
+      return { text: `${info.name}  ·  ${kmh} km/h${height}  ·  ${fuel}  ·  E to get out  ·  P to paint`, health: s.hp / info.maxHp };
+    }
+    if (aimVehicle) {
+      const s = aimVehicle.view.state;
+      const info = VEHICLES[s.kind];
+      const fuel = `fuel ${Math.ceil(s.fuel)}/${info.tank}`;
+      const how = item === 'lowGradeFuel' ? 'Left click to fill it up' : s.driver !== undefined ? 'Someone is driving' : carInReach(s) ? (info.flies ? 'E to fly  ·  P to paint' : 'E to drive  ·  P to paint or swap model') : 'Get closer to get in';
+      return { text: `${info.name} (${fuel})  ·  ${how}`, health: s.hp / info.maxHp };
+    }
+    if (item && isExplosive(item) && item !== 'beancan') {
+      const spot = plantSpot(item);
+      if (!aimPlayer && !aimHound) return { text: spot ? `${ITEMS[item].name}  ·  Left click to stick it here` : `${ITEMS[item].name}  ·  Get close to a wall or door` };
+    }
+    if (item === 'beancan' && !aimPlayer && !aimHound) return { text: 'Beancan Grenade  ·  Left click to throw' };
+    if (item === 'supplySignal' && !aimPlayer && !aimHound) return { text: 'Supply Signal  ·  Left click to throw it and call the plane' };
     if (aimResource?.kind === 'waterBarrel') {
       const r = aimResource;
       if (r.amount <= 0) return { text: 'Rain barrel: dry, it will refill' };
@@ -768,19 +1390,55 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       const how = info.tool === 'pickup' ? 'E to pick' : 'Left click to gather';
       return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
-    if (aimPlayer) return { text: aimPlayer.state.name };
+    if (aimPlayer) {
+      const s = aimPlayer.state;
+      return { text: teamIds.includes(s.id) ? `${s.name} (your team)` : `${s.name}  ·  T to invite to your team` };
+    }
+    if (aimHound) {
+      const s = aimHound.view.state;
+      const text = creatures.describe(aimHound.view, welcome.id, item, houndInReach(aimHound.view.root.position));
+      return s.anim === 'dead' ? { text } : { text, health: s.hp };
+    }
     if (aimDeployable) {
       const d = aimDeployable;
       if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
+      if (CRATE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  ${falling(d) ? 'Still coming down' : 'E to open'}` };
+      if (d.kind === 'supplySignal') return { text: 'Supply Signal  ·  The plane is on its way' };
+      if (CHARGE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  About to blow: get away!` };
+      const mine = d.owner === welcome.id;
+      if (d.kind === 'toolCupboard') {
+        const trusted = d.auth?.includes(welcome.id);
+        const who = d.auth?.length ?? 0;
+        const hints = trusted
+          ? [`You are authorised (${who} ${who === 1 ? 'person' : 'people'})`, 'G to clear everyone else']
+          : ['E to authorise yourself and build here'];
+        if (mine) hints.push('Hit to pick up');
+        return { text: ['Tool Cupboard', ...hints].join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
+      }
+      if (d.kind === 'sleepingBag') {
+        const text = mine ? 'Your sleeping bag  ·  You can wake up here  ·  Hit to pick up' : 'Sleeping bag  ·  Hit to break it';
+        return { text, health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
+      }
       const bench = WORKBENCH_LEVEL[d.kind];
       const hints = [d.slots.length > 0 ? 'E to open' : bench ? `Unlocks level ${bench} recipes nearby` : '', 'Hit to pick up'];
       const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
       return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
     }
+    if (aim?.piece?.door && (aimDoor || item === 'codeLock')) {
+      const door = aim.piece.door;
+      const name = `${ITEMS[door.kind].name}${door.locked ? ' (locked)' : ''}`;
+      const hints = [item === 'codeLock' && !door.locked ? 'Left click to fit the lock' : `E to ${door.open ? 'close' : 'open'}`, 'Left click to hit'];
+      return { text: [name, ...hints].join('  ·  '), health: door.hp / DOOR_HP[door.kind] };
+    }
+    if (item && DOOR_KINDS.includes(item as DoorKind) && aim?.piece?.kind === 'wall') {
+      const p = aim.piece;
+      return { text: p.edit !== 'door' ? 'Make a doorway first: press G on the wall' : p.door ? 'There is already a door here' : 'Doorway  ·  Left click to hang the door' };
+    }
+    if (item === 'buildingPlan' && proposal && blockedAt(pieceBounds(proposal))) return { text: "Building blocked: someone else's tool cupboard is near" };
     if (aim?.piece && (item !== 'buildingPlan' || aim.piece.kind === 'wall')) {
       const p = aim.piece;
       const name = `${ITEMS[p.material].name} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind].toLowerCase()}`;
-      const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : ''].filter(Boolean);
+      const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : '', p.door ? `E to ${p.door.open ? 'close' : 'open'} the door` : ''].filter(Boolean);
       return { text: [name, ...hints].join('  ·  '), health: p.hp / MAX_HP[p.material] };
     }
     if (item === 'buildingPlan' && proposal && countItem(slots, material) < PIECE_COST) return { text: `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}` };
@@ -792,7 +1450,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const show = held() === 'buildingPlan';
     buildInfo.hidden = !show;
     if (!show) return;
-    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)<br/><small>Right click: wall, floor, stairs · R: wood, stone, scrap</small>`;
+    const paint = buildPaint ? ` · ${PAINTS[buildPaint].name} paint` : '';
+    const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)${paint}<br/><small>Right click: foundation, wall, floor, stairs, ramp, roof · R: wood, stone, scrap · P: paint</small>`;
     if (buildInfo.innerHTML !== html) buildInfo.innerHTML = html;
   }
 
@@ -800,6 +1459,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const dist = (r: { x: number; z: number }) => Math.hypot(r.x - controller.position.x, r.z - controller.position.z);
   let portrait: { angle: number; distance: number } | null = null;
   let fixedView: { from: number[]; to: number[] } | null = null;
+  let watched: { id: number; offset: number[] } | null = null;
   (window as unknown as { __pf: unknown }).__pf = {
     state: () => ({
       id: welcome.id,
@@ -814,6 +1474,74 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       position: controller.position.toArray(),
     }),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
+    perf: (frames = 5) => {
+      const r = gfx.renderer;
+      const seen = (o: THREE.Object3D) => {
+        for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
+        return true;
+      };
+      let meshes = 0, casters = 0, tris = 0, casterTris = 0, instanced = 0, skinned = 0;
+      const tex = new Map<THREE.Texture, string>();
+      const geos = new Set<THREE.BufferGeometry>();
+      const byName = new Map<string, number>();
+      const counts = new Map<string, number>();
+      world.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !seen(m)) return;
+        meshes++;
+        const g = m.geometry;
+        geos.add(g);
+        const n = ((g.index ? g.index.count : (g.getAttribute('position')?.count ?? 0)) / 3) * ((m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1);
+        tris += n;
+        if ((m as THREE.InstancedMesh).isInstancedMesh) instanced++;
+        if ((m as THREE.SkinnedMesh).isSkinnedMesh) skinned++;
+        if (m.castShadow) { casters++; casterTris += n; }
+        const mat0 = ([] as THREE.Material[]).concat(m.material)[0];
+        const key = `${g.name || m.name || m.parent?.name || '?'}/${mat0?.name || mat0?.type}/${Math.round(n)}`;
+        byName.set(key, (byName.get(key) ?? 0) + n);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        for (const mat of ([] as THREE.Material[]).concat(m.material)) {
+          for (const v of Object.values(mat)) {
+            const t = v as THREE.Texture;
+            if (t && t.isTexture && t.image) {
+              const img = t.image as { width?: number; height?: number };
+              tex.set(t, `${img.width}x${img.height}`);
+            }
+          }
+        }
+      });
+      let texMB = 0;
+      const sizes = new Map<string, number>();
+      for (const s of tex.values()) {
+        const [w, h] = s.split('x').map(Number);
+        if (w && h) texMB += (w * h * 4 * 1.33) / 1e6;
+        sizes.set(s, (sizes.get(s) ?? 0) + 1);
+      }
+      r.info.autoReset = false;
+      r.info.reset();
+      const t0 = performance.now();
+      for (let i = 0; i < frames; i++) gfx.render();
+      r.getContext().finish();
+      const ms = (performance.now() - t0) / frames;
+      r.info.autoReset = true;
+      return {
+        ms: +ms.toFixed(1),
+        calls: Math.round(r.info.render.calls / frames),
+        drawnTris: Math.round(r.info.render.triangles / frames),
+        memory: { ...r.info.memory },
+        programs: r.info.programs?.length,
+        meshes, instanced, skinned, casters, tris: Math.round(tris), casterTris: Math.round(casterTris),
+        geos: geos.size, textures: tex.size, texMB: Math.round(texMB),
+        texSizes: [...sizes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12),
+        heaviest: [...byName.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, v]) => `${k} x${counts.get(k)} =${Math.round(v)}`),
+        most: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k, v]) => `${k} x${v}`),
+        shadow: gfx.renderer.shadowMap.enabled,
+        ratio: r.getPixelRatio(),
+        quality: gfx.quality,
+      };
+    },
+    paint: () => openPaint(),
+    pause: () => pause.showMenu(),
     look: (yaw: number, pitch: number) => {
       controller.autoWalk = null;
       controller.yaw = yaw;
@@ -839,7 +1567,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     place: (kind: PieceKind, i: number, y: number, k: number, dir: number, mat: Material) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === 'buildingPlan');
       if (n >= 0) selectSlot(n);
-      net.send({ t: 'place', kind, i, y, k, dir, material: mat });
+      net.send({ t: 'place', kind, i, y, k, dir, material: mat, ...(buildPaint && { paint: buildPaint }) });
     },
     craft: (item: ItemId, count = 1) => net.send({ t: 'craft', item, count }),
     /** Fires the gun in your hands at a point in the world. */
@@ -852,8 +1580,13 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       return true;
     },
     reload: () => net.send({ t: 'reload', slot: ui.active }),
+    /** Uses (eats, feeds, applies) whatever is in your hands. */
+    use: () => net.send({ t: 'use', slot: ui.active }),
+    hounds: () => [...creatures.views.values()].map((v) => v.state),
     respawn: () => net.send({ t: 'respawn' }),
     aim: (on: boolean) => (aiming = on),
+    fire: () => fire(),
+    firstPerson: (on: boolean) => (firstPerson = on),
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
@@ -868,6 +1601,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     edit: (key: string, edit: Piece['edit']) => net.send({ t: 'edit', key, edit }),
     /** Points the camera at your own survivor from the front, for character screenshots. */
     portrait: (angle: number | null, distance = 2.6) => (portrait = angle === null ? null : { angle, distance }),
+    /** Keeps the camera on a hound from an offset, for screenshots of them moving about. */
+    watchHound: (id: number | null, offset: number[] = [2.6, 1.2, 1.6]) => (watched = id === null ? null : { id, offset }),
+    /** Holds the clock supply drops fall by at a server time (ms), or lets it run again, for screenshots. */
+    clockAt: (ms: number | null) => (world.serverNow = ms === null ? () => dayNight.now : () => ms),
+    /** Flies a supply plane over, `elapsed` seconds into its crossing, for screenshots. */
+    showPlane: (from: number[], to: number[], speed: number, elapsed: number) =>
+      effects.plane(buildPlane(), new THREE.Vector3().fromArray(from), new THREE.Vector3().fromArray(to), speed, elapsed),
+    /** Climbs on one of your animals, or gets off with null. */
+    ride: (id: number | null) => net.send({ t: 'ride', id }),
+    /** Handles a message as if the server sent it: the screenshot browser is too slow to hear the real one in time. */
+    receive: (m: ServerMessage) => net.onMessage(m),
+    /** The nearest car's state. */
+    cars: () => [...vehicles.views.values()].map((v) => v.state).sort((a, b) => Math.hypot(a.x - controller.position.x, a.z - controller.position.z) - Math.hypot(b.x - controller.position.x, b.z - controller.position.z))[0],
+    /** Throws what is in your hands. */
+    throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
     view: (from: number[] | null, to: number[] = [0, 0, 0]) => (fixedView = from ? { from, to } : null),
     setQuality: (q: 'high' | 'low') => {
@@ -891,6 +1639,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       }
       return best;
     },
+    /** Sets the time of day (0 is sunrise, 0.75 sunset) and holds the weather, for screenshots. */
+    sky: (phase: number | null, weather?: { rain: number; dust: number; snow: number } | null) => {
+      dayNight.held = phase;
+      if (weather !== undefined) dayNight.forced = weather;
+    },
+    /** Sends any message to the server as this player, for tests and screenshots. */
+    send: (m: Parameters<Net['send']>[0]) => net.send(m),
+    /** What the crosshair is on: a piece key, a door, a deployable, and where. */
+    aimInfo: () => ({ key: aim?.piece ? pieceKey(aim.piece) : null, door: aimDoor, deployable: aimDeployable?.id ?? null, point: aim?.point.toArray() ?? null }),
     storey: STOREY,
     iconUrl: (item: ItemId) => itemIconUrl(item),
   };
@@ -899,14 +1656,30 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
   const timer = new THREE.Timer();
   let sendTimer = 0;
   let time = 0;
+  let chargeIn = 0;
+  let smokeIn = 0;
   gfx.renderer.setAnimationLoop((now) => {
     timer.update(now);
-    const dt = Math.min(timer.getDelta(), 0.05);
+    // The first frame's timestamp can come from before the timer started; never step backwards.
+    const dt = Math.max(0, Math.min(timer.getDelta(), 0.05));
     time += dt;
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
-    me.setHeld(dead ? null : held());
+    me.seated = riding !== null || driving !== null;
+    // Your own car goes where you drive it at once, rather than waiting on the server.
+    const car = driving === null ? undefined : vehicles.views.get(driving);
+    if (car && controller.car) {
+      const { fx, fz, rx, rz } = axes(controller.yaw);
+      const s = controller.car.seat;
+      const x = controller.position.x - fx * s.ahead + rx * s.left;
+      const z = controller.position.z - fz * s.ahead + rz * s.left;
+      car.carry(x, z, controller.yaw, controller.carSpeed, controller.car.flies ? controller.position.y - s.y : undefined);
+    }
+    // Your own mount goes where you steer it at once, rather than waiting on the server.
+    const mount = riding === null ? undefined : creatures.views.get(riding);
+    if (mount) mount.carry(controller.position.x, controller.position.y - (controller.mount?.seat ?? 0), controller.position.z, controller.yaw + Math.PI);
+    me.setHeld(dead ? null : held(), dead ? 0 : (slots[ui.active]?.paint ?? 0));
     me.setWear(ui.wear.map((s) => s?.item ?? null));
     me.aimPitch = controller.pitch;
     me.update(dt, controller.moving && !dead);
@@ -914,16 +1687,24 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     const gun = heldGun();
     const ads = aiming && !!gun && !dead;
     const scoped = ads && SCOPED.includes(held()!);
-    const fov = ads ? baseFov / (scoped ? 4 : 1.4) : baseFov;
+    inFirst = firstPerson && !dead && riding === null && driving === null && !portrait && !fixedView && !watched;
+    const fov = ads ? baseFov / (scoped ? 4 : inFirst ? 1.25 : 1.4) : baseFov;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 14);
       camera.updateProjectionMatrix();
     }
     controller.sensitivity = camera.fov / baseFov;
     const throughScope = scoped && camera.fov < baseFov * 0.5;
-    hud.setScope(throughScope);
-    me.root.visible = !throughScope;
-    controller.updateCamera(camera, ads ? 1 : 0, throughScope);
+    hud.setScope(throughScope, inFirst && ads && camera.fov < baseFov * 0.9);
+    me.root.visible = !throughScope && !inFirst;
+    controller.updateCamera(camera, ads ? 1 : 0, throughScope || inFirst);
+    viewKick *= Math.exp(-dt * 9);
+    if (inFirst) camera.rotateX(viewKick);
+    view.root.visible = inFirst && !throughScope;
+    if (view.root.visible) {
+      view.set(held(), slots[ui.active]?.paint ?? 0);
+      view.update(dt, { aiming: ads, moving: controller.moving, sprinting: controller.sprinting, yaw: controller.yaw, pitch: controller.pitch, room: roomAhead() });
+    }
     if (triggerHeld && gun?.auto && !ui.open) fire();
     if (portrait) {
       const a = controller.yaw + Math.PI + portrait.angle;
@@ -931,19 +1712,47 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
       camera.position.set(p.x + Math.sin(a) * portrait.distance, p.y + 1.45, p.z + Math.cos(a) * portrait.distance);
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
+    const hound = watched && creatures.views.get(watched.id);
+    if (hound) fixedView = { from: hound.root.position.clone().add(new THREE.Vector3().fromArray(watched!.offset)).toArray(), to: hound.root.position.clone().setY(hound.root.position.y + SPECIES[hound.species].height * 0.6).toArray() };
     if (fixedView) {
       camera.position.fromArray(fixedView.from);
       camera.lookAt(new THREE.Vector3().fromArray(fixedView.to));
     }
 
+    // A nearby blast shakes the view.
+    if (effects.shake > 0.01) {
+      const k = effects.shake * 0.09;
+      camera.position.add(new THREE.Vector3((Math.random() - 0.5) * k, (Math.random() - 0.5) * k, (Math.random() - 0.5) * k));
+      effects.shake *= Math.exp(-dt * 5);
+    }
+    // Supply signals pour out red smoke, and so does a supply drop for a while after it lands.
+    smokeIn -= dt;
+    if (smokeIn <= 0) {
+      smokeIn = 0.16;
+      for (const d of world.deployables.values()) {
+        const now = world.serverNow();
+        const landed = d.kind === 'supplyDrop' && d.fall && now > d.fall.land && now < d.fall.land + 90_000;
+        if (d.kind === 'supplySignal' || landed) effects.redSmoke(new THREE.Vector3(d.x, d.y + (landed ? 1.4 : 0.2), d.z));
+      }
+    }
+    // Lit charges beep or hiss.
+    chargeIn -= dt;
+    if (chargeIn <= 0) {
+      chargeIn = 0.9;
+      for (const d of world.deployables.values()) if (CHARGE_KINDS.includes(d.kind)) effects.chargeSound(d.kind as ExplosiveId, new THREE.Vector3(d.x, d.y, d.z));
+    }
+
     for (const r of remotes.values()) {
       r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
       r.avatar.root.rotation.y = r.state.yaw + Math.PI;
-      r.avatar.setHeld(r.state.held);
+      r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
-      r.avatar.update(dt, r.state.moving);
+      r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
+      r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
+    creatures.update(dt);
+    vehicles.update(dt);
 
     updateAim();
     updateGhost();
@@ -967,6 +1776,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>) 
     }
 
     world.update(dt, controller.position, time);
+    dayNight.update(dt, controller.position, camera, fires());
+    if (performance.now() > clockIn) {
+      clockIn = performance.now() + 1000;
+      clock.textContent = dayNight.label();
+      const w = dayNight.storm;
+      effects.setWeather(w.rain, w.dust, w.snow);
+    }
+    map.update(dt, mapMarks());
     gfx.render();
   });
 }

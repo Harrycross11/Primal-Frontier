@@ -1,13 +1,14 @@
 // Dedicated game server: serves the built client over HTTP and runs the game over a WebSocket at /ws.
 
+import type { Species } from '../shared/creatures.ts';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { WebSocket, WebSocketServer } from 'ws';
-import { TICK_RATE } from '../shared/constants.ts';
+import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
-import { Game, type Outgoing } from './game.ts';
+import { Game, cleanToken, type Outgoing } from './game.ts';
 import { openStore } from './store.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -101,14 +102,23 @@ const saved = await store?.load().catch((e) => {
   return null;
 });
 let game: Game;
-if (saved && !wipeDue(saved.startedAt, Date.now())) {
+// A save from before the map last changed would put bases in the wrong places: wipe instead.
+const sameMap = saved?.version === 2;
+if (saved && sameMap && !wipeDue(saved.startedAt, Date.now())) {
   game = Game.restore(saved, Date.now(), startKit);
   console.log(`world restored from ${store!.name}, started ${new Date(saved.startedAt).toISOString()}`);
 } else {
   game = new Game(SEED, startKit);
   game.startedAt = Date.now();
-  if (saved) console.log('the world was due a wipe: starting a fresh one');
+  if (saved) console.log(sameMap ? 'the world was due a wipe: starting a fresh one' : 'the map has changed: starting a fresh world');
 }
+// Coins, packs and objectives outlive wipes: they are kept apart from the world.
+game.accounts.load(
+  (await store?.loadAccounts().catch((e) => {
+    console.error('could not load accounts', e);
+    return [];
+  })) ?? [],
+);
 // START_AT='x,z' spawns everyone at one spot, for screenshots.
 if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
 const sockets = new Map<number, WebSocket>();
@@ -118,12 +128,18 @@ function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+/** Past this much unsent data a player's connection is behind, so world snapshots wait. */
+const BEHIND = 64 * 1024;
+
 function deliver(out: Outgoing[]) {
   for (const o of out) {
     const data = JSON.stringify(o.msg);
     if (o.to === 'all' || o.to === 'others') {
       for (const [id, ws] of sockets) {
         if (o.to === 'others' && id === o.except) continue;
+        // A slow connection skips snapshots (the next one replaces it anyway) so that builds,
+        // hits and inventory changes queued behind them still arrive promptly.
+        if (o.msg.t === 'state' && ws.bufferedAmount > BEHIND) continue;
         if (ws.readyState === WebSocket.OPEN) ws.send(data);
       }
     } else {
@@ -146,6 +162,17 @@ wss.on('connection', (ws) => {
     if (!msg || typeof msg !== 'object') return;
     const now = Date.now();
     if (id === null) {
+      // The main menu asks after your account and the server before you play.
+      if (msg.t === 'hello' || msg.t === 'buy') {
+        const token = cleanToken(msg.token);
+        if (msg.t === 'buy') {
+          const result = game.buy({ token }, String(msg.pack), now);
+          send(ws, { t: 'notice', text: result.text });
+        }
+        const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
+        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
+        return;
+      }
       if (msg.t !== 'join') return;
       const joined = game.join(msg.name, now, msg.look, msg.token);
       if (!joined) {
@@ -156,6 +183,8 @@ wss.on('connection', (ws) => {
       id = joined.id;
       sockets.set(id, ws);
       deliver(joined.out);
+      // START_PET=mule gives everyone who joins a tame one beside them (for screenshots).
+      if (process.env.START_PET) game.givePet(id, process.env.START_PET as Species);
       console.log(`player ${id} joined (${game.players.size} online)`);
       return;
     }
@@ -166,11 +195,45 @@ wss.on('connection', (ws) => {
       case 'gather':
         deliver(game.gather(id, msg.id, now, msg.slot));
         break;
+      case 'drive':
+        deliver(game.drive(id, msg.id));
+        break;
+      case 'buy': {
+        const result = game.buy({ id }, String(msg.pack), now);
+        deliver([{ to: id, msg: { t: 'notice', text: result.text } }, ...[game.account(id, now)].filter((o) => o !== null)]);
+        break;
+      }
+      case 'getAccount': {
+        const o = game.account(id, now);
+        if (o) deliver([o]);
+        break;
+      }
+      case 'refuel':
+        deliver(game.refuel(id, msg.id, msg.slot));
+        break;
+      case 'invite':
+        deliver(game.invite(id, msg.id, now));
+        break;
+      case 'acceptInvite':
+        deliver(game.acceptInvite(id, now));
+        break;
+      case 'leaveTeam':
+        deliver(game.leaveTeam(id));
+        break;
       case 'place':
-        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material));
+        deliver(game.place(id, msg.kind, msg.i, msg.y, msg.k, msg.dir, msg.material, msg.paint));
+        break;
+      case 'paintPiece':
+        deliver(game.paintPiece(id, String(msg.key), msg.paint, msg.all === true));
+        break;
+      case 'paintItem':
+        deliver(game.paintItem(id, msg.slot, msg.paint));
+        break;
+      case 'customiseCar':
+        deliver(game.customiseCar(id, msg.id, msg.kind, msg.paint));
         break;
       case 'hit':
-        deliver(game.hit(id, String(msg.key), now));
+        deliver(game.hit(id, String(msg.key), now, msg.door === true));
         break;
       case 'hitDeployable':
         deliver(game.hitDeployable(id, msg.id, now));
@@ -205,8 +268,35 @@ wss.on('connection', (ws) => {
       case 'use':
         deliver(game.use(id, msg.slot, now));
         break;
+      case 'ride':
+        deliver(game.ride(id, typeof msg.id === 'number' ? msg.id : null));
+        break;
       case 'respawn':
-        deliver(game.respawn(id));
+        deliver(game.respawn(id, typeof msg.bag === 'number' ? msg.bag : undefined, now));
+        break;
+      case 'authorize':
+        deliver(game.authorize(id, msg.id));
+        break;
+      case 'clearAuth':
+        deliver(game.clearAuth(id, msg.id));
+        break;
+      case 'hangDoor':
+        deliver(game.hangDoor(id, String(msg.key), msg.slot));
+        break;
+      case 'door':
+        deliver(game.toggleDoor(id, String(msg.key)));
+        break;
+      case 'lock':
+        deliver(game.lock(id, String(msg.key), msg.slot, String(msg.code)));
+        break;
+      case 'code':
+        deliver(game.tryCode(id, String(msg.key), String(msg.code), now));
+        break;
+      case 'plant':
+        deliver(game.plant(id, msg.slot, msg.at, now, typeof msg.key === 'string' ? msg.key : undefined, msg.door === true));
+        break;
+      case 'throw':
+        deliver(game.throwGrenade(id, msg.slot, msg.d, now));
         break;
     }
   });
@@ -226,7 +316,16 @@ let saving: Promise<void> = Promise.resolve();
 function save(): Promise<void> {
   if (!store) return Promise.resolve();
   const world = game.save(Date.now());
-  saving = saving.then(() => store.save(world)).catch((e) => console.error('could not save the world', e));
+  const accounts = game.accounts.dirty ? game.accounts.dump() : null;
+  game.accounts.dirty = false;
+  saving = saving
+    .then(() => store.save(world))
+    .catch((e) => console.error('could not save the world', e))
+    .then(() => (accounts ? store.saveAccounts(accounts) : undefined))
+    .catch((e) => {
+      game.accounts.dirty = true;
+      console.error('could not save accounts', e);
+    });
   return saving;
 }
 setInterval(save, SAVE_EVERY * 1000);
@@ -250,5 +349,5 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 
 http.listen(PORT, () => {
-  console.log(`Primal Frontier server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'})`);
+  console.log(`PRIME server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'})`);
 });

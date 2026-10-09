@@ -3,6 +3,7 @@
 // build in code. If a file fails to load the game falls back to those shapes.
 
 import * as THREE from 'three';
+import { lodReady } from './lod.ts';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -42,6 +43,10 @@ interface Fit {
 const FIT: Record<string, Fit> = {
   ...Object.fromEntries(BOULDERS.map((b) => [b, { width: 2.3 }])),
   log: { width: 3.2 },
+  // Worn on the survivor's back: turned so the straps face +z, against the body.
+  'gear-backpack': { height: 0.62, turn: [0, Math.PI, 0] },
+  // An English leather saddle with its stirrups hanging, front along +z; creatures.ts sizes it.
+  'gear-saddle': { length: 1 },
   barrel: { height: 0.9 },
   // The tyre is scanned standing up; lay it flat.
   tyre: { width: 0.84, turn: [Math.PI / 2, 0, 0] },
@@ -66,6 +71,25 @@ const FIT: Record<string, Fit> = {
   'ruin-wall': { width: 6 },
   'rubble-pile': { width: 5 },
   'rubble-chunks': { width: 0.5, set: true },
+  // The landmarks' buildings and props at real size (see shared/landmarks.ts, whose solid parts
+  // are measured at these sizes).
+  'lm-petrol': { width: 22 },
+  'lm-warehouse': { width: 14 },
+  'lm-house': { width: 11 },
+  'lm-shed': { height: 4.2 },
+  'lm-container': { width: 6.1 },
+  'lm-container2': { width: 9 },
+  'lm-waterTower': { height: 12 },
+  'lm-pumpJack': { height: 6 },
+  'lm-guardTower': { height: 7 },
+  'lm-tent': { width: 9 },
+  'lm-radioTower': { height: 30 },
+  // Loot crates (sized as DEPLOYABLE_INFO), the parachute and a C-17 sized supply plane.
+  crate: { width: 1.5 },
+  'crate-military': { width: 1.3 },
+  'crate-drop': { width: 1.4 },
+  parachute: { height: 5 },
+  plane: { width: 55 },
   // Held guns, turned so the barrel points along +z, at their real overall lengths.
   'gun-assaultRifle': { length: 0.88, turn: [0, -Math.PI / 2, 0] },
   'gun-boltRifle': { length: 1.23, drop: /bayonet/ },
@@ -236,12 +260,15 @@ async function load(loader: GLTFLoader, name: string) {
     alpha.flipY = false;
   }
   const out = roots.map((r) => build(r, fit, alpha)).filter((m): m is Model => !!m);
+  for (const m of out) m.geometry.name = name;
   if (out.length) models.set(name, out);
 }
 
-/** Rigged characters, kept whole (skeleton and skinned meshes) rather than merged. */
-const CHARACTERS = ['survivor'];
+/** Rigged characters and the car, kept whole (skeleton, skinned meshes, wheels) rather than merged. */
+const CHARACTERS = ['survivor', 'ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear', 'vehicle-pickup', 'vehicle-sedan', 'vehicle-van', 'vehicle-jeep', 'vehicle-heli'];
 const characters = new Map<string, THREE.Object3D>();
+/** Animations that came with a character, by name. */
+const clips = new Map<string, THREE.AnimationClip[]>();
 
 async function loadCharacter(loader: GLTFLoader, name: string) {
   const gltf = await loader.loadAsync(`/models/${name}.glb`);
@@ -256,6 +283,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
     if (m.map) m.map.anisotropy = 8;
   });
   characters.set(name, gltf.scene);
+  clips.set(name, gltf.animations);
 }
 
 /**
@@ -267,7 +295,7 @@ export async function loadModels(progress?: (done: number, total: number) => voi
   // from /draco.
   const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
   const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
-  const jobs = [...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
+  const jobs = [lodReady, ...Object.keys(FIT).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
   let done = 0;
   progress?.(0, jobs.length);
   await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
@@ -277,6 +305,11 @@ export async function loadModels(progress?: (done: number, total: number) => voi
 export function character(name: string): THREE.Object3D | undefined {
   const scene = characters.get(name);
   return scene && cloneSkinned(scene);
+}
+
+/** The animations a rigged character came with (none if it has none or didn't load). */
+export function characterClips(name: string): THREE.AnimationClip[] {
+  return clips.get(name) ?? [];
 }
 
 export function model(name: string): Model | undefined {

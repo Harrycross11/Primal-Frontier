@@ -1,7 +1,7 @@
 // Tuning values shared by the client and the server, so both sides agree on the rules.
 
 /** The playable map is a square this many metres wide, centred on (0, 0). */
-export const WORLD_SIZE = 160;
+export const WORLD_SIZE = 400;
 export const HALF_WORLD = WORLD_SIZE / 2;
 
 export const MAX_PLAYERS = 8;

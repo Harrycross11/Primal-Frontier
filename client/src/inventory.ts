@@ -18,7 +18,9 @@ import {
   type Stack,
 } from '../../shared/items.ts';
 import type { CraftJob, SlotRef } from '../../shared/protocol.ts';
+import { PAINTS } from '../../shared/paint.ts';
 import { iconSvg } from './icons.ts';
+import { swatch } from './paint.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'sulfurOre', 'sulfur', 'hqmOre', 'hqm', 'charcoal', 'gunpowder', 'cloth'];
@@ -194,9 +196,9 @@ export class InventoryUi {
       const ore = FURNACE_ORE_SLOTS.reduce((n, i) => n + (d.slots[i]?.count ?? 0), 0);
       $('furnace-status').textContent = d.on
         ? ore > 0
-          ? `Smelting: ${ore} ore left, ${fuel} wood left`
+          ? `Smelting and cooking: ${ore} left, ${fuel} wood left`
           : `Burning wood into charcoal (${fuel} wood left)`
-        : 'Add wood as fuel and metal, sulfur or high quality ore, then light it.';
+        : 'Add wood as fuel and metal, sulfur or high quality ore (or raw meat to cook), then light it.';
     }
   }
 
@@ -299,6 +301,7 @@ export class InventoryUi {
       if (max && stack.hp !== undefined) {
         el.insertAdjacentHTML('beforeend', `<span class="wear"><i style="width:${Math.round((stack.hp / max) * 100)}%"></i></span>`);
       }
+      if (stack.paint) el.insertAdjacentHTML('beforeend', `<span class="paint" style="background:${swatch(stack.paint)}"></span>`);
     }
     if (!interactive) return el;
     el.addEventListener('pointerenter', () => {
@@ -307,7 +310,8 @@ export class InventoryUi {
       const info = ITEMS[stack.item];
       const max = maxDurability(stack.item);
       const wear = max && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${max}` : '';
-      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}`;
+      const paint = stack.paint ? `<br/>${PAINTS[stack.paint].name} paint` : '';
+      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}${paint}`;
       tip.hidden = false;
     });
     el.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
@@ -328,38 +332,73 @@ export class InventoryUi {
   }
 
   /**
-   * Right click: send a stack to the open container, put armour on or take it off, or move
-   * between belt and backpack.
+   * Right click: send a stack to the open container (or from it into the inventory), put armour
+   * on or take it off, or move between belt and backpack. A stack tops up any part stacks of the
+   * same item first and the rest goes to the first empty slot.
    */
   private quickMove(from: SlotRef, stack: Stack) {
     const d = this.container && this.container.slots.length > 0 ? this.container : null;
     const armour = ITEMS[stack.item].armour;
-    let to: SlotRef | null = null;
-    if (from.c === 'me' && !d && armour) {
-      to = { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) };
-    } else if (from.c === 'wear') {
-      const i = this.bestSlot(this.slots, stack, (n) => n >= BELT_SIZE);
-      const j = i >= 0 ? i : this.bestSlot(this.slots, stack, () => true);
-      if (j >= 0) to = { c: 'me', i: j };
+    if (from.c === 'me' && !d && armour) return this.actions.move(from, { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) });
+    let into: { c: SlotRef['c']; slots: Slots; allowed: (i: number) => boolean }[];
+    if (from.c === 'wear') {
+      into = [
+        { c: 'me', slots: this.slots, allowed: (n) => n >= BELT_SIZE },
+        { c: 'me', slots: this.slots, allowed: () => true },
+      ];
     } else if (from.c === 'me' && d) {
-      const i = this.bestSlot(d.slots, stack, (n) => slotAccepts(d, n, stack.item));
-      if (i >= 0) to = { c: d.id, i };
+      into = [{ c: d.id, slots: d.slots, allowed: (n) => slotAccepts(d, n, stack.item) }];
+    } else if (from.c !== 'me') {
+      // Out of a box or bag: into the backpack first, the belt if that's full.
+      into = [
+        { c: 'me', slots: this.slots, allowed: (n) => n >= BELT_SIZE },
+        { c: 'me', slots: this.slots, allowed: () => true },
+      ];
     } else {
-      const range: [number, number] =
-        from.c !== 'me' ? [0, this.slots.length] : from.i < BELT_SIZE ? [BELT_SIZE, this.slots.length] : [0, BELT_SIZE];
-      const i = this.bestSlot(this.slots, stack, (n) => n >= range[0] && n < range[1]);
-      if (i >= 0) to = { c: 'me', i };
+      const belt = from.i < BELT_SIZE;
+      into = [{ c: 'me', slots: this.slots, allowed: (n) => (belt ? n >= BELT_SIZE : n < BELT_SIZE) }];
     }
-    if (to) this.actions.move(from, to);
+    for (const { c, slots, allowed } of into) {
+      const moves = this.plan(slots, stack, allowed);
+      if (!moves.length) continue;
+      for (const [i, count] of moves) this.actions.move(from, { c, i }, count);
+      return;
+    }
+    flashFull(from);
   }
 
-  /** A slot with the same item and room, else the first empty one. */
-  private bestSlot(slots: Slots, stack: Stack, allowed: (i: number) => boolean): number {
+  /**
+   * Where a stack goes in a set of slots: [slot, count] for each part stack of the same item it
+   * tops up, then the first empty slot for whatever is left (with no count, so the server moves
+   * all that remains). Empty when nothing fits.
+   */
+  private plan(slots: Slots, stack: Stack, allowed: (i: number) => boolean): [number, number | undefined][] {
     const max = ITEMS[stack.item].stack;
-    const same = slots.findIndex((s, i) => allowed(i) && s?.item === stack.item && s.count < max);
-    if (same >= 0 && max > 1) return same;
-    return slots.findIndex((s, i) => allowed(i) && !s);
+    const out: [number, number | undefined][] = [];
+    let left = stack.count;
+    if (max > 1) {
+      slots.forEach((s, i) => {
+        if (left <= 0 || !allowed(i) || s?.item !== stack.item || s.count >= max) return;
+        const n = Math.min(left, max - s.count);
+        out.push([i, n]);
+        left -= n;
+      });
+    }
+    if (left > 0) {
+      const empty = slots.findIndex((s, i) => allowed(i) && !s);
+      if (empty >= 0) out.push([empty, undefined]);
+    }
+    return out;
   }
+}
+
+/** A short red flash on a slot whose stack had nowhere to go. */
+function flashFull(ref: SlotRef) {
+  const el = document.querySelector<HTMLElement>(`[data-ref='${JSON.stringify(ref)}']`);
+  if (!el) return;
+  el.classList.remove('full');
+  void el.offsetWidth;
+  el.classList.add('full');
 }
 
 /** Damage, fire rate and magazine for weapons, shown in tooltips and the crafting menu. */

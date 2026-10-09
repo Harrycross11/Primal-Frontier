@@ -16,6 +16,7 @@ export type ItemId =
   | 'charcoal'
   | 'gunpowder'
   | 'cloth'
+  | 'lowGradeFuel'
   // Tools
   | 'rock'
   | 'buildingPlan'
@@ -29,10 +30,22 @@ export type ItemId =
   | 'workbench3'
   | 'furnace'
   | 'storageBox'
+  | 'toolCupboard'
+  | 'sleepingBag'
+  | 'woodenDoor'
+  | 'metalDoor'
+  | 'codeLock'
+  // Explosives
+  | 'beancan'
+  | 'satchel'
+  | 'explosives'
+  | 'c4'
+  | 'supplySignal'
   // Melee weapons
   | 'woodenSpear'
   | 'stoneSpear'
   | 'machete'
+  | 'torch'
   | 'salvagedSword'
   | 'combatKnife'
   | 'nailBat'
@@ -85,6 +98,9 @@ export type ItemId =
   | 'mushroom'
   | 'cannedBeans'
   | 'bottledWater'
+  | 'rawMeat'
+  | 'cookedMeat'
+  | 'feedSack'
   // Armour
   | 'burlapHeadwrap'
   | 'burlapShirt'
@@ -159,7 +175,7 @@ export interface ConsumeInfo {
 
 export interface ItemInfo {
   name: string;
-  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour' | 'food';
+  kind: 'resource' | 'tool' | 'plan' | 'deployable' | 'weapon' | 'ammo' | 'medical' | 'armour' | 'food' | 'explosive';
   stack: number;
   description: string;
   tool?: ToolInfo;
@@ -207,6 +223,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   charcoal: res('Charcoal', 'Left over when a furnace burns wood.'),
   gunpowder: res('Gunpowder', 'Made from charcoal and sulfur. Every bullet needs some.'),
   cloth: res('Cloth', 'Picked from hemp plants.'),
+  lowGradeFuel: { name: 'Low Grade Fuel', kind: 'resource', stack: 500, description: 'Rough fuel cooked up from charcoal and rags. Hold it and left click a car to fill its tank.' },
   rock: {
     name: 'Rock',
     kind: 'tool',
@@ -253,9 +270,30 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   workbench3: { name: 'Workbench Level 3', kind: 'deployable', stack: 1, description: 'Unlocks the assault rifles, sniper rifles and the M249.' },
   furnace: { name: 'Furnace', kind: 'deployable', stack: 1, description: 'Burns wood to smelt metal, sulfur and high quality ore.' },
   storageBox: { name: 'Storage Box', kind: 'deployable', stack: 1, description: 'Holds 12 stacks of items.' },
+  toolCupboard: {
+    name: 'Tool Cupboard',
+    kind: 'deployable',
+    stack: 1,
+    description: 'Put it inside your base. Nobody else can build within 18 m, and their hits barely scratch your walls. Press E on it to let a friend build too.',
+  },
+  sleepingBag: { name: 'Sleeping Bag', kind: 'deployable', stack: 1, description: 'Lay it down in your base and wake up there when you die.' },
+  woodenDoor: { name: 'Wooden Door', kind: 'deployable', stack: 1, description: 'Hang it in a doorway (edit a wall with G). E opens and closes it.' },
+  metalDoor: { name: 'Sheet Metal Door', kind: 'deployable', stack: 1, description: 'A much tougher door. Takes five satchel charges or two C4 to blow open.' },
+  codeLock: { name: 'Code Lock', kind: 'deployable', stack: 5, description: 'Fit it to a door and pick a 4-digit code. Only you, and whoever knows the code, can open it.' },
+  beancan: { name: 'Beancan Grenade', kind: 'explosive', stack: 10, description: 'Thrown with left click. Blows up after a few seconds: hurts people and chips at walls.' },
+  satchel: { name: 'Satchel Charge', kind: 'explosive', stack: 10, description: 'Left click to stick it to a wall or door. Two blow open a wooden wall or door, three a stone one.' },
+  explosives: res('Explosives', 'Packed gunpowder and sulfur. Needed for timed explosive charges.'),
+  c4: { name: 'Timed Explosive Charge', kind: 'explosive', stack: 10, description: 'C4. Left click to stick it to a wall or door. One takes out any wall or a wooden door.' },
+  supplySignal: {
+    name: 'Supply Signal',
+    kind: 'explosive',
+    stack: 5,
+    description: 'Found in military crates. Throw it and red smoke calls the supply plane, which drops a crate of the best gear right there. Everyone sees the smoke.',
+  },
 
   woodenSpear: melee('Wooden Spear', 'A sharpened stick with a long reach.', 30, 0.9, 3, 120),
   stoneSpear: melee('Stone Spear', 'A wooden spear with a stone tip. Hits harder.', 40, 0.9, 3, 160),
+  torch: melee('Torch', 'A stick wrapped in burning cloth. Lights your way at night, and burns whoever you hit.', 12, 0.7, 2.1, 500),
   machete: melee('Machete', 'Quick, light blade beaten from scrap metal.', 35, 0.55, 2.4, 200),
   salvagedSword: melee('Salvaged Sword', 'A heavy blade cut from a car leaf spring.', 50, 0.85, 2.6, 250),
   combatKnife: melee('Combat Knife', 'A military fighting knife. Very fast, short reach.', 32, 0.4, 1.9, 300),
@@ -386,6 +424,20 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   mushroom: { name: 'Mushroom', kind: 'food', stack: 20, consume: { food: 10, water: 3 }, description: 'Grows in the shade of ruins. Chewy, but it is food. Left click to eat.' },
   cannedBeans: { name: 'Can of Beans', kind: 'food', stack: 10, consume: { food: 40, water: 5 }, description: 'Still sealed. Found in the glove boxes of old wrecks. Left click to eat.' },
   bottledWater: { name: 'Bottled Water', kind: 'food', stack: 10, consume: { water: 35 }, description: 'Clean water from before the bombs. Found in old wrecks. Left click to drink.' },
+  rawMeat: { name: 'Raw Meat', kind: 'food', stack: 20, consume: { food: 6 }, description: 'Cut from a dead animal. Cook it in a furnace, or eat it raw if you must. Left click to eat.' },
+  cookedMeat: {
+    name: 'Cooked Meat',
+    kind: 'food',
+    stack: 20,
+    consume: { food: 35, water: 2 },
+    description: 'Seared over a furnace. Filling, and Ashhounds and Frost Bears will take it from your hand: feed one enough and it is yours.',
+  },
+  feedSack: {
+    name: 'Feed Sack',
+    kind: 'food',
+    stack: 10,
+    description: 'Hemp mash and mushrooms in a cloth sack. Walk slowly up to a mule, elk, buffalo or camel and hold it out (left click) to tame it.',
+  },
 };
 
 export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -397,6 +449,8 @@ export interface Stack {
   hp?: number;
   /** Rounds loaded, for bows and guns. */
   ammo?: number;
+  /** Its paint, from the palette in paint.ts, for guns, tools and melee weapons. */
+  paint?: number;
 }
 
 export type Slots = (Stack | null)[];
@@ -506,8 +560,8 @@ export interface Recipe {
   category: RecipeCategory;
 }
 
-export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Ammo' | 'Armour' | 'Medical' | 'Resources';
-export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Ammo', 'Armour', 'Medical', 'Resources'];
+export type RecipeCategory = 'Tools' | 'Construction' | 'Weapons' | 'Explosives' | 'Ammo' | 'Armour' | 'Medical' | 'Resources';
+export const RECIPE_CATEGORIES: RecipeCategory[] = ['Tools', 'Construction', 'Weapons', 'Explosives', 'Ammo', 'Armour', 'Medical', 'Resources'];
 
 export const RECIPES: Recipe[] = [
   { item: 'rock', count: 1, cost: { stone: 10 }, time: 1, category: 'Tools' },
@@ -520,6 +574,11 @@ export const RECIPES: Recipe[] = [
   { item: 'storageBox', count: 1, cost: { wood: 100 }, time: 4, category: 'Construction' },
   { item: 'furnace', count: 1, cost: { stone: 150, wood: 50, cloth: 10 }, time: 6, category: 'Construction' },
   { item: 'workbench', count: 1, cost: { wood: 250, metal: 50, scrap: 50 }, time: 10, category: 'Construction' },
+  { item: 'toolCupboard', count: 1, cost: { wood: 300 }, time: 6, category: 'Construction' },
+  { item: 'sleepingBag', count: 1, cost: { cloth: 30 }, time: 3, category: 'Construction' },
+  { item: 'woodenDoor', count: 1, cost: { wood: 150 }, time: 4, category: 'Construction' },
+  { item: 'metalDoor', count: 1, cost: { metal: 150 }, time: 8, workbench: 1, category: 'Construction' },
+  { item: 'codeLock', count: 1, cost: { metal: 100 }, time: 5, workbench: 1, category: 'Construction' },
   { item: 'workbench2', count: 1, cost: { metal: 500, hqm: 20, scrap: 200 }, time: 15, workbench: 1, category: 'Construction' },
   { item: 'workbench3', count: 1, cost: { metal: 1000, hqm: 100, scrap: 500 }, time: 20, workbench: 2, category: 'Construction' },
 
@@ -527,6 +586,7 @@ export const RECIPES: Recipe[] = [
   { item: 'stoneSpear', count: 1, cost: { woodenSpear: 1, stone: 20 }, time: 3, category: 'Weapons' },
   { item: 'huntingBow', count: 1, cost: { wood: 200, cloth: 50 }, time: 6, category: 'Weapons' },
   { item: 'eoka', count: 1, cost: { wood: 75, metal: 30 }, time: 5, category: 'Weapons' },
+  { item: 'torch', count: 1, cost: { wood: 30, cloth: 10 }, time: 2, category: 'Tools' },
   { item: 'machete', count: 1, cost: { metal: 40, wood: 20 }, time: 5, workbench: 1, category: 'Weapons' },
   { item: 'salvagedSword', count: 1, cost: { metal: 60, scrap: 20, wood: 20 }, time: 6, workbench: 1, category: 'Weapons' },
   { item: 'crossbow', count: 1, cost: { wood: 200, metal: 75, cloth: 20 }, time: 8, workbench: 1, category: 'Weapons' },
@@ -565,6 +625,11 @@ export const RECIPES: Recipe[] = [
   { item: 'm60', count: 1, cost: { metal: 650, hqm: 100, scrap: 300 }, time: 35, workbench: 3, category: 'Weapons' },
   { item: 'm82', count: 1, cost: { metal: 800, hqm: 150, scrap: 400 }, time: 40, workbench: 3, category: 'Weapons' },
 
+  { item: 'beancan', count: 1, cost: { gunpowder: 60, metal: 20 }, time: 4, workbench: 1, category: 'Explosives' },
+  { item: 'satchel', count: 1, cost: { beancan: 4, cloth: 10 }, time: 5, workbench: 1, category: 'Explosives' },
+  { item: 'explosives', count: 1, cost: { gunpowder: 50, sulfur: 10, metal: 10 }, time: 5, workbench: 2, category: 'Explosives' },
+  { item: 'c4', count: 1, cost: { explosives: 5, cloth: 5 }, time: 10, workbench: 3, category: 'Explosives' },
+
   { item: 'arrow', count: 2, cost: { wood: 25, stone: 10 }, time: 1, category: 'Ammo' },
   { item: 'handmadeShell', count: 2, cost: { stone: 5, gunpowder: 5 }, time: 1, category: 'Ammo' },
   { item: 'shotgunShell', count: 2, cost: { metal: 5, gunpowder: 10 }, time: 2, workbench: 1, category: 'Ammo' },
@@ -584,8 +649,10 @@ export const RECIPES: Recipe[] = [
   { item: 'bandage', count: 1, cost: { cloth: 4 }, time: 2, category: 'Medical' },
   { item: 'syringe', count: 1, cost: { cloth: 15, metal: 10 }, time: 4, workbench: 1, category: 'Medical' },
   { item: 'antiRadPills', count: 1, cost: { charcoal: 15, mushroom: 2 }, time: 3, category: 'Medical' },
+  { item: 'feedSack', count: 1, cost: { cloth: 10, mushroom: 2 }, time: 3, category: 'Tools' },
 
   { item: 'gunpowder', count: 10, cost: { charcoal: 30, sulfur: 20 }, time: 3, category: 'Resources' },
+  { item: 'lowGradeFuel', count: 5, cost: { charcoal: 10, cloth: 2 }, time: 2, category: 'Resources' },
 ];
 
 export function recipeFor(item: ItemId): Recipe | undefined {

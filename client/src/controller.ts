@@ -11,9 +11,10 @@ import {
   PLAYER_SPEED,
   PLAYER_SPRINT,
 } from '../../shared/constants.ts';
-import { pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
+import { isSlope, pieceBoxes, stairsHeight, type Box } from '../../shared/building.ts';
 import { deployableBox } from '../../shared/deployables.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
+import { axes, touchesVehicle, type VehicleInfo, type VehicleState } from '../../shared/vehicles.ts';
 import { RESOURCE_INFO, type ResourceNode } from '../../shared/world.ts';
 import type { World } from './world.ts';
 
@@ -29,6 +30,18 @@ export class Controller {
   private onGround = false;
   private keys = new Set<string>();
   private raycaster = new THREE.Raycaster();
+  /** The animal being ridden: its pace at a walk and flat out, and how high its saddle sits. */
+  mount: { walk: number; sprint: number; seat: number } | null = null;
+  /** The car being driven, and how much fuel is in it. Your position is then the driver's seat. */
+  car: (VehicleInfo & { fuel: () => number }) | null = null;
+  /** The car's speed along its heading, m/s (negative in reverse). */
+  carSpeed = 0;
+  /** Looking round while driving: the camera's turn away from the car's heading. */
+  private camYaw = 0;
+  /** Cars to bump into (your own is left out while you drive it). */
+  vehicles: () => VehicleState[] = () => [];
+  /** Called when the car hits something, with how fast it was going. */
+  onCrash: ((speed: number) => void) | null = null;
   /** Called on touching down after a jump or fall, with the downward speed. */
   onLand: ((speed: number) => void) | null = null;
   /** Used by automated tests to walk somewhere without a keyboard. */
@@ -44,7 +57,8 @@ export class Controller {
     addEventListener('blur', () => this.keys.clear());
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
-      this.yaw -= e.movementX * 0.0025 * this.sensitivity;
+      if (this.car) this.camYaw = THREE.MathUtils.clamp(this.camYaw - e.movementX * 0.0025 * this.sensitivity, -2.6, 2.6);
+      else this.yaw -= e.movementX * 0.0025 * this.sensitivity;
       this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025 * this.sensitivity, -1.3, 1.1);
     });
   }
@@ -52,11 +66,19 @@ export class Controller {
   /** Mouse look speed multiplier, lowered while aiming down sights. */
   sensitivity = 1;
 
+  /** Running: Shift held while moving on foot. */
+  get sprinting(): boolean {
+    return this.moving && !this.car && this.keys.has('ShiftLeft');
+  }
+
   get eye(): THREE.Vector3 {
     return this.position.clone().add(new THREE.Vector3(0, PLAYER_HEIGHT * 0.9, 0));
   }
 
   update(dt: number) {
+    if (this.car?.flies) return this.fly(dt, this.car, this.car.flies);
+    if (this.car) return this.drive(dt, this.car);
+    this.camYaw = 0;
     let fx = 0;
     let fz = 0;
     if (this.keys.has('KeyW')) fz += 1;
@@ -81,7 +103,8 @@ export class Controller {
     const colliders = this.nearbyColliders();
     this.moving = dir.lengthSq() > 0;
     if (this.moving) {
-      const speed = this.keys.has('ShiftLeft') ? PLAYER_SPRINT : PLAYER_SPEED;
+      const m = this.mount;
+      const speed = this.keys.has('ShiftLeft') ? (m?.sprint ?? PLAYER_SPRINT) : (m?.walk ?? PLAYER_SPEED);
       dir.normalize().multiplyScalar(speed * dt);
       // Sub-steps stop fast movement from tunnelling through thin walls.
       const steps = Math.ceil(dir.length() / 0.1);
@@ -91,6 +114,13 @@ export class Controller {
       }
     }
 
+    if (this.mount) {
+      // In the saddle: carried over the ground at the animal's back.
+      this.position.y = terrainHeight(this.world.seed, this.position.x, this.position.z) + this.mount.seat;
+      this.vy = 0;
+      this.onGround = true;
+      return;
+    }
     if (this.keys.has('Space') && this.onGround) {
       this.vy = JUMP_SPEED;
       this.onGround = false;
@@ -114,15 +144,23 @@ export class Controller {
       camera.lookAt(eye.addScaledVector(look, 10));
       return;
     }
-    const dist = 3.9 * (1 - 0.5 * zoom);
+    // Further back in the saddle or at the wheel, so the animal or car is in view.
+    const dist = (this.car?.flies ? 12 : this.car ? 8 : this.mount ? 5.6 : 3.9) * (1 - 0.5 * zoom);
+    const yaw = this.yaw + this.camYaw;
     const back = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(yaw) * Math.cos(this.pitch),
       -Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+      Math.cos(yaw) * Math.cos(this.pitch),
     );
     // Far enough right that the survivor sits left of the crosshair, so what they hold stays in view.
-    const shoulder = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).multiplyScalar(0.85 - 0.15 * zoom);
-    const pivot = this.position.clone().add(new THREE.Vector3(0, 1.65, 0)).add(shoulder);
+    const shoulder = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(this.car ? 0 : 0.85 - 0.15 * zoom);
+    const pivot = this.position.clone().add(new THREE.Vector3(0, this.car ? 1.2 : 1.65, 0)).add(shoulder);
+    if (this.car) {
+      // Look over the middle of the car rather than the driver's shoulder.
+      const { rx, rz } = axes(this.yaw);
+      pivot.x += rx * this.car.seat.left;
+      pivot.z += rz * this.car.seat.left;
+    }
     this.raycaster.set(pivot, back);
     this.raycaster.far = dist;
     const hit = this.raycaster.intersectObjects(this.world.cameraBlockers, true)[0];
@@ -138,14 +176,173 @@ export class Controller {
     this.vy = 0;
   }
 
+  /**
+   * Driving: W speeds up, S brakes and then reverses, A and D steer (more sharply the faster you
+   * go). The car stops dead against walls, trees, rocks and other cars.
+   */
+  private drive(dt: number, car: VehicleInfo & { fuel: () => number }) {
+    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const fuel = car.fuel() > 0;
+    let v = this.carSpeed;
+    if (throttle > 0 && fuel) v = v < 0 ? v + car.accel * 2 * dt : Math.min(car.top, v + car.accel * dt);
+    else if (throttle < 0) v = v > 0 ? v - car.accel * 2 * dt : fuel ? Math.max(-car.reverse, v - car.accel * 0.6 * dt) : v;
+    else v -= Math.sign(v) * Math.min(Math.abs(v), 2.5 * dt);
+    // Where the car's middle is, from the driver's seat.
+    const centre = (yaw: number) => {
+      const { fx, fz, rx, rz } = axes(yaw);
+      return { x: this.position.x - fx * car.seat.ahead + rx * car.seat.left, z: this.position.z - fz * car.seat.ahead + rz * car.seat.left };
+    };
+    const c = centre(this.yaw);
+    this.yaw += steer * car.turn * THREE.MathUtils.clamp(v / 4, -1, 1) * dt;
+    const colliders = this.nearbyColliders(7);
+    const { fx, fz } = axes(this.yaw);
+    const step = v * dt;
+    const steps = Math.max(1, Math.ceil(Math.abs(step) / 0.2));
+    for (let s = 0; s < steps; s++) {
+      const nx = THREE.MathUtils.clamp(c.x + (fx * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      const nz = THREE.MathUtils.clamp(c.z + (fz * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      if (this.carBlocked(car, nx, nz, this.yaw, colliders) && !this.carBlocked(car, c.x, c.z, this.yaw, colliders)) {
+        if (Math.abs(v) > 3) this.onCrash?.(Math.abs(v));
+        v = -v * 0.2;
+        break;
+      }
+      c.x = nx;
+      c.z = nz;
+    }
+    this.carSpeed = v;
+    this.moving = Math.abs(v) > 0.3;
+    if (Math.abs(v) > 2) this.camYaw *= Math.exp(-dt * 1.2);
+    const { fx: ax, fz: az, rx, rz } = axes(this.yaw);
+    this.position.set(c.x + ax * car.seat.ahead - rx * car.seat.left, terrainHeight(this.world.seed, c.x, c.z) + car.seat.y, c.z + az * car.seat.ahead - rz * car.seat.left);
+    this.vy = 0;
+    this.onGround = true;
+  }
+
+  /** A minicopter's speed up (positive) or down, m/s. */
+  climbSpeed = 0;
+
+  /**
+   * Flying: Space climbs and Shift (or C) sinks, W and S fly forwards and back, A and D turn. With
+   * no input it hovers where it is. Out of fuel it comes down slowly as the rotor freewheels.
+   * It stops against walls, rocks and trees, and a hard landing is reported as a crash.
+   */
+  private fly(dt: number, car: VehicleInfo & { fuel: () => number }, flies: NonNullable<VehicleInfo['flies']>) {
+    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const lift = (this.keys.has('Space') ? 1 : 0) - (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyC') ? 1 : 0);
+    const fuel = car.fuel() > 0;
+    const { fx: sx, fz: sz, rx: srx, rz: srz } = axes(this.yaw);
+    const c = { x: this.position.x - sx * car.seat.ahead + srx * car.seat.left, z: this.position.z - sz * car.seat.ahead + srz * car.seat.left };
+    let alt = this.position.y - car.seat.y;
+    const ground = terrainHeight(this.world.seed, c.x, c.z);
+    const airborne = alt > ground + 0.05;
+    // Up and down eases towards what the controls ask for.
+    const wantVy = fuel ? lift * flies.climb : airborne ? -4 : 0;
+    this.climbSpeed += (wantVy - this.climbSpeed) * Math.min(1, dt * 2.5);
+    // Along: like a car in the air; on the ground it only creeps on its skids.
+    let v = this.carSpeed;
+    if (fuel && (airborne || lift > 0) && throttle !== 0) v = THREE.MathUtils.clamp(v + throttle * car.accel * dt, -car.reverse, car.top);
+    else v -= Math.sign(v) * Math.min(Math.abs(v), (airborne ? 2 : 10) * dt);
+    if (fuel || airborne) this.yaw += steer * car.turn * dt;
+    const colliders = this.nearbyColliders(10);
+    const { fx, fz } = axes(this.yaw);
+    const step = v * dt;
+    const steps = Math.max(1, Math.ceil(Math.abs(step) / 0.25));
+    for (let s = 0; s < steps; s++) {
+      const nx = THREE.MathUtils.clamp(c.x + (fx * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      const nz = THREE.MathUtils.clamp(c.z + (fz * step) / steps, -HALF_WORLD + 3, HALF_WORLD - 3);
+      if (this.heliBlocked(car, nx, alt, nz, colliders) && !this.heliBlocked(car, c.x, alt, c.z, colliders)) {
+        if (Math.abs(v) > 6) this.onCrash?.(Math.abs(v));
+        v = -v * 0.2;
+        break;
+      }
+      c.x = nx;
+      c.z = nz;
+    }
+    // Up and down, between the ground (or a roof) and the ceiling over it.
+    const floor = Math.max(terrainHeight(this.world.seed, c.x, c.z), this.roofUnder(c.x, alt, c.z, colliders));
+    alt += this.climbSpeed * dt;
+    if (alt <= floor) {
+      if (this.climbSpeed < -7) this.onLand?.(-this.climbSpeed);
+      alt = floor;
+      this.climbSpeed = Math.max(0, this.climbSpeed);
+    }
+    alt = Math.min(alt, terrainHeight(this.world.seed, c.x, c.z) + flies.ceiling);
+    this.carSpeed = v;
+    this.moving = Math.abs(v) > 0.3 || Math.abs(this.climbSpeed) > 0.3;
+    if (Math.abs(v) > 3) this.camYaw *= Math.exp(-dt * 1.2);
+    const { fx: ax, fz: az, rx, rz } = axes(this.yaw);
+    this.position.set(c.x + ax * car.seat.ahead - rx * car.seat.left, alt + car.seat.y, c.z + az * car.seat.ahead - rz * car.seat.left);
+    this.vy = 0;
+    this.onGround = true;
+  }
+
+  /** The top of whatever solid is under a minicopter at (x, z), up to its own height `alt`. */
+  private roofUnder(x: number, alt: number, z: number, colliders: Box[]): number {
+    let top = -Infinity;
+    for (const b of colliders) {
+      if (x < b.min[0] - 0.6 || x > b.max[0] + 0.6 || z < b.min[2] - 0.6 || z > b.max[2] + 0.6) continue;
+      if (b.max[1] <= alt + 0.6) top = Math.max(top, b.max[1]);
+    }
+    return top;
+  }
+
+  /** True if a minicopter with its middle at (x, z) and its skids at height `alt` overlaps something solid. */
+  private heliBlocked(car: VehicleInfo, x: number, alt: number, z: number, colliders: Box[]): boolean {
+    const { fx, fz } = axes(this.yaw);
+    const r = car.width / 2;
+    const reach = car.length / 2 - r;
+    for (const k of [-1, 0, 1]) {
+      const px = x + fx * k * reach;
+      const pz = z + fz * k * reach;
+      for (const b of colliders) {
+        if (b.max[1] < alt + 0.6 || b.min[1] > alt + car.height) continue;
+        const dx = Math.max(b.min[0] - px, 0, px - b.max[0]);
+        const dz = Math.max(b.min[2] - pz, 0, pz - b.max[2]);
+        if (dx * dx + dz * dz < r * r) return true;
+      }
+      // Low down, trees and rocks are in the way.
+      if (alt - terrainHeight(this.world.seed, px, pz) > 4) continue;
+      for (const n of this.resources()) {
+        if (n.amount <= 0 || n.kind === 'hemp' || n.kind === 'mushroom') continue;
+        if (Math.hypot(px - n.x, pz - n.z) < RESOURCE_INFO[n.kind].radius * n.scale + r) return true;
+      }
+    }
+    return false;
+  }
+
+  /** True if a car with its middle at (x, z) facing `yaw` overlaps something solid. */
+  private carBlocked(car: VehicleInfo, x: number, z: number, yaw: number, colliders: Box[]): boolean {
+    const { fx, fz } = axes(yaw);
+    const r = car.width / 2;
+    const ground = terrainHeight(this.world.seed, x, z);
+    const reach = car.length / 2 - r;
+    for (const k of [-1, 0, 1]) {
+      const px = x + fx * k * reach;
+      const pz = z + fz * k * reach;
+      for (const b of colliders) {
+        if (b.max[1] < ground + 0.45 || b.min[1] > ground + 1.6) continue;
+        const dx = Math.max(b.min[0] - px, 0, px - b.max[0]);
+        const dz = Math.max(b.min[2] - pz, 0, pz - b.max[2]);
+        if (dx * dx + dz * dz < r * r) return true;
+      }
+      for (const n of this.resources()) {
+        if (n.amount <= 0 || n.kind === 'hemp' || n.kind === 'mushroom') continue;
+        if (Math.hypot(px - n.x, pz - n.z) < RESOURCE_INFO[n.kind].radius * n.scale + r) return true;
+      }
+    }
+    return this.vehicles().some((v) => touchesVehicle(v, x, z, r) || touchesVehicle(v, x + fx * reach, z + fz * reach, r) || touchesVehicle(v, x - fx * reach, z - fz * reach, r));
+  }
+
   /** Building pieces and scenery within a few metres of the player. */
-  private nearbyColliders(): Box[] {
+  private nearbyColliders(range = 4): Box[] {
     const p = this.position;
     const near = (b: Box) =>
-      b.max[0] > p.x - 4 && b.min[0] < p.x + 4 && b.max[2] > p.z - 4 && b.min[2] < p.z + 4;
+      b.max[0] > p.x - range && b.min[0] < p.x + range && b.max[2] > p.z - range && b.min[2] < p.z + range;
     const out = this.world.decorColliders.filter(near);
     for (const piece of this.world.pieces.values()) {
-      if (piece.kind === 'stairs') continue; // stairs are ramps, handled in groundHeight
+      if (isSlope(piece)) continue; // stairs and ramps are slopes, handled in groundHeight
       for (const b of pieceBoxes(piece)) if (near(b)) out.push(b);
     }
     for (const d of this.world.deployables.values()) {
@@ -178,7 +375,7 @@ export class Controller {
       }
     }
     for (const piece of this.world.pieces.values()) {
-      if (piece.kind !== 'stairs') continue;
+      if (!isSlope(piece)) continue;
       const h = stairsHeight(piece, x, z);
       if (h !== null && h <= y + STEP + 0.2) ground = Math.max(ground, h);
     }
@@ -189,6 +386,8 @@ export class Controller {
     const nx = THREE.MathUtils.clamp(this.position.x + dx, -HALF_WORLD + 1, HALF_WORLD - 1);
     const nz = THREE.MathUtils.clamp(this.position.z + dz, -HALF_WORLD + 1, HALF_WORLD - 1);
     if (this.blocked(nx, this.position.y, nz, colliders) || this.hitsResource(nx, nz)) return;
+    // Cars are solid: walk into one and you stop, but you can always step away from it.
+    if (this.vehicles().some((v) => touchesVehicle(v, nx, nz, PLAYER_RADIUS) && !touchesVehicle(v, this.position.x, this.position.z, PLAYER_RADIUS))) return;
     this.position.x = nx;
     this.position.z = nz;
   }

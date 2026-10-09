@@ -14,6 +14,9 @@ export const SUN_HAZE = new THREE.Color(0xffd2a4);
 const v = (c: { x: number; y: number; z: number } | THREE.Color) =>
   'r' in c ? `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})` : `vec3(${c.x.toFixed(4)}, ${c.y.toFixed(4)}, ${c.z.toFixed(4)})`;
 
+// Marks shaders that have the directional lights' uniforms, so the fog can find the sun.
+THREE.ShaderChunk.lights_pars_begin = THREE.ShaderChunk.lights_pars_begin.replace('#if NUM_DIR_LIGHTS > 0', '#if NUM_DIR_LIGHTS > 0\n#define PF_DIR_LIGHT');
+
 THREE.ShaderChunk.fog_pars_vertex = /* glsl */ `
 #ifdef USE_FOG
   varying vec3 vFogWorld;
@@ -55,7 +58,16 @@ THREE.ShaderChunk.fog_fragment = /* glsl */ `
   float fogAmount = 1.0 - exp(-fogK * fogDist * fogPath);
   // A thin even haze on top, so the far distance always fades out.
   fogAmount = max(fogAmount, 1.0 - exp(-fogDist * fogD * 0.45));
-  float fogSun = max(dot(fogDir, ${v(SUN_DIRECTION)}), 0.0);
-  vec3 fogCol = mix(fogColor, ${v(SUN_HAZE)}, pow(fogSun, 6.0) * 0.75);
+  // The glow follows the sun (the scene's one directional light) round the sky and fades with
+  // it; materials without lighting use the starting sun.
+  #ifdef PF_DIR_LIGHT
+    vec3 fogSunDir = normalize((vec4(directionalLights[0].direction, 0.0) * viewMatrix).xyz);
+    float fogGlow = clamp(dot(directionalLights[0].color, vec3(0.333)) / 2.8, 0.0, 1.0);
+  #else
+    vec3 fogSunDir = ${v(SUN_DIRECTION)};
+    float fogGlow = 0.6;
+  #endif
+  float fogSun = max(dot(fogDir, fogSunDir), 0.0);
+  vec3 fogCol = mix(fogColor, ${v(SUN_HAZE)} * fogGlow + fogColor * (1.0 - fogGlow), pow(fogSun, 6.0) * 0.75);
   gl_FragColor.rgb = mix(gl_FragColor.rgb, fogCol, clamp(fogAmount, 0.0, 1.0));
 #endif`;

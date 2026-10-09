@@ -1,0 +1,229 @@
+// Cars to drive: an old car parked just outside each landmark, which runs on low grade fuel, can be
+// shot or blown up, and turns up again where it was parked a while after it is wrecked. Anyone can
+// swap a parked car for another model and paint it. Two landmarks also have a minicopter on a pad
+// beside them, which flies on the same fuel.
+// Shared so the server and the client agree on where they are, how big and how fast.
+
+import type { Box } from './building.ts';
+import { rayBox, type Vec3 } from './combat.ts';
+import { SITE_RADIUS, landmarkSites, terrainHeight } from './terrain.ts';
+
+export type VehicleKind = 'pickup' | 'sedan' | 'van' | 'jeep' | 'heli';
+
+/** Every car model, in the order the garage menu lists them (the minicopter is not a car). */
+export const VEHICLE_KINDS: readonly VehicleKind[] = ['pickup', 'sedan', 'van', 'jeep'];
+
+export interface VehicleInfo {
+  name: string;
+  maxHp: number;
+  /** Top speed forwards and backwards, m/s. */
+  top: number;
+  reverse: number;
+  /** How quickly it picks up speed, m/s². */
+  accel: number;
+  /** Turning rate at speed, rad/s. */
+  turn: number;
+  /** Body size: length along its heading, width, and height of the solid lower body. */
+  length: number;
+  width: number;
+  height: number;
+  /** Where the driver sits: height above the ground, and how far left of and ahead of the middle. */
+  seat: { y: number; left: number; ahead: number };
+  /** What it is good at, for the garage menu. */
+  blurb: string;
+  /** Fuel it can hold, in units of low grade fuel. */
+  tank: number;
+  /** Metres it goes on one unit of fuel. */
+  range: number;
+  /** For something that flies: how fast it climbs and sinks (m/s), and how high above the ground it can go. */
+  flies?: { climb: number; ceiling: number };
+}
+
+export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
+  pickup: {
+    name: 'Rusty Pickup',
+    blurb: 'All-rounder',
+    maxHp: 600,
+    top: 17,
+    reverse: 5,
+    accel: 5.5,
+    turn: 1.5,
+    length: 4.8,
+    width: 1.95,
+    height: 1.15,
+    seat: { y: 0.55, left: 0.42, ahead: -0.1 },
+    tank: 100,
+    range: 30,
+  },
+  sedan: {
+    name: 'Old Saloon',
+    blurb: 'Quickest, but fragile',
+    maxHp: 420,
+    top: 21,
+    reverse: 6,
+    accel: 7,
+    turn: 1.7,
+    length: 4.1,
+    width: 1.62,
+    height: 1.0,
+    seat: { y: 0.5, left: 0.36, ahead: -0.15 },
+    tank: 70,
+    range: 38,
+  },
+  van: {
+    name: 'Box Van',
+    blurb: 'Slow, tough, big tank',
+    maxHp: 850,
+    top: 14,
+    reverse: 4.5,
+    accel: 4.2,
+    turn: 1.3,
+    length: 4.4,
+    width: 1.85,
+    height: 1.6,
+    seat: { y: 0.65, left: 0.42, ahead: 1.2 },
+    tank: 140,
+    range: 24,
+  },
+  jeep: {
+    name: 'Old Jeep',
+    blurb: 'Nimble, turns tightly',
+    maxHp: 500,
+    top: 18,
+    reverse: 6,
+    accel: 6.5,
+    turn: 2.0,
+    length: 3.6,
+    width: 1.6,
+    height: 0.9,
+    seat: { y: 0.55, left: 0.35, ahead: -0.3 },
+    tank: 80,
+    range: 32,
+  },
+  heli: {
+    name: 'Minicopter',
+    blurb: 'Flies',
+    maxHp: 300,
+    top: 24,
+    reverse: 8,
+    accel: 7,
+    turn: 1.5,
+    length: 7.6,
+    width: 1.5,
+    height: 1.7,
+    seat: { y: 0.95, left: 0.3, ahead: 1.3 },
+    tank: 60,
+    range: 22,
+    flies: { climb: 6, ceiling: 55 },
+  },
+};
+
+/** Spot numbers from here up are the minicopters' pads (below, the cars' parking spots). */
+export const HELI_SPOT = 100;
+
+/** Fuel a flying minicopter burns each second just to stay up, on top of what it uses to travel. */
+export const HOVER_BURN = 0.06;
+
+/** The model first parked at each spot, so every landmark has a different one. */
+export function spotKind(spot: number): VehicleKind {
+  return spot >= HELI_SPOT ? 'heli' : VEHICLE_KINDS[spot % VEHICLE_KINDS.length];
+}
+
+/** How close you must be to get in or fill it up. */
+export const VEHICLE_RANGE = 3.5;
+/** Seconds before a wrecked car is back where it was parked. */
+export const VEHICLE_RESPAWN = 600;
+/** Fuel in the tank of a car that has just turned up. */
+export const START_FUEL = 20;
+
+export interface VehicleState {
+  id: number;
+  kind: VehicleKind;
+  x: number;
+  y: number;
+  z: number;
+  /** Heading, as a player's yaw: it drives along (-sin yaw, -cos yaw). */
+  yaw: number;
+  hp: number;
+  fuel: number;
+  /** Its paint, from the palette in paint.ts (0 as it came). */
+  paint: number;
+  /** Who is at the wheel. */
+  driver?: number;
+}
+
+/** Where each car is parked: just outside each landmark, on the side facing the middle of the map. */
+export function vehicleSpots(seed: number): { x: number; z: number; yaw: number }[] {
+  return landmarkSites(seed).map((s) => {
+    const len = Math.hypot(s.x, s.z);
+    // The middle land's landmark may sit near the very centre; park that car to its south.
+    const [ux, uz] = len > 10 ? [-s.x / len, -s.z / len] : [0, 1];
+    const d = SITE_RADIUS + 3;
+    const x = s.x + ux * d;
+    const z = s.z + uz * d;
+    // Parked side-on to the landmark.
+    return { x, z, yaw: Math.atan2(uz, -ux) };
+  });
+}
+
+/** Landmarks with a minicopter pad: the Ashlands' and Rust Mesa's. */
+const PADS = [0, 2];
+
+/**
+ * Where each minicopter stands: on the ground just outside its landmark, a quarter of the way
+ * round from where the car is parked. Numbered from HELI_SPOT, so they never share a car's spot.
+ */
+export function heliSpots(seed: number): { spot: number; x: number; z: number; yaw: number }[] {
+  const sites = landmarkSites(seed);
+  return PADS.map((n) => {
+    const s = sites[n];
+    const len = Math.hypot(s.x, s.z);
+    const [ux, uz] = len > 10 ? [-s.x / len, -s.z / len] : [0, 1];
+    const d = SITE_RADIUS + 6;
+    return { spot: HELI_SPOT + n, x: s.x - uz * d, z: s.z + ux * d, yaw: Math.atan2(ux, uz) };
+  });
+}
+
+/** Forward and right along the ground for a heading. */
+export function axes(yaw: number): { fx: number; fz: number; rx: number; rz: number } {
+  const fx = -Math.sin(yaw);
+  const fz = -Math.cos(yaw);
+  return { fx, fz, rx: -fz, rz: fx };
+}
+
+/** Where the driver sits, in the world. */
+export function seatAt(v: Pick<VehicleState, 'kind' | 'x' | 'y' | 'z' | 'yaw'>, seed: number): Vec3 {
+  const { seat, flies } = VEHICLES[v.kind];
+  const { fx, fz, rx, rz } = axes(v.yaw);
+  const x = v.x + fx * seat.ahead - rx * seat.left;
+  const z = v.z + fz * seat.ahead - rz * seat.left;
+  // A car sits on the ground; a minicopter may be up in the air.
+  return [x, (flies ? Math.max(v.y, terrainHeight(seed, v.x, v.z)) : terrainHeight(seed, v.x, v.z)) + seat.y, z];
+}
+
+/**
+ * Where a ray first meets the car's body, if within `max`. The body is a box turned to its
+ * heading; only the lower part is solid, so whoever is in the cab can still be shot.
+ */
+export function rayVehicle(o: Vec3, d: Vec3, v: VehicleState, max: number): number | null {
+  const info = VEHICLES[v.kind];
+  const { fx, fz, rx, rz } = axes(v.yaw);
+  // Into the car's own frame: x to its right, z ahead.
+  const ox = o[0] - v.x;
+  const oz = o[2] - v.z;
+  const local: Vec3 = [ox * rx + oz * rz, o[1] - v.y, ox * fx + oz * fz];
+  const dir: Vec3 = [d[0] * rx + d[2] * rz, d[1], d[0] * fx + d[2] * fz];
+  const box: Box = { min: [-info.width / 2, 0.25, -info.length / 2], max: [info.width / 2, info.height, info.length / 2] };
+  return rayBox(local, dir, box, max);
+}
+
+/** True when a circle of radius r at (x, z) overlaps the car's body. */
+export function touchesVehicle(v: VehicleState, x: number, z: number, r: number): boolean {
+  const info = VEHICLES[v.kind];
+  const { fx, fz, rx, rz } = axes(v.yaw);
+  const dx = x - v.x;
+  const dz = z - v.z;
+  const along = dx * fx + dz * fz;
+  const side = dx * rx + dz * rz;
+  return Math.abs(along) < info.length / 2 + r && Math.abs(side) < info.width / 2 + r;
+}

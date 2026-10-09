@@ -18,4 +18,9 @@ Photo-scanned textures and sky from Poly Haven, all CC0 (public domain).
 - cloth: https://polyhaven.com/a/hessian_230
 - leather: https://polyhaven.com/a/brown_leather
 - wood-grain: https://polyhaven.com/a/fine_grained_wood
+- forest-floor: https://polyhaven.com/a/forrest_ground_01
+- red-earth: https://polyhaven.com/a/red_laterite_soil_stones
+- lake-bed: https://polyhaven.com/a/dry_mud_field_001
+- snow: https://polyhaven.com/a/snow_02
+- cliff: https://polyhaven.com/a/rock_face
 - sky: https://polyhaven.com/a/wasteland_clouds_puresky

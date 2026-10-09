@@ -68,16 +68,29 @@ export class Hud {
     $('quality').textContent = q[0].toUpperCase() + q.slice(1);
   }
 
-  notice(text: string) {
+  notice(text: string, seconds = 2.2) {
     const el = $('notice');
     el.textContent = text;
     el.classList.add('show');
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = window.setTimeout(() => el.classList.remove('show'), 2200);
+    this.noticeTimer = window.setTimeout(() => el.classList.remove('show'), seconds * 1000);
+  }
+
+  private bannerTimer = 0;
+
+  /** Slides in "Objective complete" with what was done and the coins it paid. */
+  objectiveDone(label: string, reward: number) {
+    $('objective-banner-label').textContent = label;
+    $('objective-banner-reward').textContent = `+${reward}`;
+    const el = $('objective-banner');
+    el.classList.add('show');
+    clearTimeout(this.bannerTimer);
+    this.bannerTimer = window.setTimeout(() => el.classList.remove('show'), 4500);
   }
 
   toggleHelp() {
     $('help').hidden = !$('help').hidden;
+    $('help-mini').hidden = !$('help').hidden;
   }
 
   setHealth(hp: number) {
@@ -99,7 +112,7 @@ export class Hud {
     $('rads').hidden = v.rads < 1 && v.level <= 0;
     const warn = $('rad-warning');
     warn.hidden = v.level <= 0;
-    if (v.level > 0) warn.textContent = `☢ Radiation ${v.level.toFixed(1)}/s`;
+    if (v.level > 0) warn.textContent = `Radiation ${v.level.toFixed(1)}/s`;
     ($('rad-tint') as HTMLElement).style.opacity = String(Math.min(0.55, v.level * 0.08 + v.rads * 0.002));
   }
 
@@ -178,18 +191,68 @@ export class Hud {
     el.classList.toggle('empty', a.loaded === 0 && !a.reloading);
   }
 
-  setScope(on: boolean) {
+  /** The scope overlay; `sights` hides the crosshair too, as you look down the gun's own sights. */
+  setScope(on: boolean, sights = false) {
     $('scope').hidden = !on;
-    $('crosshair').hidden = on;
+    $('crosshair').hidden = on || sights;
   }
 
-  showDeath(text: string, onRespawn: () => void) {
+  /**
+   * The death screen, with a button for each of your sleeping bags (greyed out while it cools
+   * down). It stays up until you are actually back on your feet.
+   */
+  showDeath(text: string, onRespawn: () => void, bags: { id: number; label: string; wait: () => number }[] = [], onBag: (id: number) => void = () => {}) {
     $('death-text').textContent = text;
     $('death').hidden = false;
-    $('respawn').onclick = () => {
-      $('death').hidden = true;
-      onRespawn();
+    $('respawn').onclick = onRespawn;
+    const list = $('bags');
+    list.replaceChildren();
+    for (const bag of bags) {
+      const button = document.createElement('button');
+      button.onclick = () => onBag(bag.id);
+      list.append(button);
+      const tick = () => {
+        if ($('death').hidden || !button.isConnected) return;
+        const wait = bag.wait();
+        button.disabled = wait > 0;
+        button.textContent = wait > 0 ? `${bag.label} (ready in ${wait} s)` : `Wake up in ${bag.label}`;
+        setTimeout(tick, 500);
+      };
+      tick();
+    }
+  }
+
+  hideDeath() {
+    $('death').hidden = true;
+  }
+
+  /** Whether the code pad is up, so keys go to it and not the game. */
+  get codeOpen(): boolean {
+    return !$('code').hidden;
+  }
+
+  /** Asks for a 4-digit code; `done` gets it, or nothing if cancelled. */
+  askCode(title: string, done: (code: string | null) => void) {
+    const box = $('code');
+    const input = $('code-input') as HTMLInputElement;
+    $('code-title').textContent = title;
+    input.value = '';
+    box.hidden = false;
+    document.exitPointerLock?.();
+    setTimeout(() => input.focus(), 0);
+    const finish = (code: string | null) => {
+      box.hidden = true;
+      input.onkeydown = null;
+      done(code);
     };
+    input.oninput = () => (input.value = input.value.replace(/\D/g, '').slice(0, 4));
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && input.value.length === 4) finish(input.value);
+      if (e.key === 'Escape') finish(null);
+    };
+    $('code-ok').onclick = () => input.value.length === 4 && finish(input.value);
+    $('code-cancel').onclick = () => finish(null);
   }
 
   disconnected() {

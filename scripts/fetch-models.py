@@ -63,6 +63,20 @@ SCANS = {
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
 CHARACTERS = {
     'survivor': 'f56ffc64d18c40cf95d17559542ca44c',
+    # A spotted hyena, re-coloured in the game into the ash-grey Ashhound.
+    'ashhound': '134831b49ca54a1ab8f5bf28441fc2fc',
+}
+
+# Rigged, animated Sketchfab animals: each land's animal to tame and ride. Only the clips the
+# game plays are kept (scripts/trim-animals.ts), with textures at most 1024 px.
+# Our name: (Sketchfab model uid, clips kept).
+ANIMALS = {
+    'mule': ('32ce1c2f276a4e27bb26b8bb99439bb7', ['Armature|idle', 'Armature|walk', 'Armature|trot', 'Armature|run', 'Armature|rear leg kick', 'Armature|grazing', 'Armature|wound']),
+    'elk': ('787834f9caa2474d9f1814b807c072d7', ['Stand_Breathing_01', 'Walk', 'Trot', 'Sprint', 'Stand_Eating_01', 'Hit_Stand_L01', 'Death_Stand_R01', 'JumpStand']),
+    'buffalo': ('d85ea147be1f4eb891d254f6899ff4d6', ['Idle', 'Walk', 'Run', 'Attack', 'Eating', 'Death']),
+    # Its clips are unnamed: idle, walk, a head toss, falling dead and a gallop.
+    'camel': ('3e1ddd35d0f045ab84177f6f68678ef3', ['Take 001', 'Take 001_1', 'Take 001_2', 'Take 001_3', 'Take 001_4']),
+    'bear': ('bffc3c87d2d148ff8533e1cc8a11c9f1', ['Stand_Idle_01', 'StandAngry_Breathing_01', 'Walk', 'Trot', 'Run', 'Attack_StandAngry_01_High', 'Hit_Stand_F01', 'Death_Stand_R01', 'Stand_Eating_01']),
 }
 
 # Game-ready Sketchfab models for held weapons and tools: kept as modelled, with their textures
@@ -114,6 +128,38 @@ PROPS = {
     'tool-nailBat': '48095b439ec5464db93337b2c3457fcc',
     'tool-fireAxe': '23cd18766328497286c925705a724b43',
     'tool-sledgehammer': '0d4f90b84b1f43ac9ade0eda770a1626',
+}
+# Game-ready Sketchfab models for the landmarks in each land, the loot crates and the air drop:
+# kept as modelled, with their textures shrunk to the size given.
+LANDMARK_PROPS = {
+    'lm-petrol': ('dacd1c0d9f5045a6bc2180702714f12c', 512),
+    'lm-warehouse': ('c7f4c017c20943cb9e9e559822a5c402', 1024),
+    'lm-house': ('f9159874daad499492cc0a488e06b489', 1024),
+    'lm-shed': ('c90674a377864ac1b8fd141ad1917ee3', 1024),
+    'lm-container': ('2b787d1a02174d0bbca9eac34eb3a486', 1024),
+    'lm-container2': ('fa3e0b6d1b5d4756827ef06fd2c8516d', 1024),
+    'lm-waterTower': ('4e98f8c8fe4e4e9fae250a026974fe99', 1024),
+    'lm-pumpJack': ('73e9e419df5748ceb1bbbd333c5ce8d1', 1024),
+    'lm-guardTower': ('963071f5fe404970a40b166bcee430b8', 1024),
+    'lm-tent': ('e06d68ead08a4c44bfd5f826ecca4987', 1024),
+    'lm-radioTower': ('e0bd9e8f693c496280e0afeb32fece26', 1024),
+    'crate': ('532244d87cdb4920b022831093470eb2', 512),
+    'crate-military': ('819ffa35626044608f497dbb6e405afc', 512),
+    'crate-drop': ('eaf6cbca12f944f498fc6dde845da06e', 512),
+    'parachute': ('af52e08feebc4d94a244692212ac25bb', 512),
+    'plane': ('549bce95137c4304b771a2b046420c6f', 512),
+    # The scrap car you can drive.
+    'vehicle-pickup': ('d52c6ed3b0ee4d9eb562f875b3c448a4', 1024),
+    # The other cars you can swap it for.
+    'vehicle-sedan': ('91270dab9d1a47c7ba7ffaaf8c8b0beb', 1024),
+    'vehicle-van': ('bb4OJb5V4L0hgYjM3vtGvPB7ZMt', 1024),
+    'vehicle-jeep': ('70c8691c6fb64b859fbfc16babfa2c5f', 1024),
+    # The minicopter.
+    'vehicle-heli': ('7677d87826f449ebadb6cccba2af38ca', 1024),
+    # Its material comes as specular-glossiness, which three.js no longer reads: after fetching,
+    # convert it with gltf-transform's metalRough() and drop the leftover specular extensions.
+    'gear-backpack': ('dce182b7965546118df059f90df497dc', 1024),
+    'gear-saddle': ('b1eda76f8a50480d917e43d69f72f57d', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.
@@ -243,6 +289,14 @@ def main():
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(slim_textures(get(link['glb']['url']), 512 if name in SMALL_TEXTURES else 1024))
         print('saved', name)
+    for name, (uid, size) in LANDMARK_PROPS.items():
+        scans.append(sketchfab_credit(name, uid, 'textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
+            f.write(slim_textures(get(link['glb']['url']), size))
+        print('saved', name)
     for name, uid in CHARACTERS.items():
         scans.append(sketchfab_credit(name, uid, 'animated by the game'))
         if only and name not in only:
@@ -250,6 +304,21 @@ def main():
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(get(link['glb']['url']))
+        print('saved', name)
+    for name, (uid, keep) in ANIMALS.items():
+        scans.append(sketchfab_credit(name, uid, 'unused animations dropped, textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        out = os.path.join(OUT, f'{name}.glb')
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, 'raw.glb')
+            with open(raw, 'wb') as f:
+                f.write(get(link['glb']['url']))
+            # Some use the old specular-glossiness materials, which three.js no longer reads.
+            subprocess.run([*CLI, 'metalrough', raw, raw], capture_output=True)
+            subprocess.run(['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'trim-animals.ts'), raw, out, *keep], check=True)
+            subprocess.run([*CLI, 'resize', out, out, '--width', '1024', '--height', '1024'], check=True, capture_output=True)
         print('saved', name)
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write(

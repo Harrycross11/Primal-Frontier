@@ -72,12 +72,21 @@ export type SurvivalCause = 'radiation' | 'thirst' | 'starvation';
 /**
  * Advances hunger, thirst and radiation by `dt` seconds for someone standing at a spot with
  * `level` radiation and `protection` (0 to 1) from what they wear. Changes `v` in place and
- * returns the health change (negative is damage) and what caused any damage.
+ * returns the health change (the land's `climate` speeds up hunger and thirst) (negative is damage) and what caused any damage.
  */
-export function tickVitals(v: Vitals, dt: number, moving: boolean, level: number, protection: number, hp: number, maxHp: number): { hp: number; cause: SurvivalCause | null } {
+export function tickVitals(
+  v: Vitals,
+  dt: number,
+  moving: boolean,
+  level: number,
+  protection: number,
+  hp: number,
+  maxHp: number,
+  climate: { hunger: number; thirst: number } = { hunger: 1, thirst: 1 },
+): { hp: number; cause: SurvivalCause | null } {
   const burn = moving ? MOVING_DRAIN : 1;
-  v.food = Math.max(0, v.food - FOOD_DRAIN * burn * dt);
-  v.water = Math.max(0, v.water - WATER_DRAIN * burn * dt);
+  v.food = Math.max(0, v.food - FOOD_DRAIN * burn * climate.hunger * dt);
+  v.water = Math.max(0, v.water - WATER_DRAIN * burn * climate.thirst * dt);
   if (level > 0) v.rads = Math.min(MAX_RADS, v.rads + level * (1 - Math.min(0.9, protection)) * dt);
   else v.rads = Math.max(0, v.rads - RADS_DECAY * dt);
 

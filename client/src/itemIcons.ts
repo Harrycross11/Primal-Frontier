@@ -69,5 +69,23 @@ export function itemIconUrl(item: ItemId): string | null {
   s.scene.remove(model);
   model.traverse((o) => !o.userData.shared && (o as THREE.Mesh).geometry?.dispose());
   urls.set(item, url);
+  closeSoon();
   return url;
+}
+
+/**
+ * The icon renderer keeps its own copy of every texture it has drawn, and the crafting menu
+ * draws every gun and tool, so once a batch of icons is done it is shut down to give that
+ * memory back. The finished icons are kept; it starts again if a new one is needed.
+ */
+let closeTimer = 0;
+function closeSoon() {
+  clearTimeout(closeTimer);
+  closeTimer = window.setTimeout(() => {
+    if (!studio) return;
+    studio.scene.environment?.dispose();
+    studio.renderer.dispose();
+    studio.renderer.forceContextLoss();
+    studio = undefined;
+  }, 2000);
 }

@@ -13,6 +13,9 @@ interface Tracer {
 /** A unit-length streak along +y, stretched and turned to fit each shot. */
 const TRACER_GEO = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true).translate(0, 0.5, 0);
 const UP = new THREE.Vector3(0, 1, 0);
+const HOLE_GEO = new THREE.PlaneGeometry(1, 1);
+/** A rifle case: a short brass tube. */
+const SHELL_GEO = new THREE.CylinderGeometry(0.0055, 0.006, 0.045, 7);
 
 interface Chip {
   mesh: THREE.Mesh;
@@ -38,12 +41,32 @@ interface Puff {
   sprite: THREE.Sprite;
   life: number;
   max: number;
+  /** Metres a second it climbs and swells. */
+  rise: number;
+  grow: number;
+}
+
+/** The supply plane crossing the sky, with the drone of its engines. */
+interface Plane {
+  obj: THREE.Object3D;
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  /** Seconds since it set off, and how long the whole crossing takes. */
+  t: number;
+  time: number;
+  hum: { gain: GainNode; pan: StereoPannerNode; stop: () => void } | null;
 }
 
 export class Effects {
   private tracers: Tracer[] = [];
   private puffs: Puff[] = [];
   private flashes: { sprite: THREE.Sprite; life: number }[] = [];
+  /** Fireballs of explosions, swelling and fading. */
+  private fireballs: { sprite: THREE.Sprite; life: number; max: number; grow: number }[] = [];
+  /** Grenades in flight, along an arc from hand to where they land. */
+  private tosses: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; t: number; time: number; done: () => void }[] = [];
+  /** How hard the camera should shake right now, from nearby blasts; read and eased by the game. */
+  shake = 0;
   /** One light reused for every muzzle flash: adding and removing lights makes three.js recompile shaders. */
   private flashLight = new THREE.PointLight(0xffa860, 0, 7, 1.6);
   private flashLife = 0;
@@ -51,6 +74,9 @@ export class Effects {
   private arrowMat = new THREE.MeshBasicMaterial({ color: 0x6a5030, transparent: true });
   private flashTex = radialTexture('rgba(255,236,170,1)', 'rgba(255,140,40,0.6)', 'rgba(255,120,30,0)');
   private dustTex = radialTexture('rgba(150,135,110,0.75)', 'rgba(120,110,95,0.35)', 'rgba(120,110,95,0)');
+  private bloodTex = radialTexture('rgba(120,14,10,0.85)', 'rgba(100,12,8,0.4)', 'rgba(90,10,8,0)');
+  private redSmokeTex = radialTexture('rgba(205,62,48,0.8)', 'rgba(180,58,46,0.4)', 'rgba(170,60,50,0)');
+  private planes: Plane[] = [];
   private audio: { ctx: AudioContext; noise: AudioBuffer; out: AudioNode; reverb: ConvolverNode } | null = null;
   /** Recorded shots, swings and strikes from client/public/sounds, by name, once decoded. */
   private samples = new Map<string, AudioBuffer>();
@@ -58,8 +84,20 @@ export class Effects {
   private gotContext!: (ctx: AudioContext) => void;
   private ready = new Promise<AudioContext>((resolve) => (this.gotContext = resolve));
   private chips: Chip[] = [];
+  /** Bullet holes left where shots struck something solid, oldest first; they fade out in time. */
+  private holes: { mesh: THREE.Mesh; life: number }[] = [];
+  private holeMats = new Map<Surface, THREE.MeshBasicMaterial>();
+  /** Hot sparks off metal, short bright streaks under gravity. */
+  private sparks: { mesh: THREE.Mesh; v: THREE.Vector3; life: number }[] = [];
+  private sparkMat = new THREE.MeshBasicMaterial({ color: 0xffc070, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  /** Spent cases thrown out of the side of a gun, bouncing once and lying a moment. */
+  private shells: { mesh: THREE.Mesh; v: THREE.Vector3; spin: number; life: number; floor: number }[] = [];
+  private shellMat = new THREE.MeshStandardMaterial({ color: 0xb08a3e, roughness: 0.35, metalness: 0.9 });
   private chipMats = new Map<number, THREE.MeshStandardMaterial>();
   private wind: GainNode | null = null;
+  /** The storm's own sounds: rain hissing on the ground, and a howl that rises with it. */
+  private rainLevel: GainNode | null = null;
+  private stormLevel: GainNode | null = null;
   /** The camera, so world sounds are panned and fade with distance. */
   listener: THREE.Camera | null = null;
 
@@ -217,6 +255,14 @@ export class Effects {
     src.start(now, Math.random() * 0.6, 0.3);
   }
 
+  /** An Ashhound's growl, bark, yelp or whine from where it stands, pitched a little low. */
+  creatureSound(name: string, at: THREE.Vector3, level = 1) {
+    if (!this.context()) return;
+    const { near, pan, distance } = this.placed(at, 6);
+    if (near < 0.04) return;
+    this.play(name, pan, 0.08, near * level * 0.9, 0.84 + Math.random() * 0.12, 18000 - Math.min(15000, distance * 300));
+  }
+
   /** One footstep on dirt, a wood, stone or metal floor; quieter for others further away. */
   footstep(surface: Surface, at: THREE.Vector3 | null, sprint = false) {
     const a = this.context();
@@ -323,6 +369,51 @@ export class Effects {
     gust.start();
     swell.start();
     this.wind = level;
+
+    // Rain: the same noise, bright and steady, silent until a storm comes in.
+    const rain = ctx.createBufferSource();
+    rain.buffer = buf;
+    rain.loop = true;
+    rain.playbackRate.value = 1.7;
+    const hiss = ctx.createBiquadFilter();
+    hiss.type = 'highpass';
+    hiss.frequency.value = 1800;
+    const patter = ctx.createBiquadFilter();
+    patter.type = 'peaking';
+    patter.frequency.value = 4200;
+    patter.gain.value = 6;
+    this.rainLevel = ctx.createGain();
+    this.rainLevel.gain.value = 0;
+    rain.connect(hiss).connect(patter).connect(this.rainLevel).connect(ctx.destination);
+    rain.start();
+    // A storm's howl: the wind again, louder and higher, gusting faster.
+    const howl = ctx.createBufferSource();
+    howl.buffer = buf;
+    howl.loop = true;
+    howl.playbackRate.value = 1.3;
+    const howlFilter = ctx.createBiquadFilter();
+    howlFilter.type = 'bandpass';
+    howlFilter.frequency.value = 700;
+    howlFilter.Q.value = 1.4;
+    const whistle = ctx.createOscillator();
+    whistle.frequency.value = 0.19;
+    const whistleDepth = ctx.createGain();
+    whistleDepth.gain.value = 380;
+    whistle.connect(whistleDepth).connect(howlFilter.frequency);
+    this.stormLevel = ctx.createGain();
+    this.stormLevel.gain.value = 0;
+    howl.connect(howlFilter).connect(this.stormLevel).connect(ctx.destination);
+    howl.start();
+    whistle.start();
+  }
+
+  /** Brings the storm's sounds up and down with the weather, each 0 to 1. */
+  setWeather(rain: number, dust: number, snow: number) {
+    const a = this.context();
+    if (!a || !this.rainLevel || !this.stormLevel) return;
+    const now = a.ctx.currentTime;
+    this.rainLevel.gain.setTargetAtTime(rain * 0.16, now, 1.5);
+    this.stormLevel.gain.setTargetAtTime(Math.min(1, dust + snow + rain * 0.4) * 0.09, now, 1.5);
   }
 
   /** Eating (crunchy chews), drinking (gulps) or swallowing pills (a rattle and a gulp). */
@@ -437,25 +528,232 @@ export class Effects {
     }
   }
 
+  /**
+   * Where a bullet struck something solid: a hole on the surface facing back along the shot,
+   * dust or chips of whatever it is, and sparks off metal. `normal` faces out of the surface.
+   */
+  impact(at: THREE.Vector3, normal: THREE.Vector3, surface: Surface, floor: number) {
+    let mat = this.holeMats.get(surface);
+    if (!mat) this.holeMats.set(surface, (mat = new THREE.MeshBasicMaterial({ map: holeTexture(surface), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 })));
+    const hole = new THREE.Mesh(HOLE_GEO, mat.clone());
+    // The ground's drawn surface sits a little proud of its collision shape, so lift holes in it more.
+    hole.position.copy(at).addScaledVector(normal, surface === 'dirt' ? 0.06 : 0.015);
+    hole.renderOrder = 3;
+    hole.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    hole.rotateZ(Math.random() * Math.PI * 2);
+    hole.scale.setScalar(surface === 'dirt' ? 0.24 : 0.08 + Math.random() * 0.03);
+    hole.userData.noAO = true;
+    this.scene.add(hole);
+    this.holes.push({ mesh: hole, life: 25 });
+    if (this.holes.length > 80) {
+      const old = this.holes.shift()!;
+      this.scene.remove(old.mesh);
+      (old.mesh.material as THREE.Material).dispose();
+    }
+    const out = at.clone().addScaledVector(normal, 0.05);
+    if (surface === 'scrap' || surface === 'ore') {
+      for (let n = 0; n < 7; n++) {
+        const spark = new THREE.Mesh(CHIP_GEO, this.sparkMat);
+        spark.position.copy(out);
+        spark.scale.set(0.012, 0.012, 0.09);
+        const v = normal.clone().multiplyScalar(3 + Math.random() * 3).add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).multiplyScalar(5));
+        spark.lookAt(out.clone().add(v));
+        spark.userData.noAO = true;
+        this.scene.add(spark);
+        this.sparks.push({ mesh: spark, v, life: 0.18 + Math.random() * 0.2 });
+      }
+    }
+    this.chipsAt(out, surface, floor, surface === 'dirt' ? 3 : 5, 0.55);
+    this.puff(out, surface === 'dirt' ? 0.55 : 0.35, 0.9);
+  }
+
+  /** A burst of red mist where a bullet went into someone. */
+  blood(at: THREE.Vector3) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.bloodTex, depthWrite: false, transparent: true }));
+    sprite.position.copy(at);
+    sprite.scale.setScalar(0.3);
+    this.scene.add(sprite);
+    this.puffs.push({ sprite, life: 0.35, max: 0.35, rise: -0.3, grow: 1.6 });
+  }
+
+  /** A spent case kicked out to the right of the gun; `right` is the shooter's right. */
+  shell(from: THREE.Vector3, right: THREE.Vector3, floor: number, big = false) {
+    const mesh = new THREE.Mesh(SHELL_GEO, this.shellMat);
+    mesh.position.copy(from);
+    mesh.scale.setScalar(big ? 1.2 : 0.85);
+    mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.PI / 2);
+    this.scene.add(mesh);
+    const v = right.clone().multiplyScalar(1.8 + Math.random() * 0.6).add(new THREE.Vector3(0, 1 + Math.random() * 0.6, 0));
+    this.shells.push({ mesh, v, spin: 20 + Math.random() * 15, life: 1.6, floor });
+  }
+
   /** A bright flash and a flicker of light at the muzzle. */
-  muzzle(at: THREE.Vector3, item: ItemId) {
+  muzzle(at: THREE.Vector3, item: ItemId, size = 1) {
     if (ITEMS[item].weapon?.class !== 'gun') return;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
     sprite.position.copy(at);
-    sprite.scale.setScalar(0.35 + Math.random() * 0.15);
+    sprite.scale.setScalar((0.35 + Math.random() * 0.15) * size);
     this.flashLight.position.copy(at);
+    this.flashLight.distance = 7;
     this.flashLight.intensity = 8;
     this.flashLife = 0.05;
     this.scene.add(sprite);
     this.flashes.push({ sprite, life: 0.05 });
   }
 
-  puff(at: THREE.Vector3, size: number) {
+  puff(at: THREE.Vector3, size: number, life = 0.6) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, depthWrite: false, transparent: true }));
     sprite.position.copy(at);
     sprite.scale.setScalar(size);
     this.scene.add(sprite);
-    this.puffs.push({ sprite, life: 0.6, max: 0.6 });
+    this.puffs.push({ sprite, life, max: life, rise: 0.3, grow: 0.8 });
+  }
+
+  /** One billow of thick red smoke from a supply signal or a landed supply drop, climbing high. */
+  redSmoke(at: THREE.Vector3) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.redSmokeTex, depthWrite: false, transparent: true }));
+    sprite.position.copy(at).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3));
+    sprite.scale.setScalar(0.6);
+    this.scene.add(sprite);
+    const life = 5 + Math.random() * 3;
+    this.puffs.push({ sprite, life, max: life, rise: 2.2 + Math.random(), grow: 1.1 });
+  }
+
+  /**
+   * The supply plane flying over, from `from` to `to` at `speed` m/s, `elapsed` seconds into
+   * its crossing already (if it set off before we heard).
+   */
+  plane(obj: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, speed: number, elapsed: number) {
+    obj.position.copy(from);
+    obj.lookAt(to);
+    this.scene.add(obj);
+    this.planes.push({ obj, from: from.clone(), to: to.clone(), t: elapsed, time: from.distanceTo(to) / speed, hum: this.engineHum() });
+  }
+
+  /** Four turbofans heard from the ground: a deep roar with a whine on top, fed into the mix. */
+  private engineHum(): Plane['hum'] {
+    const a = this.context();
+    if (!a) return null;
+    const { ctx, noise } = a;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+    const roar = ctx.createBiquadFilter();
+    roar.type = 'lowpass';
+    roar.frequency.value = 420;
+    roar.Q.value = 0.7;
+    const whine = ctx.createOscillator();
+    whine.type = 'sawtooth';
+    whine.frequency.value = 1180;
+    const whineLevel = ctx.createGain();
+    whineLevel.gain.value = 0.015;
+    const throb = ctx.createOscillator();
+    throb.type = 'triangle';
+    throb.frequency.value = 58;
+    const throbLevel = ctx.createGain();
+    throbLevel.gain.value = 0.25;
+    src.connect(roar).connect(gain);
+    whine.connect(whineLevel).connect(gain);
+    throb.connect(throbLevel).connect(gain);
+    gain.connect(pan).connect(this.audio!.out);
+    src.start();
+    whine.start();
+    throb.start();
+    return {
+      gain,
+      pan,
+      stop: () => {
+        for (const n of [src, whine, throb]) n.stop();
+        gain.disconnect();
+      },
+    };
+  }
+
+  /**
+   * Something blowing up: a fireball and a flash that lights the area, a cloud of smoke,
+   * debris thrown out, a boom that arrives late from far away, and a shake if it was close.
+   */
+  explosion(at: THREE.Vector3, item: 'beancan' | 'satchel' | 'c4' | 'car', floor: number) {
+    const size = item === 'car' ? 2.2 : item === 'c4' ? 1.7 : item === 'satchel' ? 1.25 : 0.9;
+    for (let n = 0; n < 6; n++) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flashTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+      sprite.position.copy(at).add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(0.8 * size));
+      sprite.scale.setScalar(0.4 * size);
+      this.scene.add(sprite);
+      const max = 0.25 + Math.random() * 0.2;
+      this.fireballs.push({ sprite, life: max, max, grow: (3 + Math.random() * 3) * size });
+    }
+    this.flashLight.position.copy(at).setY(at.y + 0.5);
+    this.flashLight.distance = 30;
+    this.flashLight.intensity = 45 * size;
+    this.flashLife = 0.18;
+    for (let n = 0; n < 9; n++) {
+      const p = at.clone().add(new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).multiplyScalar(1.4 * size));
+      this.puff(p, (1 + Math.random()) * size, 1.6 + Math.random() * 1.4);
+    }
+    this.chipsAt(at, 'stone', floor, Math.round(18 * size), 2.2 * size);
+    if (this.listener) this.shake = Math.max(this.shake, size * Math.max(0, 1 - this.listener.position.distanceTo(at) / 25));
+    const a = this.context();
+    if (!a) return;
+    const { near, pan, distance } = this.placed(at, 30);
+    if (near < 0.01) return;
+    const { ctx, noise } = a;
+    // Sound takes its time to arrive from far away.
+    const now = ctx.currentTime + 0.005 + distance / 343;
+    const bus = this.voiceBus(pan, 0.35 + Math.min(0.45, distance / 120), 0.95);
+    const v = near * Math.min(1.2, 0.6 + size * 0.35);
+    this.noiseHit(bus, noise, now, 'highpass', 2200, 0.7, 0.7 * v * Math.max(0.25, 1 - distance / 60), 0.07);
+    this.noiseHit(bus, noise, now, 'lowpass', 1100, 0.6, 1.1 * v, 0.55);
+    this.noiseHit(bus, noise, now + 0.015, 'lowpass', 240, 0.8, 1.4 * v, 0.85);
+    this.tone(bus, now, 'sine', 75, 26, 1.1 * v, 0.75);
+    this.gravel(bus, now + 0.3, 0.25 * v, 20);
+  }
+
+  /** A door swinging: a wooden creak and knock, or a metal scrape and clang shut. */
+  doorSound(open: boolean, metal: boolean, at: THREE.Vector3) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 6);
+    if (near < 0.05) return;
+    const { ctx, noise } = a;
+    const now = ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.12);
+    if (metal) {
+      this.noiseHit(bus, noise, now, 'bandpass', 2200, 4, 0.18 * near, 0.3);
+      if (!open) {
+        this.thud(bus, now + 0.28, 90, 0.5 * near);
+        this.ping(bus, now + 0.28, [210, 570, 1130, 1720], 0.08 * near, 0.6);
+      }
+    } else {
+      this.tone(bus, now, 'sawtooth', open ? 380 : 300, open ? 260 : 210, 0.04 * near, 0.3);
+      if (!open) {
+        this.thud(bus, now + 0.28, 130, 0.45 * near);
+        this.noiseHit(bus, noise, now + 0.28, 'bandpass', 900, 1.5, 0.3 * near, 0.08);
+      }
+    }
+  }
+
+  /** A charge's warning: C4's timer beeps; a satchel or beancan fuse hisses. */
+  chargeSound(kind: 'beancan' | 'satchel' | 'c4', at: THREE.Vector3) {
+    const a = this.context();
+    if (!a) return;
+    const { near, pan } = this.placed(at, 5);
+    if (near < 0.08) return;
+    const now = a.ctx.currentTime + 0.005;
+    const bus = this.voiceBus(pan, 0.05);
+    if (kind === 'c4') this.tone(bus, now, 'square', 2600, 2590, 0.05 * near, 0.07);
+    else this.noiseHit(bus, a.noise, now, 'highpass', 3500, 0.7, 0.08 * near, 0.55);
+  }
+
+  /** Throws a grenade model along an arc from `from` to `to`, then calls `done`. */
+  toss(obj: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, done: () => void) {
+    const time = Math.min(0.9, 0.15 + from.distanceTo(to) / 14);
+    obj.position.copy(from);
+    this.scene.add(obj);
+    this.tosses.push({ obj, from: from.clone(), to: to.clone(), t: 0, time, done });
   }
 
   update(dt: number) {
@@ -469,6 +767,28 @@ export class Effects {
     });
     this.flashLife -= dt;
     if (this.flashLife <= 0) this.flashLight.intensity = 0;
+    else if (this.flashLight.intensity > 20) this.flashLight.intensity *= Math.pow(0.02, dt);
+    this.fireballs = this.fireballs.filter((f) => {
+      f.life -= dt;
+      const k = 1 - f.life / f.max;
+      f.sprite.scale.setScalar(f.sprite.scale.x + f.grow * dt * (1 - k));
+      f.sprite.material.opacity = Math.max(0, 1 - k * k);
+      if (f.life > 0) return true;
+      this.scene.remove(f.sprite);
+      f.sprite.material.dispose();
+      return false;
+    });
+    this.tosses = this.tosses.filter((s) => {
+      s.t += dt;
+      const k = Math.min(1, s.t / s.time);
+      s.obj.position.lerpVectors(s.from, s.to, k);
+      s.obj.position.y += Math.sin(k * Math.PI) * s.time * 2.2;
+      s.obj.rotation.x += dt * 12;
+      if (k < 1) return true;
+      this.scene.remove(s.obj);
+      s.done();
+      return false;
+    });
     this.flashes = this.flashes.filter((f) => {
       f.life -= dt;
       if (f.life > 0) return true;
@@ -491,11 +811,58 @@ export class Effects {
       this.scene.remove(c.mesh);
       return false;
     });
+    this.holes = this.holes.filter((h) => {
+      h.life -= dt;
+      if (h.life < 3) (h.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, h.life / 3);
+      if (h.life > 0) return true;
+      this.scene.remove(h.mesh);
+      (h.mesh.material as THREE.Material).dispose();
+      return false;
+    });
+    this.sparks = this.sparks.filter((p) => {
+      p.life -= dt;
+      p.v.y -= 9.8 * dt;
+      p.mesh.position.addScaledVector(p.v, dt);
+      p.mesh.lookAt(p.mesh.position.clone().add(p.v));
+      if (p.life > 0) return true;
+      this.scene.remove(p.mesh);
+      return false;
+    });
+    this.shells = this.shells.filter((c) => {
+      c.life -= dt;
+      c.v.y -= 9.8 * dt;
+      c.mesh.position.addScaledVector(c.v, dt);
+      if (c.mesh.position.y < c.floor + 0.01) {
+        c.mesh.position.y = c.floor + 0.01;
+        c.v.multiplyScalar(0.25).setY(Math.abs(c.v.y) * 0.25);
+        c.spin *= 0.4;
+      }
+      c.mesh.rotation.x += c.spin * dt;
+      if (c.life > 0) return true;
+      this.scene.remove(c.mesh);
+      return false;
+    });
+    this.planes = this.planes.filter((p) => {
+      p.t += dt;
+      const k = p.t / p.time;
+      p.obj.position.lerpVectors(p.from, p.to, Math.min(1, k));
+      if (p.hum) {
+        // Heard from far off and loudest overhead; it lags a little, like the real thing.
+        const { near, pan } = this.placed(p.obj.position, 90);
+        const ctx = this.audio!.ctx;
+        p.hum.gain.gain.setTargetAtTime(0.5 * near * near, ctx.currentTime, 0.3);
+        p.hum.pan.pan.setTargetAtTime(pan, ctx.currentTime, 0.3);
+      }
+      if (k < 1) return true;
+      this.scene.remove(p.obj);
+      p.hum?.stop();
+      return false;
+    });
     this.puffs = this.puffs.filter((p) => {
       p.life -= dt;
       const k = 1 - p.life / p.max;
-      p.sprite.scale.setScalar(p.sprite.scale.x + dt * 0.8);
-      p.sprite.position.y += dt * 0.3;
+      p.sprite.scale.setScalar(p.sprite.scale.x + dt * p.grow);
+      p.sprite.position.y += dt * p.rise;
       p.sprite.material.opacity = 1 - k;
       if (p.life > 0) return true;
       this.scene.remove(p.sprite);
@@ -659,6 +1026,85 @@ export class Effects {
   }
 
   /** A voice's path out: through a little saturation, panned, with some sent to the echo. */
+  /** Each running car's engine: a low growl that climbs with its speed. */
+  private engines = new Map<number, { level: GainNode; pan: StereoPannerNode; low: OscillatorNode; high: OscillatorNode; filter: BiquadFilterNode }>();
+
+  /**
+   * Keeps a car's engine sound going at `at`: `load` from 0 (idling) to 1 (flat out), or off with
+   * null (and gone for good once the car is).
+   */
+  engine(id: number, at: THREE.Vector3 | null, load: number | null) {
+    let e = this.engines.get(id);
+    if (load === null || !at) {
+      if (e) {
+        e.level.gain.setTargetAtTime(0, e.level.context.currentTime, 0.15);
+        const old = e;
+        setTimeout(() => [old.low, old.high].forEach((o) => o.stop()), 800);
+        this.engines.delete(id);
+      }
+      return;
+    }
+    const a = this.context();
+    if (!a) return;
+    const { ctx } = a;
+    if (!e) {
+      // Two rough oscillators a fifth apart through a low-pass: a tired old straight-six.
+      const low = ctx.createOscillator();
+      low.type = 'sawtooth';
+      const high = ctx.createOscillator();
+      high.type = 'square';
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 2;
+      const mix = ctx.createGain();
+      mix.gain.value = 0.5;
+      const level = ctx.createGain();
+      level.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      low.connect(filter);
+      high.connect(mix).connect(filter);
+      filter.connect(level).connect(pan).connect(this.audio!.out);
+      low.start();
+      high.start();
+      e = { level, pan, low, high, filter };
+      this.engines.set(id, e);
+    }
+    const { near, pan } = this.placed(at, 10);
+    const t = ctx.currentTime;
+    const hz = 34 + load * 70;
+    e.low.frequency.setTargetAtTime(hz, t, 0.12);
+    e.high.frequency.setTargetAtTime(hz * 1.5 + 1.3, t, 0.12);
+    e.filter.frequency.setTargetAtTime(260 + load * 900, t, 0.12);
+    e.level.gain.setTargetAtTime(near * (0.07 + load * 0.08), t, 0.1);
+    e.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
+  }
+
+  /** A car slamming into something. */
+  /** A bright rising chime for a finished objective. */
+  objective() {
+    if (!this.audio) return;
+    const { ctx, out } = this.audio;
+    const t = ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      const start = t + i * 0.08;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.12, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.6);
+      osc.connect(gain).connect(out);
+      osc.start(start);
+      osc.stop(start + 0.65);
+    });
+  }
+
+  crash(at: THREE.Vector3, speed: number) {
+    this.gatherSound('scrap', at);
+    if (speed > 8) this.gatherSound('scrap', at, true);
+  }
+
   private voiceBus(pan: number, echo: number, drive = 0.55): AudioNode {
     const { ctx, out, reverb } = this.audio!;
     const input = ctx.createGain();
@@ -791,6 +1237,7 @@ const MELEE_SOUNDS: Partial<Record<ItemId, { swing: [string, number]; wood: [str
   stonePickaxe: { swing: ['swing-heavy', 0.95], wood: ['hit-chop2', 0.9], stone: ['hit-stone', 0.85] },
   salvagedAxe: { swing: ['swing-axe2', 1], wood: ['hit-axe', 1], stone: ['hit-pick', 1.15] },
   salvagedPickaxe: { swing: ['swing-heavy2', 1], wood: ['hit-axe', 0.85], stone: ['hit-pick', 1] },
+  torch: { swing: ['swing-light', 1], wood: ['hit-chop2', 0.9], stone: ['hit-rock', 1.1] },
   machete: { swing: ['swing-blade', 1.1], wood: ['hit-blade', 1.1], stone: ['hit-clang', 1.15] },
   salvagedSword: { swing: ['swing-sword', 1], wood: ['hit-blade', 0.9], stone: ['hit-clang', 0.95] },
   woodenSpear: { swing: ['swing-thrust', 1], wood: ['hit-stab', 1], stone: ['hit-stone', 1.25] },
@@ -881,5 +1328,41 @@ function radialTexture(inner: string, mid: string, outer: string): THREE.Texture
   ctx.fillRect(0, 0, 64, 64);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** A bullet hole: a dark pit with a ring of crushed or splintered surface round it. */
+const holeTextures = new Map<Surface, THREE.Texture>();
+function holeTexture(surface: Surface): THREE.Texture {
+  const known = holeTextures.get(surface);
+  if (known) return known;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const ring: Record<Surface, string> = {
+    wood: 'rgba(200,160,110,0.55)',
+    stone: 'rgba(210,205,195,0.5)',
+    ore: 'rgba(210,205,195,0.5)',
+    scrap: 'rgba(200,190,175,0.6)',
+    hemp: 'rgba(60,70,40,0.4)',
+    dirt: 'rgba(30,24,18,0.7)',
+  };
+  // Torn edge.
+  ctx.fillStyle = ring[surface];
+  ctx.beginPath();
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 9) {
+    const r = 15 + Math.random() * 9;
+    ctx.lineTo(32 + Math.cos(a) * r, 32 + Math.sin(a) * r);
+  }
+  ctx.fill();
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 13);
+  g.addColorStop(0, 'rgba(8,6,5,1)');
+  g.addColorStop(0.55, 'rgba(18,14,11,0.95)');
+  g.addColorStop(1, 'rgba(30,24,18,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  holeTextures.set(surface, tex);
   return tex;
 }
