@@ -10,7 +10,8 @@
 //
 // --keep-heading leaves the scan facing as it was; otherwise it is turned so its length runs
 // along x (for the car wrecks). --split keeps each top-level object separate, for a file that
-// is a set of loose pieces.
+// is a set of loose pieces. --drop=<pattern> leaves out meshes whose names match, such as the
+// floor a scan was shown on.
 
 import { Document, NodeIO, type Material, type Node, type Texture } from '@gltf-transform/core';
 import { MeshoptSimplifier } from 'meshoptimizer';
@@ -43,9 +44,11 @@ function mul(m: number[], x: number, y: number, z: number, w: number): [number, 
 }
 
 // Bake every node's transform into the vertices.
+const dropArg = args.find((a) => a.startsWith('--drop='));
+const drop = dropArg ? new RegExp(dropArg.slice('--drop='.length)) : null;
 function visit(node: Node, group: number) {
   const mesh = node.getMesh();
-  if (mesh) {
+  if (mesh && !(drop && drop.test(mesh.getName()))) {
     const m = node.getWorldMatrix() as unknown as number[];
     for (const prim of mesh.listPrimitives()) {
       const material = prim.getMaterial();

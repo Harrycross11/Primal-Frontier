@@ -68,7 +68,7 @@ export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [numb
   storageBox: { name: 'Storage Box', size: [1.0, 0.62, 0.62], hp: 150, slots: 12 },
   toolCupboard: { name: 'Tool Cupboard', size: [0.9, 1.75, 0.55], hp: 600, slots: 0 },
   sleepingBag: { name: 'Sleeping Bag', size: [0.8, 0.14, 1.9], hp: 100, slots: 0 },
-  planter: { name: 'Planter Box', size: [1.8, 0.42, 0.75], hp: 200, slots: 9 },
+  planter: { name: 'Planter Box', size: [1.7, 0.59, 1.25], hp: 200, slots: 9 },
   lootBag: { name: 'Loot Bag', size: [0.7, 0.45, 0.7], hp: 40, slots: INVENTORY_SIZE },
   crate: { name: 'Wooden Crate', size: [0.49, 0.28, 1.5], hp: 1e9, slots: 12 },
   militaryCrate: { name: 'Military Crate', size: [0.71, 0.77, 1.3], hp: 1e9, slots: 12 },

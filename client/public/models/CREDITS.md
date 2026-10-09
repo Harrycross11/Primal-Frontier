@@ -16,6 +16,7 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
 - stones: https://polyhaven.com/a/namaqualand_stones_01
 - stump: https://polyhaven.com/a/tree_stump_01
+- crop-leaves: https://polyhaven.com/a/calathea_orbifolia_01
 - grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
@@ -31,6 +32,9 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - ruin-wall: "Ruined Wall Photogrammetry scan" by photogrammexico (https://sketchfab.com/3d-models/ruined-wall-photogrammetry-scan-3fd44346135d4a66bb8fc4a9f272c5d1), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - rubble-pile: "Blocks of reinforced concrete scrap" by Оrрндп ЯТG (https://sketchfab.com/3d-models/blocks-of-reinforced-concrete-scrap-a06fea588d0a4094869a07527fdc4ec8), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - rubble-chunks: "Set of 4 Concrete rubble chunks" by matousekfoto (https://sketchfab.com/3d-models/set-of-4-concrete-rubble-chunks-0d654a6e33624665ad20c5191f5d9d95), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- planter: "248: Raised Garden Box" by alexdelker (https://sketchfab.com/3d-models/248-raised-garden-box-a68dffbd172c4429aed77c33df2344cf), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- crop-pumpkin: "Pumpkin" by Maurice Svay (https://sketchfab.com/3d-models/pumpkin-5866a5b13bac4a01918d2b1eb80ad2ff), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- food-corn: "Sweet corn" by Keith Ito (https://sketchfab.com/3d-models/sweet-corn-effa9692c0b64245aba9c163c991b21c), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - gun-assaultRifle: "AK-47  - Game Ready Assault Rifle Weapon" by Billy Jackman (https://sketchfab.com/3d-models/ak-47-game-ready-assault-rifle-weapon-dc58144409534abbb60970638d171f9f), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-boltRifle: "Mosin Nagant M91" by MaX3Dd (https://sketchfab.com/3d-models/mosin-nagant-m91-92ede39f23bd40c7982c727dfd7c4be0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-l96: "PGM Ultima Ratio · Game-Ready Sniper Rifle" by flip 3D (https://sketchfab.com/3d-models/pgm-ultima-ratio-game-ready-sniper-rifle-34611493b4104bdba2ce6beabfeb4465), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
@@ -43,6 +47,8 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - gun-m249: "M249" by Dmitriy Korotkov (https://sketchfab.com/3d-models/m249-b1e60faa37de4461822103fe38e5c9ce), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-lr300: "LR-300 ML-A Assault Rifle" by Icaro Arrigoni (https://sketchfab.com/3d-models/lr-300-ml-a-assault-rifle-ac375d2498bd4a59a23a878312b6ac43), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-semiRifle: "SKS Semi Automatic Rifle" by MaX3Dd (https://sketchfab.com/3d-models/sks-semi-automatic-rifle-ada722d492344cba8633be150eea7e85), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- crop-corn: "Maize Corn Plant" by gilles.schaeck (https://sketchfab.com/3d-models/maize-corn-plant-5fd3b104d8104519b061469c365d4974), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- crop-hemp: "Cannabis Plant" by 3D Crackhouse (https://sketchfab.com/3d-models/cannabis-plant-79fe78fd6c6a426b8584115e772a5818), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedAxe: "Hatchet" by MaX3Dd (https://sketchfab.com/3d-models/hatchet-30c5a2054fd9469796c0771dc52a0fa0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedPickaxe: "Pickaxe" by Multipainkiller Studio (https://sketchfab.com/3d-models/pickaxe-83e334fc83ed4bb19592154e60e529c5), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-eoka: "Hand Made Pistol" by Lyndschoko (https://sketchfab.com/3d-models/hand-made-pistol-1e83dccd8d6e43a183fe48410750dfb4), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized

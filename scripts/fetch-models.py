@@ -41,6 +41,8 @@ MODELS = {
     'dead-branch': ('dead_quiver_branch_01', 1500),
     'stones': ('namaqualand_stones_01', 1500),
     'stump': ('tree_stump_01', 2000),
+    # Broad leaves round the pumpkin in a planter box.
+    'crop-leaves': ('calathea_orbifolia_01', 2500),
 }
 
 # Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
@@ -58,6 +60,12 @@ SCANS = {
     'ruin-wall': ('3fd44346135d4a66bb8fc4a9f272c5d1', 12000, [], 2048),
     'rubble-pile': ('a06fea588d0a4094869a07527fdc4ec8', 14000, ['--keep-heading'], 1024),
     'rubble-chunks': ('0d654a6e33624665ad20c5191f5d9d95', 6000, ['--keep-heading', '--split'], 1024),
+    # A rusty-cornered wooden raised bed, its scanned greens cut out (scripts/cut-planter.ts).
+    'planter': ('a68dffbd172c4429aed77c33df2344cf', 5000, ['--keep-heading', '--cut-planter'], 1024),
+    # A pumpkin, for the crop and its icon.
+    'crop-pumpkin': ('5866a5b13bac4a01918d2b1eb80ad2ff', 3000, ['--keep-heading', '--drop=Plane', '--metalrough'], 1024),
+    # A cob of sweet corn, for the item.
+    'food-corn': ('effa9692c0b64245aba9c163c991b21c', 3000, ['--keep-heading'], 1024),
 }
 
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
@@ -94,6 +102,9 @@ PROPS = {
     'gun-m249': 'b1e60faa37de4461822103fe38e5c9ce',
     'gun-lr300': 'ac375d2498bd4a59a23a878312b6ac43',
     'gun-semiRifle': 'ada722d492344cba8633be150eea7e85',
+    # Crops grown in the planter box.
+    'crop-corn': '5fd3b104d8104519b061469c365d4974',
+    'crop-hemp': '79fe78fd6c6a426b8584115e772a5818',
     'tool-salvagedAxe': '30c5a2054fd9469796c0771dc52a0fa0',
     'tool-salvagedPickaxe': '83e334fc83ed4bb19592154e60e529c5',
     'gun-eoka': '1e83dccd8d6e43a183fe48410750dfb4',
@@ -163,7 +174,7 @@ LANDMARK_PROPS = {
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.
-SMALL_TEXTURES = [name for name in PROPS if list(PROPS).index(name) >= list(PROPS).index('gun-m4')]
+SMALL_TEXTURES = [name for name in PROPS if name.startswith('crop-') or list(PROPS).index(name) >= list(PROPS).index('gun-m4')]
 
 
 def slim_textures(glb: bytes, size: int = 1024) -> bytes:
@@ -229,6 +240,22 @@ def triangles(path: str) -> int:
     return sum(doc['accessors'][p['indices']]['count'] // 3 for m in doc['meshes'] for p in m['primitives'])
 
 
+def cut_planter(path: str, tmp: str):
+    """Cuts the scanned greens out of the raised bed, leaving its walls (see scripts/cut-planter.ts)."""
+    import numpy as np
+    from PIL import Image
+
+    script = os.path.join(os.path.dirname(__file__), 'cut-planter.ts')
+    uvs, photo, mask = (os.path.join(tmp, n) for n in ('uvs.bin', 'photo.jpg', 'green.bin'))
+    subprocess.run(['npx', 'tsx', script, path, '--dump', uvs, photo], check=True, capture_output=True)
+    uv = np.fromfile(uvs, dtype=np.float32).reshape(-1, 2)
+    tex = np.asarray(Image.open(photo).convert('RGB')).astype(int)
+    h, w, _ = tex.shape
+    c = tex[((uv[:, 1] % 1) * (h - 1)).astype(int), ((uv[:, 0] % 1) * (w - 1)).astype(int)]
+    ((c[:, 1] > c[:, 0] + 8) & (c[:, 1] > c[:, 2])).astype(np.uint8).tofile(mask)
+    subprocess.run(['npx', 'tsx', script, path, path, '--mask', mask], check=True, capture_output=True)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     credits = [f'- {name}: https://polyhaven.com/a/{asset}' for name, (asset, _) in MODELS.items()]
@@ -270,6 +297,13 @@ def main():
             full = os.path.join(tmp, 'scan.glb')
             with open(full, 'wb') as f:
                 f.write(get(link['glb']['url']))
+            if '--metalrough' in flags:
+                # Old specular-glossiness materials, which the simplifier cannot read.
+                flags = [f for f in flags if f != '--metalrough']
+                subprocess.run([*CLI, 'metalrough', full, full], check=True, capture_output=True)
+            if '--cut-planter' in flags:
+                flags = [f for f in flags if f != '--cut-planter']
+                cut_planter(full, tmp)
             out = os.path.join(OUT, f'{name}.glb')
             result = subprocess.run(
                 ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'simplify-scan.ts'), full, out, str(budget), *flags],
