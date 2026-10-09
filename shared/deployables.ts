@@ -3,6 +3,7 @@
 // items. Shared so client and server agree on size and slot rules.
 
 import type { Box } from './building.ts';
+import { CROPS, PLANTER_SEED_SLOTS } from './farming.ts';
 import { INVENTORY_SIZE, emptySlots, type ItemId, type Slots } from './items.ts';
 
 export type DeployableKind =
@@ -13,6 +14,7 @@ export type DeployableKind =
   | 'storageBox'
   | 'toolCupboard'
   | 'sleepingBag'
+  | 'planter'
   | 'lootBag'
   // Loot crates at the landmarks, and the crate the supply plane drops.
   | 'crate'
@@ -25,7 +27,7 @@ export type DeployableKind =
   | 'satchel'
   | 'c4';
 /** The kinds that come from an item of the same name and can be placed. */
-export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox', 'toolCupboard', 'sleepingBag'];
+export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox', 'toolCupboard', 'sleepingBag', 'planter'];
 /** Lit explosives waiting to go off. */
 export const CHARGE_KINDS: DeployableKind[] = ['beancan', 'satchel', 'c4'];
 /** Crates full of loot that nobody owns: you can only take from them, and they can't be broken. */
@@ -44,6 +46,8 @@ export interface Deployable {
   owner: number;
   /** Item slots, for furnaces, boxes and loot bags. */
   slots: Slots;
+  /** Planters: seconds each plot's plant has grown (see shared/farming.ts). */
+  grow?: number[];
   /** Furnaces: burning or not. */
   on: boolean;
   /** Loot bags: whose they were. */
@@ -64,6 +68,7 @@ export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [numb
   storageBox: { name: 'Storage Box', size: [1.0, 0.62, 0.62], hp: 150, slots: 12 },
   toolCupboard: { name: 'Tool Cupboard', size: [0.9, 1.75, 0.55], hp: 600, slots: 0 },
   sleepingBag: { name: 'Sleeping Bag', size: [0.8, 0.14, 1.9], hp: 100, slots: 0 },
+  planter: { name: 'Planter Box', size: [1.8, 0.42, 0.75], hp: 200, slots: 9 },
   lootBag: { name: 'Loot Bag', size: [0.7, 0.45, 0.7], hp: 40, slots: INVENTORY_SIZE },
   crate: { name: 'Wooden Crate', size: [0.49, 0.28, 1.5], hp: 1e9, slots: 12 },
   militaryCrate: { name: 'Military Crate', size: [0.71, 0.77, 1.3], hp: 1e9, slots: 12 },
@@ -117,6 +122,7 @@ export function newDeployable(id: number, kind: DeployableKind, x: number, y: nu
   const d: Deployable = { id, kind, x, y, z, rot, hp: info.hp, owner, slots: emptySlots(info.slots), on: false };
   // Whoever sets down a tool cupboard is the first one it trusts.
   if (kind === 'toolCupboard') d.auth = [owner];
+  if (kind === 'planter') d.grow = PLANTER_SEED_SLOTS.map(() => 0);
   return d;
 }
 
@@ -133,6 +139,7 @@ export function deployableBox(d: Pick<Deployable, 'kind' | 'x' | 'y' | 'z' | 'ro
 /** Whether an item may go into a container slot. Furnace outputs and loot bags only give. */
 export function slotAccepts(d: Deployable, slot: number, item: ItemId): boolean {
   if (d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) return false;
+  if (d.kind === 'planter') return PLANTER_SEED_SLOTS.includes(slot) && CROPS[item] !== undefined;
   if (d.kind !== 'furnace') return true;
   if (slot === FURNACE_FUEL) return item === 'wood';
   if (FURNACE_ORE_SLOTS.includes(slot)) return SMELTS[item] !== undefined;

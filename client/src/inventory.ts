@@ -2,6 +2,7 @@
 // inventory grid, an open furnace or box, and the crafting menu. Items move by dragging
 // between slots, or by right-clicking to send a stack to the other side.
 
+import { CROPS, PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
 import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, WORKBENCH_LEVEL, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
   ARMOUR_SLOTS,
@@ -26,6 +27,8 @@ import { swatch } from './paint.ts';
 const $ = (id: string) => document.getElementById(id)!;
 const SHOWN_RESOURCES: ItemId[] = ['wood', 'stone', 'scrap', 'metalOre', 'metal', 'sulfurOre', 'sulfur', 'hqmOre', 'hqm', 'charcoal', 'gunpowder', 'cloth'];
 const FURNACE_LABELS = ['Wood', 'Ore', 'Ore', 'Out', 'Out', 'Out'];
+/** Only the top row is labelled; the second row is more crop slots, and its labels would sit on the first. */
+const PLANTER_LABELS = ['Seed', 'Seed', 'Seed', 'Crop', 'Crop', 'Crop'];
 
 export interface InventoryActions {
   move(from: SlotRef, to: SlotRef, count?: number): void;
@@ -194,14 +197,17 @@ export class InventoryUi {
     grid.innerHTML = '';
     d.slots.forEach((s, i) => {
       const el = this.slotElement({ c: d.id, i }, s, true);
-      if (d.kind === 'furnace') {
+      const label = d.kind === 'furnace' ? FURNACE_LABELS[i] : d.kind === 'planter' ? PLANTER_LABELS[i] : undefined;
+      if (label) {
         el.classList.add('label-slot');
-        el.dataset.label = FURNACE_LABELS[i];
+        el.dataset.label = label;
       }
       grid.appendChild(el);
     });
     grid.classList.toggle('furnace-row', d.kind === 'furnace');
-    $('furnace-controls').hidden = d.kind !== 'furnace';
+    $('furnace-controls').hidden = d.kind !== 'furnace' && d.kind !== 'planter';
+    $('furnace-toggle').hidden = d.kind !== 'furnace';
+    if (d.kind === 'planter') $('furnace-status').textContent = planterStatus(d);
     if (d.kind === 'furnace') {
       $('furnace-toggle').textContent = d.on ? 'Put out' : 'Light';
       const fuel = d.slots[FURNACE_FUEL]?.count ?? 0;
@@ -516,4 +522,14 @@ function maxCraftable(slots: Slots, r: Recipe): number {
   let most = Infinity;
   for (const [item, n] of Object.entries(r.cost)) most = Math.min(most, Math.floor(countItem(slots, item as ItemId) / n!));
   return most === Infinity ? 0 : most;
+}
+
+/** How each of a planter's plants is coming along, or how to start one. */
+export function planterStatus(d: Deployable): string {
+  const growing = PLANTER_SEED_SLOTS.flatMap((slot, n) => {
+    const seed = d.slots[slot];
+    const crop = seed && CROPS[seed.item];
+    return crop ? [`${crop.name} ${Math.floor(ripeness(seed.item, d.grow?.[n] ?? 0) * 100)}%`] : [];
+  });
+  return growing.length ? `Growing: ${growing.join(', ')}. Ripe crops and new seeds land in the crop slots.` : 'Put hemp, corn or pumpkin seeds in the seed slots and they grow by themselves.';
 }

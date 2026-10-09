@@ -486,6 +486,30 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       part(g, new THREE.TorusGeometry(0.016, 0.004, 5, 12).rotateX(Math.PI / 2), mat('feed-string', () => new THREE.MeshStandardMaterial({ color: 0x5a4426, roughness: 1 })), 0, 0.152, 0);
       return g;
     }
+    case 'corn': {
+      // A cob lying across, its husk peeled back from the base.
+      const cob = new THREE.Group();
+      part(cob, new THREE.CapsuleGeometry(0.03, 0.12, 4, 12), mat('corn-cob', () => new THREE.MeshStandardMaterial({ color: 0xe0b83a, roughness: 0.6 })), 0, 0.09, 0);
+      const husk = mat('corn-husk', () => new THREE.MeshStandardMaterial({ color: 0x8a9a48, roughness: 0.9, side: THREE.DoubleSide }));
+      for (let n = 0; n < 3; n++) {
+        const leaf = part(cob, new THREE.PlaneGeometry(0.05, 0.13).translate(0, -0.06, 0), husk, 0, 0.03, 0);
+        leaf.rotation.set(-0.5, (n / 3) * Math.PI * 2, 0, 'YXZ');
+      }
+      cob.rotation.z = -1.1;
+      cob.position.set(-0.05, 0.03, 0);
+      g.add(cob);
+      return g;
+    }
+    case 'pumpkin': {
+      const skin = mat('pumpkin', () => new THREE.MeshStandardMaterial({ color: 0xd8742a, roughness: 0.55 }));
+      for (let r = 0; r < 8; r++) {
+        const a = (r / 8) * Math.PI * 2;
+        const lobe = part(g, new THREE.SphereGeometry(0.06, 12, 8).scale(0.55, 0.8, 1), skin, Math.cos(a) * 0.045, 0.05, Math.sin(a) * 0.045);
+        lobe.rotation.y = -a;
+      }
+      part(g, new THREE.CylinderGeometry(0.008, 0.013, 0.04, 6), mat('pumpkin-stem', () => new THREE.MeshStandardMaterial({ color: 0x5a4a2a, roughness: 0.9 })), 0, 0.11, 0);
+      return g;
+    }
     case 'mushroom': {
       const stem = mat('shroom-stem', () => new THREE.MeshStandardMaterial({ color: 0xd8cdb4, roughness: 0.9 }));
       const cap = mat('shroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));

@@ -47,7 +47,7 @@ import { MenuStage } from './menuStage.ts';
 import { lateLoaded, lateModels, loadModels } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
-import { InventoryUi } from './inventory.ts';
+import { InventoryUi, planterStatus } from './inventory.ts';
 import { Net } from './net.ts';
 import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.ts';
 import { WorldMap } from './map.ts';
@@ -1442,6 +1442,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const text = mine ? 'Your sleeping bag  ·  You can wake up here  ·  Hit to pick up' : 'Sleeping bag  ·  Hit to break it';
         return { text, health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
       }
+      if (d.kind === 'planter') return { text: ['Planter Box', planterStatus(d).split('.')[0], 'E to open', 'Hit to pick up'].join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
       const bench = WORKBENCH_LEVEL[d.kind];
       const hints = [d.slots.length > 0 ? 'E to open' : bench ? 'E for the tech tree' : '', 'Hit to pick up'];
       const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
@@ -1619,6 +1620,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       return true;
     },
     moveItem: (from: SlotRef, to: SlotRef, count?: number) => net.send({ t: 'moveItem', from, to, count }),
+    slotOf: (item: ItemId) => slots.findIndex((s) => s?.item === item),
     furnace: (id: number, on: boolean) => net.send({ t: 'furnace', id, on }),
     openScreen: (id: number | null) => openScreen(id === null ? null : (world.deployables.get(id) ?? null)),
     closeScreen: () => ui.hide(),

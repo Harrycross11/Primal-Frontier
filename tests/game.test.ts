@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { Game } from '../server/game.ts';
 import { MAX_PLAYERS } from '../shared/constants.ts';
 import { TECH } from '../shared/techTree.ts';
+import { CROPS, LAND_GROWTH, PLANTER_OUTPUT_SLOTS, PLANTER_SEED_SLOTS, growthAt, ripeness } from '../shared/farming.ts';
 import { terrainHeight } from '../shared/terrain.ts';
 import { BARREL_DRINK, generateResources, RESOURCE_INFO } from '../shared/world.ts';
 import {
@@ -370,6 +371,43 @@ test('a furnace burns wood to charcoal and smelts ore into metal fragments', () 
   assert.equal(furnace.on, false, 'goes out when the wood runs out');
   game.moveItem(id, { c: furnace.id, i: out('metal') }, { c: 'me', i: 20 });
   assert.equal(have(game, id, 'metal'), 5);
+});
+
+test('a planter grows seeds into crops and fresh seeds, at its land\'s pace', () => {
+  const { game, id } = setup();
+  standAt(game, id, 4, 4);
+  give(game, id, 'planter', 1);
+  give(game, id, 'hempSeed', 2);
+  give(game, id, 'cornSeed', 1);
+  give(game, id, 'wood', 5);
+  const p = game.players.get(id)!;
+  game.deploy(id, p.slots.findIndex((s) => s?.item === 'planter'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  const planter = [...game.deployables.values()][0];
+  assert.equal(planter.kind, 'planter');
+  const at = (item: ItemId) => p.slots.findIndex((s) => s?.item === item);
+  const plot = (i: number) => planter.slots[i];
+  game.moveItem(id, { c: 'me', i: at('wood') }, { c: planter.id, i: PLANTER_SEED_SLOTS[0] });
+  assert.equal(plot(0), null, 'only seeds can be planted');
+  game.moveItem(id, { c: 'me', i: at('hempSeed') }, { c: planter.id, i: PLANTER_OUTPUT_SLOTS[0] });
+  assert.equal(planter.slots[PLANTER_OUTPUT_SLOTS[0]], null, 'harvest slots only give');
+  game.moveItem(id, { c: 'me', i: at('hempSeed') }, { c: planter.id, i: 0 });
+  game.moveItem(id, { c: 'me', i: at('cornSeed') }, { c: planter.id, i: 1 });
+  assert.equal(plot(0)?.count, 2);
+
+  const rate = growthAt(SEED, 6, 4);
+  const hemp = CROPS.hempSeed!;
+  let t = run(game, 0, (hemp.seconds / rate) * 0.5);
+  assert.ok(ripeness('hempSeed', planter.grow![0]) > 0.4 && ripeness('hempSeed', planter.grow![0]) < 0.6, 'half grown');
+  t = run(game, t, (hemp.seconds / rate) * 0.55);
+  const out = (item: ItemId) => PLANTER_OUTPUT_SLOTS.map((i) => planter.slots[i]).find((s) => s?.item === item)?.count ?? 0;
+  assert.equal(out('cloth'), 15, 'ripe hemp gives cloth');
+  assert.equal(out('hempSeed'), 2, 'and fresh seeds');
+  assert.equal(plot(0)?.count, 1, 'the next seed starts');
+  assert.equal(out('corn'), 0, 'corn takes longer');
+  run(game, t, CROPS.cornSeed!.seconds / rate);
+  assert.equal(out('corn'), 3);
+  assert.equal(plot(1), null, 'its only seed is used up');
+  assert.ok(LAND_GROWTH.deadwood > LAND_GROWTH.ashlands && LAND_GROWTH.frost < LAND_GROWTH.ashlands);
 });
 
 test('storage boxes hold items; breaking your own box gives it and its contents back', () => {

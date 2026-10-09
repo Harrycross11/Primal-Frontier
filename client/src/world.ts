@@ -1066,6 +1066,7 @@ export class World {
       this.cameraBlockers.push(g);
     }
     g.userData.setOn?.(d.on);
+    g.userData.setGrow?.(d);
     g.userData.health = d.hp / DEPLOYABLE_INFO[d.kind].hp;
   }
 
