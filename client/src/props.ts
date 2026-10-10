@@ -416,13 +416,21 @@ export function buildMushrooms(rand: () => number): THREE.Group {
  */
 export function buildWaterBarrel(): THREE.Group {
   const g = new THREE.Group();
-  const plastic = mat('drum-plastic', () => new THREE.MeshStandardMaterial({ color: 0x2c5a80, roughness: 0.5 }));
-  const body = mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, true), plastic, 0, 0.45, 0);
-  (body.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
-  g.add(body);
-  g.add(mesh(new THREE.CircleGeometry(0.3, 20).rotateX(-Math.PI / 2), plastic, 0, 0.02, 0));
-  for (const y of [0.22, 0.68]) g.add(mesh(new THREE.TorusGeometry(0.305, 0.015, 6, 24).rotateX(Math.PI / 2), plastic, 0, y, 0));
-  g.add(mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 24).rotateX(Math.PI / 2), plastic, 0, 0.9, 0));
+  const scan = model('water-drum');
+  if (scan) {
+    const drum = shared(new THREE.Mesh(scan.geometry, scan.material));
+    // The scan's plastic is a brighter blue than sun-faded drums left outside.
+    for (const m of [scan.material].flat()) m.color.setRGB(0.55, 0.62, 0.72);
+    g.add(drum);
+  } else {
+    const plastic = mat('drum-plastic', () => new THREE.MeshStandardMaterial({ color: 0x2c5a80, roughness: 0.5 }));
+    const body = mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.9, 20, 1, true), plastic, 0, 0.45, 0);
+    (body.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+    g.add(body);
+    g.add(mesh(new THREE.CircleGeometry(0.3, 20).rotateX(-Math.PI / 2), plastic, 0, 0.02, 0));
+    for (const y of [0.22, 0.68]) g.add(mesh(new THREE.TorusGeometry(0.305, 0.015, 6, 24).rotateX(Math.PI / 2), plastic, 0, y, 0));
+    g.add(mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 24).rotateX(Math.PI / 2), plastic, 0, 0.9, 0));
+  }
   // A torn tarp tied round the rim as a funnel.
   const tarp = mat('tarp', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x5a6a4a, roughness: 1, side: THREE.DoubleSide }));
   const funnel = mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.16, 10, 1, true), tarp, 0, 0.97, 0);
@@ -430,7 +438,7 @@ export function buildWaterBarrel(): THREE.Group {
   g.add(funnel);
   for (const a of [0.4, 2.5, 4.4]) g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), ropeMat(), Math.cos(a) * 0.4, 0.9, Math.sin(a) * 0.4));
   const water = mesh(
-    new THREE.CircleGeometry(0.29, 20).rotateX(-Math.PI / 2),
+    new THREE.CircleGeometry(scan ? 0.25 : 0.29, 20).rotateX(-Math.PI / 2),
     mat('barrel-water', () => new THREE.MeshStandardMaterial({ color: 0x3a5058, roughness: 0.08, metalness: 0.2 })),
     0,
     0.82,
@@ -448,6 +456,12 @@ export function buildWaterBarrel(): THREE.Group {
 /** A yellow radiation warning sign on a leaning post, at the edge of a hot crater. */
 export function buildRadSign(): THREE.Group {
   const g = new THREE.Group();
+  const scan = model('rad-sign');
+  if (scan) {
+    g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
+    g.rotation.z = 0.06;
+    return g;
+  }
   g.add(mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.8, 6).translate(0, 0.9, 0), rustMat()));
   const face = mat('rad-sign', () => {
     const c = document.createElement('canvas');
@@ -1026,6 +1040,24 @@ export function buildDoorLeaf(kind: DoorKind, locked: boolean): THREE.Group {
   const H = DOORWAY.height - 0.03;
   const T = 0.05;
   const x0 = 0.02;
+  const scan = model(kind === 'woodenDoor' ? 'door-wood' : 'door-metal');
+  if (scan) {
+    // Stretched to the doorway, hinged at x = 0; the scan brings its own handles.
+    const size = scan.geometry.boundingBox!.getSize(new THREE.Vector3());
+    const leaf = shared(new THREE.Mesh(scan.geometry, scan.material));
+    leaf.scale.set(W / size.x, H / size.y, 1);
+    leaf.position.x = x0 + W / 2;
+    g.add(leaf);
+    if (locked) {
+      for (const side of [-1, 1]) {
+        const pad = buildKeypad(false);
+        pad.position.set(x0 + W - 0.13, 1.2, side * (size.z / 2 + 0.02));
+        if (side < 0) pad.rotation.y = Math.PI;
+        g.add(pad);
+      }
+    }
+    return g;
+  }
   if (kind === 'woodenDoor') {
     const boards = 5;
     for (let n = 0; n < boards; n++) {
@@ -1073,6 +1105,14 @@ export function buildDoorLeaf(kind: DoorKind, locked: boolean): THREE.Group {
 /** A code lock's keypad: a steel box with a grid of buttons and a green light, facing +z. */
 function buildKeypad(held: boolean): THREE.Group {
   const g = new THREE.Group();
+  const scan = model('keypad');
+  if (scan) {
+    const pad = shared(new THREE.Mesh(scan.geometry, scan.material));
+    pad.position.y = -0.075;
+    g.add(pad);
+    if (held) g.rotation.x = -0.4;
+    return g;
+  }
   g.add(mesh(new RoundedBoxGeometry(0.09, 0.15, 0.035, 2, 0.008), plain(0x3a3e42, 0.45, 0.7), 0, 0, 0));
   for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) g.add(mesh(new THREE.BoxGeometry(0.018, 0.016, 0.008), plain(0xb8bcc0, 0.5, 0.6), -0.024 + c * 0.024, 0.035 - r * 0.024, 0.02));
   const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), new THREE.MeshStandardMaterial({ color: 0x6cff6a, emissive: 0x3cff4a, emissiveIntensity: 2 }));
@@ -1098,7 +1138,21 @@ export function buildCharge(kind: 'beancan' | 'satchel' | 'c4', lit: boolean): T
     g.add(s);
     spark = s;
   };
-  if (kind === 'beancan') {
+  const scan = model(`charge-${kind}`);
+  if (scan) {
+    g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
+    const box = scan.geometry.boundingBox!;
+    if (kind === 'c4') {
+      // A timer light on the front that blinks once it is armed.
+      const light = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a1a, emissiveIntensity: lit ? 1.5 : 0.4 });
+      g.add(mesh(new THREE.SphereGeometry(0.008, 8, 6), light, box.max.x * 0.6, box.max.y * 0.85, box.max.z));
+      led = light;
+    } else {
+      // A twist of fuse out of the top.
+      g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.06, 6), plain(0x3a2a1c, 1), 0.01, box.max.y + 0.025, 0));
+      if (lit) sparkAt(0.01, box.max.y + 0.055, 0);
+    }
+  } else if (kind === 'beancan') {
     g.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.12, 16), plain(0x9a9c9a, 0.4, 0.8), 0, 0.06, 0));
     g.add(mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.07, 16, 1, true), plain(0xb04a2a, 0.8), 0, 0.06, 0));
     g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6), plain(0x3a2a1c, 1), 0.01, 0.145, 0));

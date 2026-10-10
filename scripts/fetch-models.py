@@ -202,6 +202,17 @@ LANDMARK_PROPS = {
     # convert it with gltf-transform's metalRough() and drop the leftover specular extensions.
     'gear-backpack': ('dce182b7965546118df059f90df497dc', 1024),
     'gear-saddle': ('b1eda76f8a50480d917e43d69f72f57d', 1024),
+    # Base parts and props round the world: doors, the code lock's keypad, the three charges, the
+    # rain barrel, the warning signs round hot craters and the power poles along the road.
+    'door-wood': ('afed9756ba974d1395a336124ff326fd', 1024),
+    'door-metal': ('8d56d78187684f54a5c38319b43a5b1d', 1024),
+    'keypad': ('b722a6496ab344d78e74bf64be6c8eb8', 512),
+    'charge-beancan': ('566323fb276f4fa7ac2943b38bb4e98d', 512),
+    'charge-satchel': ('3316c1f3fc4e4f95adf05b1ee5478813', 512),
+    'charge-c4': ('617d754683114b6a8244ececbd03365e', 512),
+    'water-drum': ('1dcc9bd0f44f4e1892c5531ad03ae0d2', 512),
+    'rad-sign': ('9199df7113744de1b2b5aaf90910f48d', 512),
+    'power-pole': ('510d4e3fddfa44359d1f6595a00dcf8a', 1024),
 }
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.

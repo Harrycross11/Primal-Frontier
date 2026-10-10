@@ -574,6 +574,11 @@ export class World {
         chunk.position.set((rand() - 0.5) * (w + 4), 0.15, (rand() - 0.5) * (l + 4));
         chunk.rotation.set(rand() * 3, rand() * 3, rand() * 3);
       }
+    } else if (d.kind === 'pole' && model('power-pole')) {
+      const scan = model('power-pole')!;
+      solid(new THREE.Mesh(scan.geometry, scan.material), true);
+      g.rotation.z = (rand() - 0.5) * 0.1;
+      this.decorColliders.push({ min: [d.x - 0.2, d.y, d.z - 0.2], max: [d.x + 0.2, d.y + 8, d.z + 0.2] });
     } else if (d.kind === 'pole') {
       const pole = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 8, 8), this.materials.pole), true);
       pole.position.y = 4;

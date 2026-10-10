@@ -76,6 +76,19 @@ const FIT: Record<string, Fit> = {
   'sleeping-bag': { length: 1.9 },
   'loot-bag': { width: 0.9 },
   mushroom: { height: 0.12 },
+  // Doors are stretched to fit the doorway in props.ts; the wooden one's frame is left out, and
+  // the steel one, facing x in the file, is turned to face z like it.
+  'door-wood': { height: 2.27, drop: /DoorFrame/ },
+  'door-metal': { height: 2.27, turn: [0, Math.PI / 2, 0] },
+  keypad: { height: 0.15 },
+  'charge-beancan': { height: 0.13 },
+  'charge-satchel': { height: 0.3 },
+  // Lies flat in the file; stood on end with its keypad facing out from the wall.
+  'charge-c4': { height: 0.28, turn: [Math.PI / 2, 0, 0] },
+  // A rain barrel with its lid off.
+  'water-drum': { height: 0.9, drop: /Object_8/ },
+  'rad-sign': { height: 2.3 },
+  'power-pole': { height: 8 },
   // Trees, at the size of the ones they replace (node scale varies them 0.8-1.3).
   'tree-pine': { height: 9, foliage: true, ownAlpha: true },
   'tree-spruce': { height: 8, foliage: true, ownAlpha: true },
