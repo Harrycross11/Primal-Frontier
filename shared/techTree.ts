@@ -3,7 +3,7 @@
 // each step along a branch needs the one before it. What a survivor has learned stays through
 // death and is wiped with the world.
 
-import { ITEMS, recipeFor, type ItemId } from './items.ts';
+import { ITEMS, newStack, recipeFor, type ItemId, type Stack } from './items.ts';
 
 export interface TechBranch {
   level: 1 | 2 | 3;
@@ -67,4 +67,15 @@ export function learnBlock(item: ItemId, learned: ReadonlySet<ItemId>, bench: nu
   if (node.after && !learned.has(node.after)) return `Learn the ${ITEMS[node.after].name} first`;
   if (scrap < node.scrap) return `You need ${node.scrap} scrap to learn this`;
   return null;
+}
+
+/**
+ * A blueprint stack found in a crate: teaches one tech tree item from a workbench level drawn
+ * from `levels` (list a level twice to make it twice as likely).
+ */
+export function rollBlueprint(levels: readonly (1 | 2 | 3)[], rand: () => number): Stack {
+  const level = levels[Math.floor(rand() * levels.length)];
+  const pool = [...TECH.values()].filter((n) => n.level === level);
+  const node = pool[Math.floor(rand() * pool.length)];
+  return { ...newStack('blueprint'), teaches: node.item };
 }

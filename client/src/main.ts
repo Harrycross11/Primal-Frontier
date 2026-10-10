@@ -1078,7 +1078,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   function primary() {
     const item = held();
     if (heldGun()) return fire();
-    if (item && ITEMS[item].armour) return net.send({ t: 'use', slot: ui.active });
+    if (item && (ITEMS[item].armour || item === 'blueprint')) return net.send({ t: 'use', slot: ui.active });
     if (item === 'feedSack') {
       net.send({ t: 'use', slot: ui.active });
       return me.swing();

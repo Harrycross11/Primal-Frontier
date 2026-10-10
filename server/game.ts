@@ -1091,6 +1091,16 @@ export class Game {
     return [this.inventory(p), { to: id, msg: { t: 'learned', items: [...p.learned], item } }, notice(id, `Learned the ${ITEMS[item].name}`)];
   }
 
+  /** Reads the blueprint in a belt slot: learns what it teaches, free and anywhere, and uses it up. */
+  private study(p: Player, slot: number): Outgoing[] {
+    const item = p.slots[slot]?.teaches;
+    if (!item || !TECH.has(item)) return [];
+    if (p.learned.includes(item)) return [notice(p.id, `You already know how to make the ${ITEMS[item].name}`)];
+    p.slots[slot] = null;
+    p.learned.push(item);
+    return [this.inventory(p), { to: p.id, msg: { t: 'learned', items: [...p.learned], item } }, notice(p.id, `Learned the ${ITEMS[item].name}`)];
+  }
+
   cancelCraft(id: number, index: number): Outgoing[] {
     const p = this.alive(id);
     const job = p?.queue[index];
@@ -1640,6 +1650,7 @@ export class Game {
     // Armour in your hands is put on, swapping with whatever was worn there.
     const armour = stack ? ITEMS[stack.item].armour : undefined;
     if (armour) return this.moveItem(id, { c: 'me', i: slot }, { c: 'wear', i: ARMOUR_SLOTS.indexOf(armour.slot) });
+    if (stack?.item === 'blueprint') return this.study(p, slot);
     if (stack?.item === 'cookedMeat' || stack?.item === 'feedSack') {
       const fed = this.feed(p, slot, now, stack.item);
       if (fed) return fed;
