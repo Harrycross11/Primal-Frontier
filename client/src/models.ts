@@ -210,6 +210,8 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
     const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
     // Keep only what every part has, so the parts can be merged.
     for (const key of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(key)) geo.deleteAttribute(key);
+    // Untextured parts (a door's handles) come without UVs; give them blank ones to merge.
+    if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
     parts.push(geo);
     materials.push(mesh.material as THREE.MeshStandardMaterial);
   });
