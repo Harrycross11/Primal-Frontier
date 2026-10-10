@@ -50,6 +50,7 @@ import {
   LOOT_BAG_SECONDS,
   SMELTS,
   WORKBENCH_LEVEL,
+  burns,
   deployableBox,
   newDeployable,
   privilege,
@@ -97,7 +98,8 @@ import { EXPLOSIVES, PLANT_RANGE, POINT_BLANK, THROW_SPEED, blastFalloff, isExpl
 import { CROPS, PLANTER_OUTPUT_SLOTS, PLANTER_SEED_SLOTS, WILD_HEMP_SEED, growthAt, ripeness } from '../shared/farming.ts';
 import { BARREL_DRINK, RESOURCE_INFO, WRECK_LOOT, generateResources, type Material, type ResourceNode } from '../shared/world.ts';
 import { BIOMES, CORE_RADIUS, biomeAt, climateAt } from '../shared/biomes.ts';
-import { atLandmark, crateSpots, landmarks } from '../shared/landmarks.ts';
+import { atLandmark, crateSpots, landmarks, recyclerSpots } from '../shared/landmarks.ts';
+import { RECYCLER_INPUT, RECYCLER_OUTPUT, RECYCLE_SECONDS, recycleYield } from '../shared/recycling.ts';
 import { rollLoot } from '../shared/loot.ts';
 import {
   START_FUEL,
@@ -315,6 +317,8 @@ export class Game {
   private nextDeployableId = 1;
   private respawns: { id: number; at: number }[] = [];
   private furnaces = new Map<number, FurnaceTimers>();
+  /** Seconds each running recycler has worked on its current item. */
+  private recycling = new Map<number, number>();
   /** Seconds until each loot bag disappears. */
   private bagExpiry = new Map<number, number>();
   private lastTick = -1;
@@ -993,7 +997,7 @@ export class Game {
     const p = this.alive(id);
     const d = this.deployables.get(deployableId);
     if (!p || !d || CHARGE_KINDS.includes(d.kind) || d.kind === 'supplySignal') return [];
-    if (CRATE_KINDS.includes(d.kind)) return [notice(id, 'Press E to open it')];
+    if (CRATE_KINDS.includes(d.kind) || d.kind === 'recycler') return [notice(id, 'Press E to open it')];
     if ((now - p.lastGatherAt) / 1000 < GATHER_COOLDOWN) return [];
     if (!this.inReach(p, deployableBox(d))) return [notice(id, 'Too far away')];
     p.lastGatherAt = now;
@@ -1184,12 +1188,13 @@ export class Game {
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }, this.inventory(p)];
   }
 
-  /** Lights or puts out a furnace. */
+  /** Lights or puts out a furnace or campfire, or switches a recycler on or off. */
   furnace(id: number, deployableId: number, on: boolean): Outgoing[] {
     const p = this.alive(id);
     const d = this.deployables.get(deployableId);
-    if (!p || !d || d.kind !== 'furnace' || !this.container(p, d.id)) return [];
-    if (on && !d.slots[FURNACE_FUEL]) return [notice(id, 'Put some wood in first')];
+    if (!p || !d || !(burns(d.kind) || d.kind === 'recycler') || !this.container(p, d.id)) return [];
+    if (on && d.kind === 'recycler' && !RECYCLER_INPUT.some((i) => d.slots[i])) return [notice(id, 'Put something to recycle in the top row first')];
+    if (on && burns(d.kind) && !d.slots[FURNACE_FUEL]) return [notice(id, 'Put some wood in first')];
     d.on = !!on;
     return [{ to: 'all', msg: { t: 'deployable', id: d.id, d, by: id } }];
   }
@@ -1481,7 +1486,7 @@ export class Game {
       if (dist <= info.radius) out.push(...this.hurtVehicle(v, info.structure * share(dist), this.players.get(d.owner) ?? null, now));
     }
     for (const other of [...this.deployables.values()]) {
-      if (CHARGE_KINDS.includes(other.kind) || CRATE_KINDS.includes(other.kind) || other.kind === 'supplySignal') continue;
+      if (CHARGE_KINDS.includes(other.kind) || CRATE_KINDS.includes(other.kind) || other.kind === 'supplySignal' || other.kind === 'recycler') continue;
       const dist = distanceToBox(c, deployableBox(other));
       if (dist > info.radius) continue;
       other.hp -= info.structure * blastFalloff(dist, info.radius);
@@ -1977,7 +1982,7 @@ export class Game {
       if (!p.dead) out.push(...this.progress(p, 'minutes', dt / 60, now));
     }
     for (const d of this.deployables.values()) {
-      if ((d.kind === 'furnace' && d.on && this.tickFurnace(d, dt)) || (d.kind === 'planter' && this.tickPlanter(d, dt))) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
+      if ((burns(d.kind) && d.on && this.tickFurnace(d, dt)) || (d.kind === 'recycler' && d.on && this.tickRecycler(d, dt)) || (d.kind === 'planter' && this.tickPlanter(d, dt))) out.push({ to: 'all', msg: { t: 'deployable', id: d.id, d, by: 0 } });
     }
     for (const [id, fuse] of [...this.fuses]) {
       const d = this.deployables.get(id);
@@ -2003,6 +2008,14 @@ export class Game {
     const filled = new Set<string>();
     for (const d of this.deployables.values()) if (d.spot) filled.add(d.spot);
     const out: Outgoing[] = [];
+    // Recyclers stand at every landmark from the start, and come back if ever lost.
+    for (const s of recyclerSpots(this.seed)) {
+      if (filled.has(s.key)) continue;
+      const r = newDeployable(this.nextDeployableId++, 'recycler', s.x, s.y, s.z, s.rot, 0);
+      r.spot = s.key;
+      this.deployables.set(r.id, r);
+      out.push({ to: 'all', msg: { t: 'deployable', id: r.id, d: r, by: 0 } });
+    }
     for (const s of this.spots) {
       if (filled.has(s.key) || (this.crateDue.get(s.key) ?? 0) > now) continue;
       this.crateDue.delete(s.key);
@@ -2142,6 +2155,31 @@ export class Game {
       }
     });
     return changed;
+  }
+
+  /**
+   * Runs a recycler: every few seconds it breaks one item from its top row down into the bottom
+   * row, and switches itself off when the top row is empty or the bottom row is full. Returns
+   * true when anything changed.
+   */
+  private tickRecycler(d: Deployable, dt: number): boolean {
+    const t = (this.recycling.get(d.id) ?? 0) + dt;
+    this.recycling.set(d.id, t);
+    if (t < RECYCLE_SECONDS) return false;
+    this.recycling.set(d.id, 0);
+    const slot = RECYCLER_INPUT.find((i) => d.slots[i] && recycleYield(d.slots[i]!.item));
+    const yields = slot === undefined ? null : recycleYield(d.slots[slot]!.item)!;
+    const out = RECYCLER_OUTPUT.map((i) => (d.slots[i] ? { ...d.slots[i]! } : null));
+    if (slot === undefined || !yields || !yields.every(([item, n]) => addItem(out, item, n) === 0)) {
+      d.on = false;
+      return true;
+    }
+    RECYCLER_OUTPUT.forEach((i, n) => (d.slots[i] = out[n]));
+    const stack = d.slots[slot]!;
+    stack.count -= 1;
+    if (stack.count === 0) d.slots[slot] = null;
+    if (!RECYCLER_INPUT.some((i) => d.slots[i])) d.on = false;
+    return true;
   }
 
   /**

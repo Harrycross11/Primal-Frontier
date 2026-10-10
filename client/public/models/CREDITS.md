@@ -16,6 +16,15 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
 - stones: https://polyhaven.com/a/namaqualand_stones_01
 - stump: https://polyhaven.com/a/tree_stump_01
+- furnace: https://polyhaven.com/a/barrel_stove
+- campfire: https://polyhaven.com/a/stone_fire_pit
+- recycler: https://polyhaven.com/a/old_military_compressor
+- storage-box: https://polyhaven.com/a/wooden_crate_01
+- cupboard: https://polyhaven.com/a/drawer_cabinet
+- workbench-1: https://polyhaven.com/a/WoodenTable_03
+- workbench-2: https://polyhaven.com/a/tool_cart
+- workbench-3: https://polyhaven.com/a/industrial_storage_cart
+- toolchest: https://polyhaven.com/a/metal_tool_chest
 - tree-quiver: https://polyhaven.com/a/quiver_tree_01
 - tree-dead-quiver: https://polyhaven.com/a/dead_quiver_trunk
 - grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
@@ -50,6 +59,13 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - gun-semiRifle: "SKS Semi Automatic Rifle" by MaX3Dd (https://sketchfab.com/3d-models/sks-semi-automatic-rifle-ada722d492344cba8633be150eea7e85), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-corn: "Maize Corn Plant" by gilles.schaeck (https://sketchfab.com/3d-models/maize-corn-plant-5fd3b104d8104519b061469c365d4974), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-hemp: "Cannabis Plant" by 3D Crackhouse (https://sketchfab.com/3d-models/cannabis-plant-79fe78fd6c6a426b8584115e772a5818), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- mushroom: "Tricholoma murrillianum mushroom" by JevinJones (https://sketchfab.com/3d-models/tricholoma-murrillianum-mushroom-4949f967e01c480388c5b32c48598c22), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- part-gears: "Rusty_Gears📷" by ayumi ikeda (https://sketchfab.com/3d-models/rusty-gears-10e4ab22490f470aaf91498199ec17d9), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- part-pipe: "Rusty cast iron pipe" by Dr_Kryzel (https://sketchfab.com/3d-models/rusty-cast-iron-pipe-a6993701e19240ed853a07a09e0a19f1), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- part-rope: "Coil Of Rope | Моток верёвки" by Freede (https://sketchfab.com/3d-models/coil-of-rope-25fc28346ef44f37bf212486fd905080), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- part-sheet: "Rusted Sheet Metal" by George Hager (https://sketchfab.com/3d-models/rusted-sheet-metal-4fa58a383f494d7db337510d1c1bd5c8), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- sleeping-bag: "Sleeping bag" by Tactical_Beard (https://sketchfab.com/3d-models/sleeping-bag-8098c046310445b6b15c0f1466509e35), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- loot-bag: "Military Duffel bag" by Sousinho (https://sketchfab.com/3d-models/military-duffel-bag-d69478f0c5334e189e98f99e84bbe3e6), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tree-pine: "Pine Tree" by evolveduk (https://sketchfab.com/3d-models/pine-tree-d45218a3fab349e5b1de040f29e7b6f9), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tree-spruce: "Spruce" by evolveduk (https://sketchfab.com/3d-models/spruce-a50a5df3164246a5af97992cec33a143), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tree-dead-old: "Old tree" by evolveduk (https://sketchfab.com/3d-models/old-tree-3cb4d59eb4844dc4802480e9ee53785e), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized

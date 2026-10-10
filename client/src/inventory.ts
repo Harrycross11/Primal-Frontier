@@ -3,7 +3,7 @@
 // between slots, or by right-clicking to send a stack to the other side.
 
 import { CROPS, PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
-import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, WORKBENCH_LEVEL, slotAccepts, type Deployable } from '../../shared/deployables.ts';
+import { DEPLOYABLE_INFO, FURNACE_FUEL, FURNACE_ORE_SLOTS, WORKBENCH_LEVEL, burns, slotAccepts, type Deployable } from '../../shared/deployables.ts';
 import {
   ARMOUR_SLOTS,
   BELT_SIZE,
@@ -198,26 +198,34 @@ export class InventoryUi {
     grid.innerHTML = '';
     d.slots.forEach((s, i) => {
       const el = this.slotElement({ c: d.id, i }, s, true);
-      const label = d.kind === 'furnace' ? FURNACE_LABELS[i] : d.kind === 'planter' ? PLANTER_LABELS[i] : undefined;
+      const label = burns(d.kind) ? FURNACE_LABELS[i] : d.kind === 'planter' ? PLANTER_LABELS[i] : undefined;
       if (label) {
         el.classList.add('label-slot');
         el.dataset.label = label;
       }
       grid.appendChild(el);
     });
-    grid.classList.toggle('furnace-row', d.kind === 'furnace');
-    $('furnace-controls').hidden = d.kind !== 'furnace' && d.kind !== 'planter';
-    $('furnace-toggle').hidden = d.kind !== 'furnace';
+    grid.classList.toggle('furnace-row', burns(d.kind));
+    $('furnace-controls').hidden = !burns(d.kind) && d.kind !== 'planter' && d.kind !== 'recycler';
+    $('furnace-toggle').hidden = !burns(d.kind) && d.kind !== 'recycler';
+    if (d.kind === 'recycler') {
+      $('furnace-toggle').textContent = d.on ? 'Switch off' : 'Switch on';
+      $('furnace-status').textContent = d.on
+        ? 'Recycling, one item every few seconds.'
+        : 'Put salvage parts, or guns, tools and gear you can craft, in the top row, then switch it on.';
+    }
     if (d.kind === 'planter') $('furnace-status').textContent = planterStatus(d);
-    if (d.kind === 'furnace') {
+    if (burns(d.kind)) {
       $('furnace-toggle').textContent = d.on ? 'Put out' : 'Light';
       const fuel = d.slots[FURNACE_FUEL]?.count ?? 0;
       const ore = FURNACE_ORE_SLOTS.reduce((n, i) => n + (d.slots[i]?.count ?? 0), 0);
       $('furnace-status').textContent = d.on
         ? ore > 0
-          ? `Smelting and cooking: ${ore} left, ${fuel} wood left`
+          ? `${d.kind === 'campfire' ? 'Cooking' : 'Smelting and cooking'}: ${ore} left, ${fuel} wood left`
           : `Burning wood into charcoal (${fuel} wood left)`
-        : 'Add wood as fuel and metal, sulfur or high quality ore (or raw meat to cook), then light it.';
+        : d.kind === 'campfire'
+          ? 'Add wood as fuel and raw meat to cook, then light it.'
+          : 'Add wood as fuel and metal, sulfur or high quality ore (or raw meat to cook), then light it.';
     }
   }
 

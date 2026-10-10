@@ -23,6 +23,11 @@ export type ItemId =
   // Tools
   | 'rock'
   | 'buildingPlan'
+  // Salvage parts, for the recycler.
+  | 'gears'
+  | 'metalPipe'
+  | 'rope'
+  | 'sheetMetal'
   /** Found in crates: teaches the item in its stack's `teaches` (see shared/techTree.ts). */
   | 'blueprint'
   | 'stoneHatchet'
@@ -34,6 +39,7 @@ export type ItemId =
   | 'workbench2'
   | 'workbench3'
   | 'furnace'
+  | 'campfire'
   | 'storageBox'
   | 'toolCupboard'
   | 'sleepingBag'
@@ -234,6 +240,10 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   charcoal: res('Charcoal', 'Left over when a furnace burns wood.'),
   gunpowder: res('Gunpowder', 'Made from charcoal and sulfur. Every bullet needs some.'),
   cloth: res('Cloth', 'Picked from hemp plants.'),
+  gears: { name: 'Gears', kind: 'resource', stack: 20, description: 'Rusty gears out of old machines. Recycle them for scrap and metal fragments.' },
+  metalPipe: { name: 'Metal Pipe', kind: 'resource', stack: 20, description: 'A length of cast iron pipe. Recycle it for scrap and high quality metal.' },
+  rope: { name: 'Rope', kind: 'resource', stack: 20, description: 'A coil of old rope. Recycle it for cloth.' },
+  sheetMetal: { name: 'Sheet Metal', kind: 'resource', stack: 20, description: 'A rusted metal sheet. Recycle it for lots of metal fragments.' },
   lowGradeFuel: { name: 'Low Grade Fuel', kind: 'resource', stack: 500, description: 'Rough fuel cooked up from charcoal and rags. Hold it and left click a car to fill its tank.' },
   rock: {
     name: 'Rock',
@@ -281,6 +291,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   workbench2: { name: 'Workbench Level 2', kind: 'deployable', stack: 1, description: 'Unlocks pistols, SMGs, the pump shotgun and the semi-auto rifle.' },
   workbench3: { name: 'Workbench Level 3', kind: 'deployable', stack: 1, description: 'Unlocks the assault rifles, sniper rifles and the M249.' },
   furnace: { name: 'Furnace', kind: 'deployable', stack: 1, description: 'Burns wood to smelt metal, sulfur and high quality ore.' },
+  campfire: { name: 'Campfire', kind: 'deployable', stack: 1, description: 'A ring of stones round a fire. Burns wood to cook raw meat, and lights up the night.' },
   storageBox: { name: 'Storage Box', kind: 'deployable', stack: 1, description: 'Holds 12 stacks of items.' },
   toolCupboard: {
     name: 'Tool Cupboard',
@@ -599,6 +610,7 @@ export const RECIPES: Recipe[] = [
 
   { item: 'buildingPlan', count: 1, cost: { wood: 20 }, time: 2, category: 'Construction' },
   { item: 'storageBox', count: 1, cost: { wood: 100 }, time: 4, category: 'Construction' },
+  { item: 'campfire', count: 1, cost: { wood: 100, stone: 20 }, time: 3, category: 'Construction' },
   { item: 'furnace', count: 1, cost: { stone: 150, wood: 50, cloth: 10 }, time: 6, category: 'Construction' },
   { item: 'workbench', count: 1, cost: { wood: 250, metal: 50, scrap: 50 }, time: 10, category: 'Construction' },
   { item: 'toolCupboard', count: 1, cost: { wood: 300 }, time: 6, category: 'Construction' },
