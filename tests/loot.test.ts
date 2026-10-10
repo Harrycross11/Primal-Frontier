@@ -7,6 +7,8 @@ import { countItem, type ItemId } from '../shared/items.ts';
 import { LANDMARKS, crateSpots, landmarks } from '../shared/landmarks.ts';
 import { BLUEPRINTS, LOOT, rollLoot } from '../shared/loot.ts';
 import { TECH } from '../shared/techTree.ts';
+import { RECYCLER_INPUT, RECYCLER_OUTPUT, recycleYield } from '../shared/recycling.ts';
+const LANDMARKS_COUNT = BIOME_IDS.length;
 import { SITE_RADIUS, landmarkSites, mulberry32, terrainHeight } from '../shared/terrain.ts';
 
 const SEED = 1234;
@@ -33,7 +35,7 @@ function run(game: Game, from: number, seconds: number, out: Outgoing[] = []): n
   return t;
 }
 
-const crates = (game: Game) => [...game.deployables.values()].filter((d) => d.spot);
+const crates = (game: Game) => [...game.deployables.values()].filter((d) => d.spot && d.kind !== 'recycler');
 
 test('every land has a landmark on level ground, inside that land', () => {
   for (const seed of [SEED, 1, 42, 2024, 31337]) {
@@ -193,4 +195,24 @@ test('blueprints turn up in crates, better ones in better crates', () => {
     assert.ok(found > 400 * BLUEPRINTS[kind].chance * 0.7, `${kind} holds blueprints`);
     assert.deepEqual([...levels].sort(), [...new Set(BLUEPRINTS[kind].levels)].sort(), `${kind} blueprints come from its levels`);
   }
+});
+
+test('every landmark has a recycler that breaks salvage down into resources', () => {
+  const game = new Game(SEED);
+  game.wildlife = false;
+  game.tick(0);
+  const recyclers = [...game.deployables.values()].filter((d) => d.kind === 'recycler');
+  assert.equal(recyclers.length, LANDMARKS_COUNT);
+  const r = recyclers[0];
+  r.slots[RECYCLER_INPUT[0]] = { item: 'gears', count: 2 };
+  r.slots[RECYCLER_INPUT[1]] = { item: 'revolver', count: 1, hp: 100, ammo: 0 };
+  r.on = true;
+  let t = 0;
+  for (let n = 0; n < 80; n++) game.tick((t += 250));
+  const got = (item: ItemId) => RECYCLER_OUTPUT.reduce((sum, i) => sum + (r.slots[i]?.item === item ? r.slots[i]!.count : 0), 0);
+  assert.equal(got('scrap'), 20 + recycleYield('revolver')!.find(([i]) => i === 'scrap')![1]);
+  assert.equal(got('metal'), 26 + (recycleYield('revolver')!.find(([i]) => i === 'metal')?.[1] ?? 0));
+  assert.equal(r.on, false, 'switches off when the top row is empty');
+  assert.ok(!r.slots.slice(0, 6).some(Boolean));
+  assert.equal(recycleYield('wood'), null, 'raw resources are not taken');
 });

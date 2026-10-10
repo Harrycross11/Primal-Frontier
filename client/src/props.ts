@@ -223,6 +223,17 @@ function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | un
 /** A clump of tall hemp stalks with narrow leaves. */
 export function buildHemp(rand: () => number): THREE.Group {
   const g = new THREE.Group();
+  // The scanned hemp plant, if it loaded, stood on its stem and a little smaller in the wild.
+  const scan = model('crop-hemp');
+  if (scan) {
+    const plant = new THREE.Mesh(scan.geometry, scan.material);
+    const [x, z] = stemOf(scan.geometry);
+    plant.position.set(-x, 0, -z);
+    const root = new THREE.Group().add(plant);
+    root.rotation.y = rand() * Math.PI * 2;
+    root.scale.setScalar(0.65 + rand() * 0.25);
+    return g.add(root);
+  }
   const stalkMat = plain(0x6d7a3a);
   const leafMat = mat('hemp-leaf', () => new THREE.MeshStandardMaterial({ color: 0x7f8f3a, roughness: 0.85, side: THREE.DoubleSide }));
   for (let s = 0; s < 5; s++) {
@@ -361,6 +372,22 @@ export function buildCrop(seed: ItemId, rand: () => number): THREE.Group {
 
 /** A clump of pale wasteland mushrooms with brown, speckled caps. */
 export function buildMushrooms(rand: () => number): THREE.Group {
+  // Scanned mushrooms, if they loaded: a few of different sizes leaning every way.
+  const scan = model('mushroom');
+  if (scan) {
+    const g = new THREE.Group();
+    const n = 3 + Math.floor(rand() * 4);
+    for (let k = 0; k < n; k++) {
+      const m = new THREE.Mesh(scan.geometry, scan.material);
+      const a = rand() * Math.PI * 2;
+      const r = k === 0 ? 0 : 0.06 + rand() * 0.16;
+      m.position.set(Math.cos(a) * r, -0.005, Math.sin(a) * r);
+      m.rotation.set((rand() - 0.5) * 0.3, rand() * Math.PI * 2, (rand() - 0.5) * 0.3);
+      m.scale.setScalar(k === 0 ? 1.2 : 0.5 + rand() * 0.6);
+      g.add(m);
+    }
+    return g;
+  }
   const g = new THREE.Group();
   const stemMat = plain(0xd8cdb4, 0.9);
   const capMat = mat('mushroom-cap', () => new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 0.6 }));
@@ -463,10 +490,102 @@ export function buildRadSign(): THREE.Group {
   return g;
 }
 
+/** The scanned model each of these deployables is drawn with, if it loaded (see models.ts). */
+const SCANNED_DEPLOYABLES: Partial<Record<DeployableKind, string>> = {
+  workbench: 'workbench-1',
+  workbench2: 'workbench-2',
+  workbench3: 'workbench-3',
+  furnace: 'furnace',
+  campfire: 'campfire',
+  recycler: 'recycler',
+  storageBox: 'storage-box',
+  toolCupboard: 'cupboard',
+  sleepingBag: 'sleeping-bag',
+  lootBag: 'loot-bag',
+};
+
+function scannedDeployable(kind: DeployableKind, g: THREE.Group): THREE.Group | null {
+  const name = SCANNED_DEPLOYABLES[kind];
+  const scan = name ? model(name) : undefined;
+  if (!scan) return null;
+  g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
+  const top = scan.geometry.boundingBox!.max.y;
+  if (kind === 'workbench3') {
+    // A red tool chest on the workshop cart.
+    const chest = model('toolchest');
+    if (chest) {
+      const c = shared(new THREE.Mesh(chest.geometry, chest.material));
+      c.position.set(-0.35, top - 0.01, -0.12);
+      c.rotation.y = 0.12;
+      g.add(c);
+    }
+  }
+  if (kind === 'campfire') {
+    // Three short scanned logs laid across each other in the ring, coals under them, and
+    // flames that show while it burns.
+    const log = model('log');
+    if (log) {
+      for (let n = 0; n < 3; n++) {
+        const piece = shared(new THREE.Mesh(log.geometry, log.material));
+        piece.scale.setScalar(0.2);
+        piece.position.set(0, 0.04 + n * 0.05, 0);
+        piece.rotation.set(0.12, (n / 3) * Math.PI, 0);
+        g.add(piece);
+      }
+    }
+    const coalMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, emissive: 0x000000, roughness: 1 });
+    g.add(mesh(new THREE.CircleGeometry(0.32, 18).rotateX(-Math.PI / 2), coalMat, 0, 0.03, 0));
+    const flames = new THREE.Group();
+    flames.position.y = 0.06;
+    const fire = (r: number, h: number, color: number, opacity: number, x: number, z: number) => {
+      const m = new THREE.Mesh(
+        new THREE.ConeGeometry(r, h, 10, 1, true).translate(0, h / 2, 0),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+      );
+      m.position.set(x, 0, z);
+      m.userData.noAO = true;
+      flames.add(m);
+    };
+    for (const [x, z] of [[0, 0], [0.09, 0.05], [-0.08, 0.06], [0.02, -0.09]]) {
+      const big = x === 0 && z === 0;
+      fire(big ? 0.16 : 0.09, big ? 0.62 : 0.38, 0xff6a1a, 0.5, x, z);
+      fire(big ? 0.09 : 0.05, big ? 0.4 : 0.24, 0xffd27a, 0.75, x, z);
+    }
+    flames.visible = false;
+    g.add(flames);
+    const light = new THREE.PointLight(0xff8a3a, 0, 9, 1.5);
+    light.position.set(0, 0.7, 0);
+    g.add(light);
+    g.userData.setOn = (on: boolean) => {
+      flames.visible = on;
+      coalMat.emissive.set(on ? 0xff5a14 : 0x000000);
+      coalMat.emissiveIntensity = on ? 2 : 0;
+      light.intensity = on ? 8 : 0;
+    };
+  }
+  if (kind === 'furnace') {
+    // Coals glowing in the open top of the barrel, and the light they throw.
+    const fireMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, emissive: 0x000000, roughness: 1 });
+    const r = scan.geometry.boundingBox!.max.x * 0.88;
+    g.add(mesh(new THREE.CircleGeometry(r, 20).rotateX(-Math.PI / 2), fireMat, 0, top - 0.12, 0));
+    const light = new THREE.PointLight(0xff8a3a, 0, 6, 1.5);
+    light.position.set(0, top + 0.4, 0);
+    g.add(light);
+    g.userData.setOn = (on: boolean) => {
+      fireMat.emissive.set(on ? 0xff6a1a : 0x000000);
+      fireMat.emissiveIntensity = on ? 2.2 : 0;
+      light.intensity = on ? 6 : 0;
+    };
+  }
+  return g;
+}
+
 /** The object for a deployable, sitting on y = 0, facing +z. Furnaces get a fire that can be lit. */
 export function buildDeployable(kind: DeployableKind): THREE.Group {
   const g = new THREE.Group();
   const [w, h, l] = DEPLOYABLE_INFO[kind].size;
+  const scanned = scannedDeployable(kind, g);
+  if (scanned) return scanned;
   if (kind === 'workbench' || kind === 'workbench2' || kind === 'workbench3') {
     const level = kind === 'workbench' ? 1 : kind === 'workbench2' ? 2 : 3;
     const topMat = level === 1 ? plankMat() : level === 2 ? rustMat() : metalMat();

@@ -373,6 +373,30 @@ test('a furnace burns wood to charcoal and smelts ore into metal fragments', () 
   assert.equal(have(game, id, 'metal'), 5);
 });
 
+test('a campfire cooks raw meat but will not smelt ore', () => {
+  const { game, id } = setup();
+  standAt(game, id, 4, 4);
+  give(game, id, 'campfire', 1);
+  give(game, id, 'wood', 20);
+  give(game, id, 'metalOre', 5);
+  give(game, id, 'rawMeat', 2);
+  const p = game.players.get(id)!;
+  game.deploy(id, p.slots.findIndex((s) => s?.item === 'campfire'), 6, terrainHeight(SEED, 6, 4), 4, 0);
+  const fire = [...game.deployables.values()][0];
+  assert.equal(fire.kind, 'campfire');
+  const at = (item: ItemId) => p.slots.findIndex((s) => s?.item === item);
+  game.moveItem(id, { c: 'me', i: at('metalOre') }, { c: fire.id, i: FURNACE_ORE_SLOTS[0] });
+  assert.equal(fire.slots[FURNACE_ORE_SLOTS[0]], null, 'not hot enough to smelt');
+  game.moveItem(id, { c: 'me', i: at('wood') }, { c: fire.id, i: FURNACE_FUEL }, 10);
+  game.moveItem(id, { c: 'me', i: at('rawMeat') }, { c: fire.id, i: FURNACE_ORE_SLOTS[0] });
+  game.furnace(id, fire.id, true);
+  assert.equal(fire.on, true);
+  let t = 0;
+  game.tick(t);
+  for (let n = 0; n < 60; n++) game.tick((t += 250));
+  assert.ok(FURNACE_OUTPUT_SLOTS.some((i) => fire.slots[i]?.item === 'cookedMeat' && fire.slots[i]!.count === 2), 'meat cooked');
+});
+
 test('a planter grows seeds into crops and fresh seeds, at its land\'s pace', () => {
   const { game, id } = setup();
   standAt(game, id, 4, 4);

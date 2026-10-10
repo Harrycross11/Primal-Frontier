@@ -41,6 +41,19 @@ MODELS = {
     'dead-branch': ('dead_quiver_branch_01', 1500),
     'stones': ('namaqualand_stones_01', 1500),
     'stump': ('tree_stump_01', 2000),
+    # Things players set down: a barrel stove as the furnace, a chest as the storage box, a
+    # drawer cabinet as the tool cupboard, and a bench, a tool cart and a workshop cart (with a
+    # tool chest on it) as the three workbenches.
+    'furnace': ('barrel_stove', 4000),
+    'campfire': ('stone_fire_pit', 3000),
+    # An old military compressor, standing in for the recycler at each landmark.
+    'recycler': ('old_military_compressor', 9000),
+    'storage-box': ('wooden_crate_01', 3000),
+    'cupboard': ('drawer_cabinet', 4000),
+    'workbench-1': ('WoodenTable_03', 3000),
+    'workbench-2': ('tool_cart', 4000),
+    'workbench-3': ('industrial_storage_cart', 4000),
+    'toolchest': ('metal_tool_chest', 3000),
     # A quiver tree and a dead quiver trunk, among the dry lands' dead trees.
     'tree-quiver': ('quiver_tree_01', 6000),
     'tree-dead-quiver': ('dead_quiver_trunk', 4000),
@@ -106,6 +119,16 @@ PROPS = {
     # Crops grown in the planter box.
     'crop-corn': '5fd3b104d8104519b061469c365d4974',
     'crop-hemp': '79fe78fd6c6a426b8584115e772a5818',
+    # A photo-scanned wild mushroom, clustered into the patches you pick.
+    'mushroom': '4949f967e01c480388c5b32c48598c22',
+    # Salvage parts found in crates and wrecks, to feed the recycler.
+    'part-gears': '10e4ab22490f470aaf91498199ec17d9',
+    'part-pipe': 'a6993701e19240ed853a07a09e0a19f1',
+    'part-rope': '25fc28346ef44f37bf212486fd905080',
+    'part-sheet': '4fa58a383f494d7db337510d1c1bd5c8',
+    # An unzipped quilted sleeping bag, and the duffel bag a survivor drops when they die.
+    'sleeping-bag': '8098c046310445b6b15c0f1466509e35',
+    'loot-bag': 'd69478f0c5334e189e98f99e84bbe3e6',
     # Trees: a pine and a spruce for Deadwood's groves, an old dead tree and a dead pine elsewhere.
     'tree-pine': 'd45218a3fab349e5b1de040f29e7b6f9',
     'tree-spruce': 'a50a5df3164246a5af97992cec33a143',

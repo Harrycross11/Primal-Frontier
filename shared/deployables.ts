@@ -4,6 +4,7 @@
 
 import type { Box } from './building.ts';
 import { CROPS, PLANTER_SEED_SLOTS } from './farming.ts';
+import { RECYCLER_INPUT, recycleYield } from './recycling.ts';
 import { INVENTORY_SIZE, emptySlots, type ItemId, type Slots } from './items.ts';
 
 export type DeployableKind =
@@ -11,11 +12,14 @@ export type DeployableKind =
   | 'workbench2'
   | 'workbench3'
   | 'furnace'
+  | 'campfire'
   | 'storageBox'
   | 'toolCupboard'
   | 'sleepingBag'
   | 'planter'
   | 'lootBag'
+  /** One at every landmark, belonging to nobody: breaks salvage down into resources. */
+  | 'recycler'
   // Loot crates at the landmarks, and the crate the supply plane drops.
   | 'crate'
   | 'militaryCrate'
@@ -27,7 +31,7 @@ export type DeployableKind =
   | 'satchel'
   | 'c4';
 /** The kinds that come from an item of the same name and can be placed. */
-export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'storageBox', 'toolCupboard', 'sleepingBag', 'planter'];
+export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'workbench3', 'furnace', 'campfire', 'storageBox', 'toolCupboard', 'sleepingBag', 'planter'];
 /** Lit explosives waiting to go off. */
 export const CHARGE_KINDS: DeployableKind[] = ['beancan', 'satchel', 'c4'];
 /** Crates full of loot that nobody owns: you can only take from them, and they can't be broken. */
@@ -61,15 +65,17 @@ export interface Deployable {
 }
 
 export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [number, number, number]; hp: number; slots: number }> = {
-  workbench: { name: 'Workbench Level 1', size: [1.7, 0.95, 0.85], hp: 300, slots: 0 },
-  workbench2: { name: 'Workbench Level 2', size: [1.8, 1.0, 0.9], hp: 500, slots: 0 },
-  workbench3: { name: 'Workbench Level 3', size: [2.0, 1.05, 1.0], hp: 800, slots: 0 },
-  furnace: { name: 'Furnace', size: [1.0, 1.7, 1.0], hp: 400, slots: 6 },
-  storageBox: { name: 'Storage Box', size: [1.0, 0.62, 0.62], hp: 150, slots: 12 },
-  toolCupboard: { name: 'Tool Cupboard', size: [0.9, 1.75, 0.55], hp: 600, slots: 0 },
+  workbench: { name: 'Workbench Level 1', size: [1.6, 1.0, 0.7], hp: 300, slots: 0 },
+  workbench2: { name: 'Workbench Level 2', size: [1.4, 1.06, 0.83], hp: 500, slots: 0 },
+  workbench3: { name: 'Workbench Level 3', size: [1.7, 1.5, 1.16], hp: 800, slots: 0 },
+  furnace: { name: 'Furnace', size: [0.95, 1.38, 0.95], hp: 400, slots: 6 },
+  campfire: { name: 'Campfire', size: [1.1, 0.3, 1.1], hp: 150, slots: 6 },
+  storageBox: { name: 'Storage Box', size: [1.0, 0.45, 0.5], hp: 150, slots: 12 },
+  toolCupboard: { name: 'Tool Cupboard', size: [1.06, 1.75, 0.46], hp: 600, slots: 0 },
   sleepingBag: { name: 'Sleeping Bag', size: [0.8, 0.14, 1.9], hp: 100, slots: 0 },
   planter: { name: 'Planter Box', size: [1.7, 0.59, 1.25], hp: 200, slots: 9 },
-  lootBag: { name: 'Loot Bag', size: [0.7, 0.45, 0.7], hp: 40, slots: INVENTORY_SIZE },
+  recycler: { name: 'Recycler', size: [0.8, 1.5, 2.1], hp: 1e9, slots: 12 },
+  lootBag: { name: 'Loot Bag', size: [0.9, 0.3, 0.36], hp: 40, slots: INVENTORY_SIZE },
   crate: { name: 'Wooden Crate', size: [0.49, 0.28, 1.5], hp: 1e9, slots: 12 },
   militaryCrate: { name: 'Military Crate', size: [0.71, 0.77, 1.3], hp: 1e9, slots: 12 },
   supplyDrop: { name: 'Supply Drop', size: [1.4, 1.37, 1.4], hp: 1e9, slots: 18 },
@@ -98,6 +104,11 @@ export function privilege(deployables: Iterable<Deployable>, x: number, z: numbe
   return result;
 }
 
+
+/** Deployables that burn wood to turn what is in them into something else: furnaces and campfires. */
+export function burns(kind: DeployableKind): boolean {
+  return kind === 'furnace' || kind === 'campfire';
+}
 
 export const WORKBENCH_LEVEL: Partial<Record<DeployableKind, 1 | 2 | 3>> = { workbench: 1, workbench2: 2, workbench3: 3 };
 
@@ -140,8 +151,10 @@ export function deployableBox(d: Pick<Deployable, 'kind' | 'x' | 'y' | 'z' | 'ro
 export function slotAccepts(d: Deployable, slot: number, item: ItemId): boolean {
   if (d.kind === 'lootBag' || CRATE_KINDS.includes(d.kind)) return false;
   if (d.kind === 'planter') return PLANTER_SEED_SLOTS.includes(slot) && CROPS[item] !== undefined;
-  if (d.kind !== 'furnace') return true;
+  if (d.kind === 'recycler') return RECYCLER_INPUT.includes(slot) && recycleYield(item) !== null;
+  if (!burns(d.kind)) return true;
   if (slot === FURNACE_FUEL) return item === 'wood';
-  if (FURNACE_ORE_SLOTS.includes(slot)) return SMELTS[item] !== undefined;
+  // A campfire only cooks; it isn't hot enough to smelt.
+  if (FURNACE_ORE_SLOTS.includes(slot)) return SMELTS[item] !== undefined && (d.kind === 'furnace' || item === 'rawMeat');
   return false;
 }

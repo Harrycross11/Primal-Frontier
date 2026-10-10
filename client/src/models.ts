@@ -59,6 +59,23 @@ const FIT: Record<string, Fit> = {
   'dead-branch': { width: 0.9, turn: [Math.PI / 2, 0, 0] },
   stones: { width: 0.3, set: true },
   stump: { width: 1.1 },
+  // Deployables, each at the width of its DEPLOYABLE_INFO size.
+  furnace: { width: 0.95 },
+  campfire: { width: 1.1 },
+  recycler: { height: 1.5 },
+  'part-gears': { width: 0.25 },
+  'part-pipe': { length: 0.5 },
+  'part-rope': { width: 0.3 },
+  'part-sheet': { width: 0.6 },
+  'storage-box': { width: 1.0 },
+  cupboard: { height: 1.75 },
+  'workbench-1': { width: 1.6 },
+  'workbench-2': { width: 1.4 },
+  'workbench-3': { width: 1.7 },
+  toolchest: { width: 0.75 },
+  'sleeping-bag': { length: 1.9 },
+  'loot-bag': { width: 0.9 },
+  mushroom: { height: 0.12 },
   // Trees, at the size of the ones they replace (node scale varies them 0.8-1.3).
   'tree-pine': { height: 9, foliage: true, ownAlpha: true },
   'tree-spruce': { height: 8, foliage: true, ownAlpha: true },
@@ -305,7 +322,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 }
 
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
-const isLate = (name: string) => /^(gun-|tool-|crop-|food-|planter$)/.test(name);
+const isLate = (name: string) => /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
 
 /**
  * Loads the models the menu and the world need; resolves even if some fail, so a missing file

@@ -50,6 +50,9 @@ OTHERS = {
     'amb-crickets': ('crickets_1.mp3', 'https://opengameart.org/content/crickets-ambient-noise-loopable', 'Wolfgang_', None, True),
     'amb-birds': ('birds-isaiah658_0.ogg', 'https://opengameart.org/content/ambient-bird-sounds', 'isaiah658', None, True),
     'amb-creak': ('tree_creak_0.ogg', 'https://opengameart.org/content/tree-creaking', 'AntumDeluge', 3.6, False),
+    # Played by lit fires and running recyclers. The machine is one loop out of a pack (pack:member).
+    'amb-fire': ('fire.wav', 'https://opengameart.org/content/fireplace-sound-loop', 'pagdev', None, True),
+    'amb-machine': ('sfx_loops.zip:machine_11.ogg', 'https://opengameart.org/content/30-cc0-sfx-loops', 'rubberduck', None, True),
 }
 
 
@@ -124,8 +127,16 @@ def main():
             credits.append(f'- step-{kind}-*.mp3: {origin}, from "{page.rsplit("/", 1)[1]}" by {author} ({page}), {licence}')
             print('saved', kind, len(files))
         for name, (file, page, author, keep, loops) in OTHERS.items():
-            src = os.path.join(tmp, file)
-            get(OGA + file, src)
+            if ':' in file:
+                pack, member = file.split(':')
+                archive = os.path.join(tmp, pack)
+                if not os.path.exists(archive):
+                    get(OGA + pack, archive)
+                    unpack(archive, os.path.join(tmp, pack + '.d'))
+                src = os.path.join(tmp, pack + '.d', member)
+            else:
+                src = os.path.join(tmp, file)
+                get(OGA + file, src)
             x = decode(src)
             if keep:
                 x = x[: int(keep * RATE)]

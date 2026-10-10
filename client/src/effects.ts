@@ -473,7 +473,7 @@ export class Effects {
    * `land` is how much each land claims the spot (as biomeWeights), `light` the daylight from 0
    * (night) to 1, and `wreck` the nearest wreck if one is in earshot.
    */
-  surroundings(land: readonly number[], light: number, wreck: THREE.Vector3 | null) {
+  surroundings(land: readonly number[], light: number, wreck: THREE.Vector3 | null, fire = Infinity, machine = Infinity) {
     const a = this.context();
     if (!a) return;
     const { ctx } = a;
@@ -487,6 +487,10 @@ export class Effects {
     const birds = this.bed('amb-birds');
     birds?.gain.setTargetAtTime(0.09 * day * calm * (forest + ash * 0.12 + mesa * 0.15), now, 2);
     this.wind?.gain.setTargetAtTime(0.05 * (1 + frost * 0.7 + flats * 0.35 + mesa * 0.3 - forest * 0.25), now, 3);
+    // The nearest lit fire crackling, and the nearest running recycler grinding, by distance.
+    const fade = (d: number, range: number) => Math.max(0, 1 - d / range) ** 2;
+    this.bed('amb-fire')?.gain.setTargetAtTime(0.3 * fade(fire, 14), now, 0.6);
+    this.bed('amb-machine')?.gain.setTargetAtTime(0.22 * fade(machine, 16), now, 0.6);
 
     if (now < this.nextCreak || !this.listener) return;
     this.nextCreak = now + 5 + Math.random() * 9;

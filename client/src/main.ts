@@ -18,7 +18,7 @@ import {
   type PieceKind,
   PIECE_KINDS,
 } from '../../shared/building.ts';
-import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, burns, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
 import { BIOMES, biomeAt, biomeWeights } from '../../shared/biomes.ts';
 import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
@@ -241,7 +241,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       if (at) out.push({ at, strength: 1 });
     }
     for (const d of world.deployables.values()) {
-      if (d.kind === 'furnace' && d.on) out.push({ at: new THREE.Vector3(d.x, d.y + 0.9, d.z), strength: 0.7 });
+      if (burns(d.kind) && d.on) out.push({ at: new THREE.Vector3(d.x, d.y + (d.kind === 'campfire' ? 0.5 : 0.9), d.z), strength: d.kind === 'campfire' ? 1 : 0.7 });
     }
     return out;
   };
@@ -709,7 +709,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     const x = d ?? old;
     if (!x) return;
     const at = new THREE.Vector3(x.x, x.y + 0.5, x.z);
-    const material = x.kind === 'furnace' ? 'stone' : 'wood';
+    const material = x.kind === 'furnace' || x.kind === 'campfire' ? 'stone' : 'wood';
     if (!old && d) effects.buildSound(material, at);
     else if (old && !d) {
       effects.breakSound(material, at);
@@ -1442,10 +1442,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const text = mine ? 'Your sleeping bag  ·  You can wake up here  ·  Hit to pick up' : 'Sleeping bag  ·  Hit to break it';
         return { text, health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
       }
+      if (d.kind === 'recycler') return { text: [d.on ? 'Recycler (running)' : 'Recycler', 'E to open'].join('  ·  ') };
       if (d.kind === 'planter') return { text: ['Planter Box', planterStatus(d).split('.')[0], 'E to open', 'Hit to pick up'].join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
       const bench = WORKBENCH_LEVEL[d.kind];
       const hints = [d.slots.length > 0 ? 'E to open' : bench ? 'E for the tech tree' : '', 'Hit to pick up'];
-      const name = d.kind === 'furnace' && d.on ? 'Furnace (burning)' : DEPLOYABLE_INFO[d.kind].name;
+      const name = burns(d.kind) && d.on ? `${DEPLOYABLE_INFO[d.kind].name} (burning)` : DEPLOYABLE_INFO[d.kind].name;
       return { text: [name, ...hints].filter(Boolean).join('  ·  '), health: d.hp / DEPLOYABLE_INFO[d.kind].hp };
     }
     if (aim?.piece?.door && (aimDoor || item === 'codeLock')) {
@@ -1812,7 +1813,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const w = dayNight.storm;
       effects.setWeather(w.rain, w.dust, w.snow);
       const p = controller.position;
-      effects.surroundings(biomeWeights(world.seed, p.x, p.z), daylight(dayNight.now), world.nearest('scrap', p, 28));
+      let fire = Infinity;
+      let machine = Infinity;
+      for (const d of world.deployables.values()) {
+        if (!d.on) continue;
+        const dist = Math.hypot(d.x - p.x, d.y - p.y, d.z - p.z);
+        if (burns(d.kind)) fire = Math.min(fire, dist);
+        else if (d.kind === 'recycler') machine = Math.min(machine, dist);
+      }
+      effects.surroundings(biomeWeights(world.seed, p.x, p.z), daylight(dayNight.now), world.nearest('scrap', p, 28), fire, machine);
     }
     map.update(dt, mapMarks());
     gfx.render();

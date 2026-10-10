@@ -8,6 +8,7 @@ import { DEPLOYABLE_KINDS, type DeployableKind } from '../../shared/deployables.
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { mulberry32 } from '../../shared/terrain.ts';
 import { buildArmourModel } from './armour.ts';
+import { model } from './models.ts';
 import { GUN_LOOKS, PISTOLS, buildGun, buildOtherWeapon } from './guns.ts';
 import { buildBoulder, buildDeployable, buildHeldItem } from './props.ts';
 import { barkSurface, clothSurface, concreteSurface, gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
@@ -245,7 +246,16 @@ function resource(item: ItemId): THREE.Object3D | null {
 }
 
 /** The model an item's icon is drawn from, plus how to frame it. */
+/** Salvage parts drawn from their scanned models. */
+const PART_MODELS: Partial<Record<ItemId, string>> = { gears: 'part-gears', metalPipe: 'part-pipe', rope: 'part-rope', sheetMetal: 'part-sheet' };
+
 export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'side' | 'top' | 'front' } | null {
+  const part = PART_MODELS[item] ? model(PART_MODELS[item]!) : undefined;
+  if (part) {
+    const m = new THREE.Mesh(part.geometry, part.material);
+    m.userData.shared = true;
+    return { model: wrap(m), view: 'top' };
+  }
   const r = resource(item);
   if (r) return { model: r, view: 'top' };
   if ((DEPLOYABLE_KINDS as readonly string[]).includes(item)) return { model: buildDeployable(item as DeployableKind), view: 'top' };

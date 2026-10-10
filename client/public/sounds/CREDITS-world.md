@@ -13,3 +13,5 @@ Footsteps and ambience from OpenGameArt, CC0 or CC-BY 3.0 as marked. The CC-BY o
 - amb-crickets.mp3: by Wolfgang_ (https://opengameart.org/content/crickets-ambient-noise-loopable), CC0
 - amb-birds.mp3: by isaiah658 (https://opengameart.org/content/ambient-bird-sounds), CC0
 - amb-creak.mp3: by AntumDeluge (https://opengameart.org/content/tree-creaking), CC0
+- amb-fire.mp3: by pagdev (https://opengameart.org/content/fireplace-sound-loop), CC0
+- amb-machine.mp3: by rubberduck (https://opengameart.org/content/30-cc0-sfx-loops), CC0
