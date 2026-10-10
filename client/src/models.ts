@@ -59,6 +59,13 @@ const FIT: Record<string, Fit> = {
   'dead-branch': { width: 0.9, turn: [Math.PI / 2, 0, 0] },
   stones: { width: 0.3, set: true },
   stump: { width: 1.1 },
+  // Trees, at the size of the ones they replace (node scale varies them 0.8-1.3).
+  'tree-pine': { height: 9, foliage: true, ownAlpha: true },
+  'tree-spruce': { height: 8, foliage: true, ownAlpha: true },
+  'tree-dead-old': { height: 4.5 },
+  'tree-dead-pine': { height: 6 },
+  'tree-quiver': { height: 4.6 },
+  'tree-dead-quiver': { height: 3.6 },
   // Lengths of the real cars: two big sedans, three mid-size, and a small hatchback.
   'wreck-a': { width: 5.0 },
   'wreck-b': { width: 4.6 },

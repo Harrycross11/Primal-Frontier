@@ -41,6 +41,9 @@ MODELS = {
     'dead-branch': ('dead_quiver_branch_01', 1500),
     'stones': ('namaqualand_stones_01', 1500),
     'stump': ('tree_stump_01', 2000),
+    # A quiver tree and a dead quiver trunk, among the dry lands' dead trees.
+    'tree-quiver': ('quiver_tree_01', 6000),
+    'tree-dead-quiver': ('dead_quiver_trunk', 4000),
 }
 
 # Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
@@ -103,6 +106,11 @@ PROPS = {
     # Crops grown in the planter box.
     'crop-corn': '5fd3b104d8104519b061469c365d4974',
     'crop-hemp': '79fe78fd6c6a426b8584115e772a5818',
+    # Trees: a pine and a spruce for Deadwood's groves, an old dead tree and a dead pine elsewhere.
+    'tree-pine': 'd45218a3fab349e5b1de040f29e7b6f9',
+    'tree-spruce': 'a50a5df3164246a5af97992cec33a143',
+    'tree-dead-old': '3cb4d59eb4844dc4802480e9ee53785e',
+    'tree-dead-pine': '84b73e8b6efb4ca7b47409c89689927a',
     # A melon vine, its melons left out in the game: the leaves round a growing pumpkin.
     'crop-vine': '806bf365ccf24fe498dced58695cad99',
     'tool-salvagedAxe': '30c5a2054fd9469796c0771dc52a0fa0',
