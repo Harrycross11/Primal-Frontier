@@ -39,6 +39,11 @@ import {
 
 /** Size of the map's squares, metres, and how far off they still show. */
 const CELL = 50;
+/** The scanned trees each kind of tree node is drawn with (see models.ts). */
+const SCANNED_TREES = {
+  tree: ['tree-pine', 'tree-spruce'],
+  deadTree: ['tree-dead-old', 'tree-dead-pine', 'tree-dead-quiver', 'tree-quiver'],
+};
 const VIEW = 240;
 /**
  * How far off smaller things still show: a clump of hemp or a barrel is a speck in the haze
@@ -836,6 +841,16 @@ export class World {
    * forest of trees built limb by limb would take thousands of draw calls.
    */
   private treeShape(kind: 'tree' | 'deadTree', id: number): THREE.Group {
+    // Scanned trees, if they loaded: a mix per kind, each slightly sunk so the roots sit in the ground.
+    const scans = SCANNED_TREES[kind].map((name) => model(name)).filter((m) => m !== undefined);
+    if (scans.length) {
+      const scan = scans[id % scans.length];
+      const g = new THREE.Group();
+      const tree = scanMesh(scan.geometry, scan.material);
+      tree.position.y = -0.08;
+      g.add(tree);
+      return g;
+    }
     let shapes = this.treeShapes.get(kind);
     if (!shapes) {
       shapes = [];

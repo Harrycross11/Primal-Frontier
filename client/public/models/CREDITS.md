@@ -16,6 +16,8 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - dead-branch: https://polyhaven.com/a/dead_quiver_branch_01
 - stones: https://polyhaven.com/a/namaqualand_stones_01
 - stump: https://polyhaven.com/a/tree_stump_01
+- tree-quiver: https://polyhaven.com/a/quiver_tree_01
+- tree-dead-quiver: https://polyhaven.com/a/dead_quiver_trunk
 - grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
@@ -48,6 +50,10 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - gun-semiRifle: "SKS Semi Automatic Rifle" by MaX3Dd (https://sketchfab.com/3d-models/sks-semi-automatic-rifle-ada722d492344cba8633be150eea7e85), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-corn: "Maize Corn Plant" by gilles.schaeck (https://sketchfab.com/3d-models/maize-corn-plant-5fd3b104d8104519b061469c365d4974), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-hemp: "Cannabis Plant" by 3D Crackhouse (https://sketchfab.com/3d-models/cannabis-plant-79fe78fd6c6a426b8584115e772a5818), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- tree-pine: "Pine Tree" by evolveduk (https://sketchfab.com/3d-models/pine-tree-d45218a3fab349e5b1de040f29e7b6f9), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- tree-spruce: "Spruce" by evolveduk (https://sketchfab.com/3d-models/spruce-a50a5df3164246a5af97992cec33a143), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- tree-dead-old: "Old tree" by evolveduk (https://sketchfab.com/3d-models/old-tree-3cb4d59eb4844dc4802480e9ee53785e), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- tree-dead-pine: "Mid Poly Dead Pine Tree" by sujirour (https://sketchfab.com/3d-models/mid-poly-dead-pine-tree-84b73e8b6efb4ca7b47409c89689927a), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - crop-vine: "Watermelon Bush" by FixIK* (https://sketchfab.com/3d-models/watermelon-bush-806bf365ccf24fe498dced58695cad99), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedAxe: "Hatchet" by MaX3Dd (https://sketchfab.com/3d-models/hatchet-30c5a2054fd9469796c0771dc52a0fa0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-salvagedPickaxe: "Pickaxe" by Multipainkiller Studio (https://sketchfab.com/3d-models/pickaxe-83e334fc83ed4bb19592154e60e529c5), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
