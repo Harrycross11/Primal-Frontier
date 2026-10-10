@@ -411,7 +411,24 @@ export function buildMushrooms(rand: () => number): THREE.Group {
 }
 
 /**
- * A blue plastic drum catching rain under a tarp funnel. `setLevel` (0 to 1) raises or lowers
+ * The scanned drum's plastic is a vivid new blue; left out in the sun it fades to a duller, greyer blue.
+ * Seen into from above, its inside walls show too.
+ */
+function fadeInSun(m: THREE.MeshStandardMaterial) {
+  if (m.userData.faded) return;
+  m.userData.faded = true;
+  m.side = THREE.DoubleSide;
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      '#include <map_fragment>\n  { float l = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b); diffuseColor.rgb = l * vec3(0.2, 0.36, 0.52); }',
+    );
+  };
+  m.needsUpdate = true;
+}
+
+/**
+ * A blue plastic drum, open to catch the rain. `setLevel` (0 to 1) raises or lowers
  * the water inside as people drink from it.
  */
 export function buildWaterBarrel(): THREE.Group {
@@ -419,8 +436,7 @@ export function buildWaterBarrel(): THREE.Group {
   const scan = model('water-drum');
   if (scan) {
     const drum = shared(new THREE.Mesh(scan.geometry, scan.material));
-    // The scan's plastic is a brighter blue than sun-faded drums left outside.
-    for (const m of [scan.material].flat()) m.color.setRGB(0.55, 0.62, 0.72);
+    for (const m of [scan.material].flat()) if (m.name === 'Drum') fadeInSun(m);
     g.add(drum);
   } else {
     const plastic = mat('drum-plastic', () => new THREE.MeshStandardMaterial({ color: 0x2c5a80, roughness: 0.5 }));
@@ -431,12 +447,14 @@ export function buildWaterBarrel(): THREE.Group {
     for (const y of [0.22, 0.68]) g.add(mesh(new THREE.TorusGeometry(0.305, 0.015, 6, 24).rotateX(Math.PI / 2), plastic, 0, y, 0));
     g.add(mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 24).rotateX(Math.PI / 2), plastic, 0, 0.9, 0));
   }
-  // A torn tarp tied round the rim as a funnel.
-  const tarp = mat('tarp', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x5a6a4a, roughness: 1, side: THREE.DoubleSide }));
-  const funnel = mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.16, 10, 1, true), tarp, 0, 0.97, 0);
-  funnel.rotation.z = 0.08;
-  g.add(funnel);
-  for (const a of [0.4, 2.5, 4.4]) g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), ropeMat(), Math.cos(a) * 0.4, 0.9, Math.sin(a) * 0.4));
+  if (!scan) {
+    // A torn tarp tied round the rim as a funnel.
+    const tarp = mat('tarp', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x5a6a4a, roughness: 1, side: THREE.DoubleSide }));
+    const funnel = mesh(new THREE.CylinderGeometry(0.5, 0.28, 0.16, 10, 1, true), tarp, 0, 0.97, 0);
+    funnel.rotation.z = 0.08;
+    g.add(funnel);
+    for (const a of [0.4, 2.5, 4.4]) g.add(mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), ropeMat(), Math.cos(a) * 0.4, 0.9, Math.sin(a) * 0.4));
+  }
   const water = mesh(
     new THREE.CircleGeometry(scan ? 0.25 : 0.29, 20).rotateX(-Math.PI / 2),
     mat('barrel-water', () => new THREE.MeshStandardMaterial({ color: 0x3a5058, roughness: 0.08, metalness: 0.2 })),
