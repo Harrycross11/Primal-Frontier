@@ -861,7 +861,8 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       for (const y of [0.0, 0.12]) g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 14), tapeMat(), 0, y, 0.012));
       return g;
     }
-    case 'buildingPlan': {
+    case 'buildingPlan':
+    case 'blueprint': {
       // A blueprint sheet, half unrolled, with the plan of a hut drawn on it.
       const sheet = new THREE.PlaneGeometry(0.17, 0.26, 12, 1);
       const p = sheet.attributes.position;

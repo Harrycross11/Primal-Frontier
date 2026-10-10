@@ -13,6 +13,7 @@ import {
   canAfford,
   countItem,
   maxDurability,
+  stackName,
   type ItemId,
   type Recipe,
   type Slots,
@@ -392,7 +393,9 @@ export class InventoryUi {
     el.dataset.ref = JSON.stringify(ref);
     if (stack) {
       const info = ITEMS[stack.item];
-      el.innerHTML = iconSvg(stack.item);
+      // A blueprint shows what it teaches, on blueprint paper.
+      if (stack.teaches) el.classList.add('bp');
+      el.innerHTML = iconSvg(stack.teaches ?? stack.item);
       if (stack.count > 1) el.insertAdjacentHTML('beforeend', `<span class="count">${stack.count}</span>`);
       if (info.weapon?.mag) el.insertAdjacentHTML('beforeend', `<span class="count ammo">${stack.ammo ?? 0}/${info.weapon.mag}</span>`);
       const max = maxDurability(stack.item);
@@ -409,7 +412,7 @@ export class InventoryUi {
       const max = maxDurability(stack.item);
       const wear = max && stack.hp !== undefined ? `<br/>Condition ${stack.hp} / ${max}` : '';
       const paint = stack.paint ? `<br/>${PAINTS[stack.paint].name} paint` : '';
-      tip.innerHTML = `<b>${info.name}</b>${info.description}${statsText(stack.item)}${wear}${paint}`;
+      tip.innerHTML = `<b>${stackName(stack)}</b>${info.description}${statsText(stack.item)}${wear}${paint}`;
       tip.hidden = false;
     });
     el.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
@@ -419,7 +422,7 @@ export class InventoryUi {
       if (e.button === 2) return this.quickMove(ref, stack);
       this.drag = { from: ref, stack };
       const ghost = $('drag');
-      ghost.innerHTML = iconSvg(stack.item);
+      ghost.innerHTML = iconSvg(stack.teaches ?? stack.item);
       ghost.style.left = `${e.clientX}px`;
       ghost.style.top = `${e.clientY}px`;
       ghost.hidden = false;

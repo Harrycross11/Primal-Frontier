@@ -19,7 +19,7 @@ import {
   radZones,
   radiationAt,
 } from '../shared/survival.ts';
-import { addItem, countItem, ITEMS, RECIPES, recipeFor, type ItemId, type Slots } from '../shared/items.ts';
+import { addItem, countItem, ITEMS, newStack, RECIPES, recipeFor, type ItemId, type Slots } from '../shared/items.ts';
 import { FURNACE_FUEL, FURNACE_ORE_SLOTS, FURNACE_OUTPUT_SLOTS, LOOT_BAG_SECONDS } from '../shared/deployables.ts';
 import { EYE_HEIGHT, MAX_HEALTH } from '../shared/combat.ts';
 import {
@@ -807,6 +807,17 @@ test('learning costs scrap, needs the step before it and a workbench, and surviv
   assert.deepEqual(game.players.get(id)!.learned, ['salvagedAxe'], 'kept through death');
   game.craft(id, 'salvagedPickaxe', 1);
   assert.equal(player.queue.length, 0, 'not learned, so not crafted');
+});
+
+test('a blueprint teaches its item anywhere, skipping the scrap and the steps before it', () => {
+  const { game, id, player } = setup();
+  player.slots[0] = { ...newStack('blueprint'), teaches: 'hk416' };
+  game.use(id, 0, 0);
+  assert.deepEqual(player.learned, ['hk416']);
+  assert.equal(player.slots[0], null, 'used up');
+  player.slots[1] = { ...newStack('blueprint'), teaches: 'hk416' };
+  game.use(id, 1, 0);
+  assert.equal(player.slots[1]?.teaches, 'hk416', 'kept when already known');
 });
 
 test('what a survivor has learned comes back with them after a restart', () => {

@@ -5,7 +5,8 @@ import { BIOME_IDS, biomeAt } from '../shared/biomes.ts';
 import { CRATE_KINDS, type Deployable } from '../shared/deployables.ts';
 import { countItem, type ItemId } from '../shared/items.ts';
 import { LANDMARKS, crateSpots, landmarks } from '../shared/landmarks.ts';
-import { LOOT, rollLoot } from '../shared/loot.ts';
+import { BLUEPRINTS, LOOT, rollLoot } from '../shared/loot.ts';
+import { TECH } from '../shared/techTree.ts';
 import { SITE_RADIUS, landmarkSites, mulberry32, terrainHeight } from '../shared/terrain.ts';
 
 const SEED = 1234;
@@ -175,5 +176,21 @@ test('crates hold a few different things from their table', () => {
       for (const s of stacks) assert.ok(s.count >= 1);
       assert.ok(new Set(items).size >= items.length - 1, 'no repeats from the table');
     }
+  }
+});
+
+test('blueprints turn up in crates, better ones in better crates', () => {
+  const rand = mulberry32(11);
+  for (const kind of ['crate', 'militaryCrate', 'supplyDrop'] as const) {
+    const levels = new Set<number>();
+    let found = 0;
+    for (let n = 0; n < 400; n++) {
+      for (const s of rollLoot(kind, null, rand).filter((s) => s.item === 'blueprint')) {
+        found++;
+        levels.add(TECH.get(s.teaches!)!.level);
+      }
+    }
+    assert.ok(found > 400 * BLUEPRINTS[kind].chance * 0.7, `${kind} holds blueprints`);
+    assert.deepEqual([...levels].sort(), [...new Set(BLUEPRINTS[kind].levels)].sort(), `${kind} blueprints come from its levels`);
   }
 });

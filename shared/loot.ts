@@ -4,6 +4,7 @@
 
 import type { BiomeId } from './biomes.ts';
 import { newStack, type ItemId, type Stack } from './items.ts';
+import { rollBlueprint } from './techTree.ts';
 
 export type LootKind = 'crate' | 'militaryCrate' | 'supplyDrop';
 
@@ -109,6 +110,16 @@ export const LOOT: Record<LootKind, { rolls: [number, number]; table: Roll[] }> 
   },
 };
 
+/**
+ * The chance each crate holds a blueprint, and the workbench levels it is drawn from: early
+ * gear in wooden crates, mid gear in military crates, the best in supply drops.
+ */
+export const BLUEPRINTS: Record<LootKind, { chance: number; levels: (1 | 2 | 3)[] }> = {
+  crate: { chance: 0.3, levels: [1] },
+  militaryCrate: { chance: 0.5, levels: [1, 2, 2] },
+  supplyDrop: { chance: 0.85, levels: [2, 3, 3] },
+};
+
 /** What each land's crates hold extra of. */
 export const LAND_LOOT: Record<BiomeId, Roll> = {
   ashlands: r('scrap', 15, 30, 0),
@@ -134,5 +145,6 @@ export function rollLoot(kind: LootKind, land: BiomeId | null, rand: () => numbe
     take(left.splice(i < 0 ? left.length - 1 : i, 1)[0]);
   }
   if (land && rand() < 0.5) take(LAND_LOOT[land]);
+  if (rand() < BLUEPRINTS[kind].chance) out.push(rollBlueprint(BLUEPRINTS[kind].levels, rand));
   return out;
 }

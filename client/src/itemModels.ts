@@ -289,7 +289,7 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
   }
   const held = buildHeldItem(item);
   // The blueprint is seen face on, a little turned, so its drawing shows.
-  if (held && item === 'buildingPlan') {
+  if (held && (item === 'buildingPlan' || item === 'blueprint')) {
     held.rotation.set(-0.2, 0.3, -0.35);
     return { model: wrap(held), view: 'front' };
   }

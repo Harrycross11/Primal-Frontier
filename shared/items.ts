@@ -23,6 +23,8 @@ export type ItemId =
   // Tools
   | 'rock'
   | 'buildingPlan'
+  /** Found in crates: teaches the item in its stack's `teaches` (see shared/techTree.ts). */
+  | 'blueprint'
   | 'stoneHatchet'
   | 'stonePickaxe'
   | 'salvagedAxe'
@@ -242,6 +244,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     weapon: { class: 'melee', damage: 10, delay: 0.7, range: 2.2 },
   },
   buildingPlan: { name: 'Building Plan', kind: 'plan', stack: 1, description: 'Hold it to build walls, floors and stairs.' },
+  blueprint: { name: 'Blueprint', kind: 'plan', stack: 1, description: 'Found in crates. Hold it and click to learn how to make what it shows, with no workbench or scrap needed.' },
   stoneHatchet: {
     name: 'Stone Hatchet',
     kind: 'tool',
@@ -468,6 +471,8 @@ export interface Stack {
   ammo?: number;
   /** Its paint, from the palette in paint.ts, for guns, tools and melee weapons. */
   paint?: number;
+  /** Blueprints: the item it teaches. */
+  teaches?: ItemId;
 }
 
 export type Slots = (Stack | null)[];
@@ -487,6 +492,11 @@ export function newStack(item: ItemId, count = 1): Stack {
   if (durability) stack.hp = durability;
   if (weapon?.mag) stack.ammo = 0;
   return stack;
+}
+
+/** A stack's name as players see it: blueprints say what they teach. */
+export function stackName(stack: Stack): string {
+  return stack.teaches ? `${ITEMS[stack.teaches].name} Blueprint` : ITEMS[stack.item].name;
 }
 
 /** Uses before an item breaks, or 0 if it never does. */
