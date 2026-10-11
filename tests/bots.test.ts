@@ -51,7 +51,8 @@ test('a bot shoots at a survivor who comes close', () => {
   // Stand still 10 m away, on the ground.
   const place = () => game.move(human.id, bot.x + 10, bot.y, bot.z, 0, false, 0);
   place();
-  let now = 0;
+  // Past the grace a fresh spawn gets.
+  let now = 61_000;
   for (let n = 0; n < 20 * 20 && p.hp === 100 && !p.dead; n++) {
     now += 50;
     p.x = bot.x + 10;
@@ -73,4 +74,22 @@ test('bots in a long session raid doors and come back after dying', () => {
   const doors = [...game.pieces.values()].filter((p) => p.door);
   assert.ok(doors.length >= 1);
   assert.ok(now > 0);
+});
+
+test('bots leave a fresh spawn alone for the first minute', () => {
+  const game = new Game(1234);
+  const bots = new Bots(game, 1, mulberry32(3));
+  bots.balance(0, 0);
+  const bot = [...game.players.values()][0];
+  const human = game.join('Ash', 0)!;
+  const p = game.players.get(human.id)!;
+  let shots = 0;
+  for (let now = 50; now < 30_000; now += 50) {
+    p.x = bot.x + 10;
+    p.z = bot.z;
+    p.y = bot.y;
+    shots += bots.tick(now).filter((o) => o.msg.t === 'shot').length;
+    game.tick(now);
+  }
+  assert.equal(shots, 0);
 });

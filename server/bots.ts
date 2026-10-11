@@ -28,6 +28,8 @@ const ENGAGE = 30;
 /** Closer than this, bots of rival crews fight each other too. */
 const ENGAGE_BOT = 16;
 const GIVE_UP = 45;
+/** Seconds after the hounds' own grace that bots leave a fresh spawn alone too. */
+const GRACE = 40;
 /** Radians of aim error, so bots can be outshot. */
 const AIM_ERROR = 0.05;
 /** Wood a bot gathers before it builds its hut (seven pieces cost 70; the rest is for show). */
@@ -194,7 +196,7 @@ export class Bots {
     p.vitals.water = Math.max(p.vitals.water, 150);
     p.vitals.rads = 0;
 
-    const foe = this.findEnemy(bot, p);
+    const foe = this.findEnemy(bot, p, now);
     if (foe) {
       bot.enemy = foe;
       return this.fight(bot, p, now, dt);
@@ -216,7 +218,7 @@ export class Bots {
 
   // Fighting.
 
-  private findEnemy(bot: Bot, p: Survivor): Bot['enemy'] {
+  private findEnemy(bot: Bot, p: Survivor, now: number): Bot['enemy'] {
     if (bot.enemy) {
       const at = this.enemyAt(bot.enemy);
       if (at && Math.hypot(at.x - p.x, at.z - p.z) < GIVE_UP) return bot.enemy;
@@ -227,6 +229,8 @@ export class Bots {
       if (other.id === p.id || other.dead) continue;
       const mate = this.bots.get(other.id);
       if (mate && mate.crew === bot.crew) continue;
+      // Fresh spawns get a minute's grace, so nobody is shot before they've found their feet.
+      if (!mate && now < other.safeUntil + GRACE * 1000) continue;
       const d = Math.hypot(other.x - p.x, other.z - p.z);
       if (d < (mate ? ENGAGE_BOT : ENGAGE) && d < bestD) {
         best = { kind: 'player', id: other.id };
