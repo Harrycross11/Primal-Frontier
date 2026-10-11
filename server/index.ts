@@ -8,6 +8,7 @@ import { gzipSync } from 'node:zlib';
 import { WebSocket, WebSocketServer } from 'ws';
 import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
+import { Bots } from './bots.ts';
 import { Game, cleanToken, type Outgoing } from './game.ts';
 import { openStore } from './store.ts';
 
@@ -121,6 +122,10 @@ game.accounts.load(
 );
 // START_AT='x,z' spawns everyone at one spot, for screenshots.
 if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
+// Computer-controlled survivors keep the world busy: BOTS is how many survivors the server
+// should feel like it has, and bots make up whatever real players don't. None by default in
+// screenshot runs (START_AT), where they would wander into shot.
+const bots = new Bots(game, Number(process.env.BOTS ?? (process.env.START_AT ? 0 : 5)));
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
@@ -174,6 +179,8 @@ wss.on('connection', (ws) => {
         return;
       }
       if (msg.t !== 'join') return;
+      // A bot gives up its place to a real player.
+      if (game.players.size >= MAX_PLAYERS) deliver(bots.removeOne());
       const joined = game.join(msg.name, now, msg.look, msg.token);
       if (!joined) {
         send(ws, { t: 'full' });
@@ -185,6 +192,7 @@ wss.on('connection', (ws) => {
       deliver(joined.out);
       // START_PET=mule gives everyone who joins a tame one beside them (for screenshots).
       if (process.env.START_PET) game.givePet(id, process.env.START_PET as Species);
+      deliver(bots.balance(sockets.size, now));
       console.log(`player ${id} joined (${game.players.size} online)`);
       return;
     }
@@ -308,11 +316,17 @@ wss.on('connection', (ws) => {
     if (id === null) return;
     sockets.delete(id);
     deliver(game.leave(id));
+    deliver(bots.balance(sockets.size, Date.now()));
     console.log(`player ${id} left (${game.players.size} online)`);
   });
 });
 
-setInterval(() => deliver(game.tick(Date.now())), 1000 / TICK_RATE);
+bots.balance(0, Date.now());
+setInterval(() => {
+  const now = Date.now();
+  deliver(bots.tick(now));
+  deliver(game.tick(now));
+}, 1000 / TICK_RATE);
 
 let saving: Promise<void> = Promise.resolve();
 /** Saves the world; one save at a time, and a failure is logged rather than fatal. */
