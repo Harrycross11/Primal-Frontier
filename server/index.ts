@@ -321,7 +321,8 @@ wss.on('connection', (ws) => {
   });
 });
 
-bots.balance(0, Date.now());
+// BOTS_WAIT=1 holds the bots back until someone joins (for filming them).
+if (!process.env.BOTS_WAIT) bots.balance(0, Date.now());
 setInterval(() => {
   const now = Date.now();
   deliver(bots.tick(now));

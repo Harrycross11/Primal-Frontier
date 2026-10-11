@@ -113,6 +113,7 @@ export class Bots {
     const joined = this.game.join(`Bot ${name}`, now, randomLook(this.rand));
     if (!joined) return null;
     const p = this.game.players.get(joined.id)!;
+    this.scatter(p);
     this.kit(p);
     this.bots.set(joined.id, {
       id: joined.id,
@@ -134,6 +135,18 @@ export class Bots {
     });
     // Others still hear that someone joined; the bot itself has nobody to send to.
     return joined.out.filter((o) => o.to !== joined.id);
+  }
+
+  /** Moves a fresh spawn a few metres from the spawn point, so bots arriving together spread out. */
+  private scatter(p: Survivor) {
+    const a = this.rand() * Math.PI * 2;
+    const r = 3 + this.rand() * 9;
+    const x = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, p.x + Math.cos(a) * r));
+    const z = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, p.z + Math.sin(a) * r));
+    if (this.walled(x, terrainHeight(this.game.seed, x, z), z)) return;
+    p.x = x;
+    p.z = z;
+    p.y = terrainHeight(this.game.seed, x, z);
   }
 
   /** A hatchet and a weapon with ammunition, loaded, on top of the starting rock and building plan. */
@@ -188,6 +201,8 @@ export class Bots {
       bot.enemy = null;
       bot.goal = null;
       const out = this.game.respawn(bot.id, undefined, now);
+      this.scatter(p);
+      out.push(...this.game.move(bot.id, p.x, p.y, p.z, p.yaw, false, now, 0));
       this.kit(p);
       return out;
     }
