@@ -1500,6 +1500,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       pieces: [...world.pieces.values()],
       position: controller.position.toArray(),
     }),
+    players: () => [...remotes.values()].map((r) => ({ id: r.state.id, name: r.state.name, x: r.state.x, y: r.state.y, z: r.state.z, dead: r.state.dead })),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
     perf: (frames = 5) => {
       const r = gfx.renderer;

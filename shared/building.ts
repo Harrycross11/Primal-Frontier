@@ -61,6 +61,8 @@ export interface Piece {
   door?: Door;
   /** Its paint, from the palette in paint.ts; none for bare material. */
   paint?: number;
+  /** Built by a bot (server/bots.ts), so a bot can move back in after a restart. */
+  bot?: boolean;
 }
 
 export type Box = { min: [number, number, number]; max: [number, number, number] };

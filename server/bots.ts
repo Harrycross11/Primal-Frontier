@@ -1,0 +1,671 @@
+// Computer-controlled survivors, so a quiet server still feels lived in. Each one plays through
+// the same Game calls a connected player's messages make: it walks, chops wood, builds and locks
+// a small hut with a box of loot inside, fights whoever comes too close and now and then raids
+// someone's door with satchel charges. Bots fill the server up to a target head count and leave
+// one by one as real players join.
+
+import { PLAYER_HEIGHT, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
+import { EYE_HEIGHT } from '../shared/combat.ts';
+import { DOORWAY, STOREY, TILE, boxesTouch, buildBaseY, pieceBoxes, pieceKey, type Piece } from '../shared/building.ts';
+import { ITEMS, addItem, countItem, type ItemId, type Slots } from '../shared/items.ts';
+import { randomLook } from '../shared/look.ts';
+import { atLandmark } from '../shared/landmarks.ts';
+import { radiationAt } from '../shared/survival.ts';
+import { terrainHeight } from '../shared/terrain.ts';
+import { RESOURCE_INFO, type ResourceNode } from '../shared/world.ts';
+import { playerBox, type Game, type Outgoing } from './game.ts';
+
+const NAMES = ['Kade', 'Mara', 'Rook', 'Vex', 'Juno', 'Dusty', 'Hollis', 'Wren', 'Tamsin', 'Cole', 'Ash', 'Briggs'];
+/** What each bot carries besides its hatchet: a gun or bow, and ammunition for it. */
+const LOADOUTS: [ItemId, ItemId, number][] = [
+  ['huntingBow', 'arrow', 40],
+  ['revolver', 'pistolAmmo', 64],
+  ['waterpipe', 'handmadeShell', 24],
+  ['semiPistol', 'pistolAmmo', 60],
+];
+/** How close an armed survivor gets before a bot starts shooting, in metres. */
+const ENGAGE = 30;
+/** Closer than this, bots of rival crews fight each other too. */
+const ENGAGE_BOT = 16;
+const GIVE_UP = 45;
+/** Seconds after the hounds' own grace that bots leave a fresh spawn alone too. */
+const GRACE = 40;
+/** Radians of aim error, so bots can be outshot. */
+const AIM_ERROR = 0.05;
+/** Wood a bot gathers before it builds its hut (seven pieces cost 70; the rest is for show). */
+const HUT_WOOD = 200;
+/** Seconds between raids for each bot, roughly. */
+const RAID_EVERY = [360, 720];
+const RESPAWN_AFTER = 8;
+
+type Phase = 'gather' | 'build' | 'roam' | 'raid' | 'fight';
+
+interface Bot {
+  id: number;
+  /** Bots of different crews fight on sight; crewmates leave each other alone. */
+  crew: number;
+  phase: Phase;
+  /** Where it is walking to, if anywhere. */
+  goal: { x: number; z: number; near: number } | null;
+  node: ResourceNode | null;
+  enemy: { kind: 'player' | 'hound'; id: number } | null;
+  /** Its hut: the tile, the floor's height and the doorway's key. */
+  home: { i: number; k: number; y: number; door: string } | null;
+  buildStep: number;
+  spotTries: number;
+  raidAt: number;
+  raid: { key: string; planted: number; leaveAt: number } | null;
+  deadAt: number;
+  nextShotAt: number;
+  strafe: number;
+  strafeUntil: number;
+  /** For noticing when it is stuck against something. */
+  lastPos: { x: number; z: number; at: number };
+}
+
+type Survivor = NonNullable<ReturnType<Game['players']['get']>>;
+
+export class Bots {
+  private bots = new Map<number, Bot>();
+  private names = [...NAMES];
+  private lastTick = -1;
+
+  constructor(
+    private game: Game,
+    /** How many survivors the server should feel like it has; bots make up the difference. */
+    private fill: number,
+    private rand: () => number = Math.random,
+  ) {}
+
+  isBot(id: number): boolean {
+    return this.bots.has(id);
+  }
+
+  get count(): number {
+    return this.bots.size;
+  }
+
+  /** Adds or removes bots so humans plus bots come to `fill` (never more than the server holds). */
+  balance(humans: number, now: number): Outgoing[] {
+    const out: Outgoing[] = [];
+    const want = Math.max(0, this.fill - humans);
+    while (this.bots.size > want) out.push(...this.removeOne());
+    while (this.bots.size < want) {
+      const joined = this.add(now);
+      if (!joined) break;
+      out.push(...joined);
+    }
+    return out;
+  }
+
+  /** Takes one bot out of the world to make room for a real player. */
+  removeOne(): Outgoing[] {
+    const id = [...this.bots.keys()].pop();
+    if (id === undefined) return [];
+    this.bots.delete(id);
+    const p = this.game.players.get(id);
+    if (p) this.names.push(p.name.replace(/^Bot /, ''));
+    return this.game.leave(id);
+  }
+
+  private add(now: number): Outgoing[] | null {
+    const name = this.names.splice(Math.floor(this.rand() * this.names.length), 1)[0] ?? 'Drifter';
+    const joined = this.game.join(`Bot ${name}`, now, randomLook(this.rand));
+    if (!joined) return null;
+    const p = this.game.players.get(joined.id)!;
+    this.kit(p);
+    this.bots.set(joined.id, {
+      id: joined.id,
+      crew: this.bots.size % 2,
+      phase: 'gather',
+      goal: null,
+      node: null,
+      enemy: null,
+      home: this.adoptHut(p),
+      buildStep: 0,
+      spotTries: 0,
+      raidAt: now + this.between(RAID_EVERY) * 1000,
+      raid: null,
+      deadAt: 0,
+      nextShotAt: 0,
+      strafe: 1,
+      strafeUntil: 0,
+      lastPos: { x: p.x, z: p.z, at: now },
+    });
+    // Others still hear that someone joined; the bot itself has nobody to send to.
+    return joined.out.filter((o) => o.to !== joined.id);
+  }
+
+  /** A hatchet and a weapon with ammunition, loaded, on top of the starting rock and building plan. */
+  private kit(p: Survivor) {
+    const [weapon, ammo, rounds] = LOADOUTS[Math.floor(this.rand() * LOADOUTS.length)];
+    addItem(p.slots, 'stoneHatchet', 1);
+    addItem(p.slots, weapon, 1);
+    addItem(p.slots, ammo, rounds);
+    const gun = p.slots.find((s) => s?.item === weapon);
+    if (gun) gun.ammo = ITEMS[weapon].weapon?.mag ?? 1;
+  }
+
+  /** An empty bot hut left from before a restart, for a new bot to call home. */
+  private adoptHut(p: Survivor): Bot['home'] {
+    const taken = new Set([...this.bots.values()].map((b) => b.home?.door));
+    let best: Bot['home'] = null;
+    let bestD = Infinity;
+    for (const [key, piece] of this.game.pieces) {
+      if (!piece.bot || !piece.door || taken.has(key)) continue;
+      const d = Math.hypot(piece.i * TILE - p.x, piece.k * TILE - p.z);
+      if (d < bestD) {
+        bestD = d;
+        best = { i: piece.i, k: piece.k, y: piece.y, door: key };
+      }
+    }
+    return best;
+  }
+
+  tick(now: number): Outgoing[] {
+    const dt = this.lastTick < 0 ? 0 : Math.min((now - this.lastTick) / 1000, 0.5);
+    this.lastTick = now;
+    const out: Outgoing[] = [];
+    for (const bot of this.bots.values()) {
+      const p = this.game.players.get(bot.id);
+      if (!p) {
+        this.bots.delete(bot.id);
+        continue;
+      }
+      out.push(...this.think(bot, p, now, dt));
+    }
+    // Nobody is listening for a bot's own messages.
+    return out.filter((o) => typeof o.to !== 'number' || !this.bots.has(o.to));
+  }
+
+  private think(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    if (p.dead) {
+      if (!bot.deadAt) bot.deadAt = now;
+      if (now - bot.deadAt < RESPAWN_AFTER * 1000) return [];
+      bot.deadAt = 0;
+      bot.phase = bot.home ? 'roam' : 'gather';
+      bot.raid = null;
+      bot.enemy = null;
+      bot.goal = null;
+      const out = this.game.respawn(bot.id, undefined, now);
+      this.kit(p);
+      return out;
+    }
+    // Bots don't need to eat; keeping them fed stops them starving where nobody sees.
+    p.vitals.food = Math.max(p.vitals.food, 150);
+    p.vitals.water = Math.max(p.vitals.water, 150);
+    p.vitals.rads = 0;
+
+    const foe = this.findEnemy(bot, p, now);
+    if (foe) {
+      bot.enemy = foe;
+      return this.fight(bot, p, now, dt);
+    }
+    bot.enemy = null;
+    if (bot.phase === 'fight') bot.phase = bot.raid ? 'raid' : bot.home ? 'roam' : 'gather';
+    if (bot.phase !== 'raid' && bot.home && now > bot.raidAt && this.pickRaid(bot, p)) bot.phase = 'raid';
+    switch (bot.phase) {
+      case 'gather':
+        return this.gather(bot, p, now, dt);
+      case 'build':
+        return this.build(bot, p, now, dt);
+      case 'raid':
+        return this.doRaid(bot, p, now, dt);
+      default:
+        return this.roam(bot, p, now, dt);
+    }
+  }
+
+  // Fighting.
+
+  private findEnemy(bot: Bot, p: Survivor, now: number): Bot['enemy'] {
+    if (bot.enemy) {
+      const at = this.enemyAt(bot.enemy);
+      if (at && Math.hypot(at.x - p.x, at.z - p.z) < GIVE_UP) return bot.enemy;
+    }
+    let best: Bot['enemy'] = null;
+    let bestD = Infinity;
+    for (const other of this.game.players.values()) {
+      if (other.id === p.id || other.dead) continue;
+      const mate = this.bots.get(other.id);
+      if (mate && mate.crew === bot.crew) continue;
+      // Fresh spawns get a minute's grace, so nobody is shot before they've found their feet.
+      if (!mate && now < other.safeUntil + GRACE * 1000) continue;
+      const d = Math.hypot(other.x - p.x, other.z - p.z);
+      if (d < (mate ? ENGAGE_BOT : ENGAGE) && d < bestD) {
+        best = { kind: 'player', id: other.id };
+        bestD = d;
+      }
+    }
+    // Wild animals that have come for it.
+    for (const h of this.game.hounds.values()) {
+      if (h.hp <= 0 || h.target?.kind !== 'player' || h.target.id !== p.id) continue;
+      const d = Math.hypot(h.x - p.x, h.z - p.z);
+      if (d < 20 && d < bestD) {
+        best = { kind: 'hound', id: h.id };
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  private enemyAt(e: NonNullable<Bot['enemy']>): { x: number; y: number; z: number; height: number } | null {
+    if (e.kind === 'player') {
+      const t = this.game.players.get(e.id);
+      return t && !t.dead ? { x: t.x, y: t.y, z: t.z, height: PLAYER_HEIGHT * 0.7 } : null;
+    }
+    const h = this.game.hounds.get(e.id);
+    return h && h.hp > 0 ? { x: h.x, y: h.y, z: h.z, height: 0.6 } : null;
+  }
+
+  private fight(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    bot.phase = 'fight';
+    const t = this.enemyAt(bot.enemy!)!;
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    const gunSlot = this.beltSlot(p, (s) => !!ITEMS[s.item].weapon && ITEMS[s.item].weapon!.class !== 'melee');
+    const gun = gunSlot >= 0 ? p.slots[gunSlot]! : null;
+    const w = gun ? ITEMS[gun.item].weapon! : null;
+    const hasAmmo = !!gun && ((gun.ammo ?? 0) > 0 || countItem(p.slots, w!.ammo!) > 0);
+    const out: Outgoing[] = [];
+    // Keep at a comfortable range for the weapon, sidestepping; with nothing to shoot, close in.
+    const want = hasAmmo ? Math.min(w!.range * 0.4, 14) : 1.2;
+    if (now > bot.strafeUntil) {
+      bot.strafe = this.rand() < 0.5 ? -1 : 1;
+      bot.strafeUntil = now + 900 + this.rand() * 1400;
+    }
+    const ux = dx / (dist || 1);
+    const uz = dz / (dist || 1);
+    const closing = dist > want + 2 ? 1 : dist < want - 3 ? -0.7 : 0;
+    const vx = ux * closing + -uz * bot.strafe * (hasAmmo ? 0.6 : 0);
+    const vz = uz * closing + ux * bot.strafe * (hasAmmo ? 0.6 : 0);
+    const yaw = Math.atan2(-dx, -dz);
+    out.push(...this.step(bot, p, vx, vz, PLAYER_SPEED * 0.9, yaw, now, dt, hasAmmo ? gunSlot : 0));
+    if (now < bot.nextShotAt) return out;
+    const eye = p.y + EYE_HEIGHT;
+    const aim = (): [number, number, number] => {
+      const dy = t.y + t.height - eye;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const e = () => (this.rand() - 0.5) * 2 * AIM_ERROR;
+      return [dx / len + e(), dy / len + e(), dz / len + e()];
+    };
+    if (hasAmmo && gun) {
+      if ((gun.ammo ?? 0) === 0) {
+        bot.nextShotAt = now + (w!.reload ?? 1) * 1000 + 200;
+        return [...out, ...this.game.reload(bot.id, gunSlot, now)];
+      }
+      if (dist > w!.range * 0.9) return out;
+      bot.nextShotAt = now + Math.max(w!.delay * 1000, 450) + this.rand() * 250;
+      return [...out, ...this.game.fire(bot.id, gunSlot, aim(), false, now)];
+    }
+    if (dist < 2.2) {
+      bot.nextShotAt = now + 700;
+      return [...out, ...this.game.melee(bot.id, 0, aim(), now)];
+    }
+    return out;
+  }
+
+  // Wood, and a hut.
+
+  private gather(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    if (countItem(p.slots, 'wood') >= HUT_WOOD) {
+      bot.node = null;
+      bot.phase = bot.home ? 'roam' : 'build';
+      bot.buildStep = 0;
+      bot.goal = null;
+      return [];
+    }
+    if (!bot.node || bot.node.amount <= 0) {
+      bot.node = this.nearestNode(p, ['tree', 'deadTree']);
+      if (!bot.node) return this.roam(bot, p, now, dt);
+    }
+    const n = bot.node;
+    const reach = 2.2 + RESOURCE_INFO[n.kind].radius;
+    if (Math.hypot(n.x - p.x, n.z - p.z) > reach) return this.walkTo(bot, p, n.x, n.z, reach - 0.4, now, dt);
+    const slot = this.beltSlot(p, (s) => s.item === 'stoneHatchet');
+    const use = slot >= 0 ? slot : 0;
+    const out = this.face(p, n.x, n.z, now, use);
+    return [...out, ...this.game.gather(bot.id, n.id, now, use)];
+  }
+
+  private nearestNode(p: Survivor, kinds: ResourceNode['kind'][]): ResourceNode | null {
+    let best: ResourceNode | null = null;
+    let bestD = 150;
+    for (const n of this.game.resources) {
+      if (!kinds.includes(n.kind) || n.amount <= 0) continue;
+      const d = Math.hypot(n.x - p.x, n.z - p.z);
+      if (d < bestD && radiationAt(this.game.seed, n.x, n.z) === 0) {
+        best = n;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  private build(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    if (bot.buildStep === 0 && bot.home) {
+      // Back to fix up the hut it has: whatever is missing gets put back.
+      bot.goal = { x: bot.home.i * TILE + TILE / 2, z: bot.home.k * TILE - 2.2, near: 0.6 };
+      bot.buildStep = 1;
+    }
+    if (!bot.goal || bot.buildStep === 0) {
+      const spot = this.findSpot(p);
+      if (!spot || bot.spotTries > 6) {
+        // Nowhere to build round here: live without a hut for now.
+        bot.phase = 'roam';
+        bot.spotTries = 0;
+        return [];
+      }
+      bot.spotTries++;
+      bot.home = { ...spot, door: pieceKey({ kind: 'wall', i: spot.i, y: spot.y, k: spot.k, dir: 0 }) };
+      bot.goal = { x: spot.i * TILE + TILE / 2, z: spot.k * TILE - 2.2, near: 0.6 };
+      bot.buildStep = 1;
+    }
+    const home = bot.home!;
+    const g = bot.goal!;
+    if (Math.hypot(g.x - p.x, g.z - p.z) > g.near) return this.walkTo(bot, p, g.x, g.z, g.near, now, dt);
+    if (now < bot.nextShotAt) return [];
+    bot.nextShotAt = now + 600;
+    return this.buildNext(bot, p, home, now);
+  }
+
+  /** One step of the hut each call: floor, box and cupboard, walls, ceiling, doorway, door and lock. */
+  private buildNext(bot: Bot, p: Survivor, home: NonNullable<Bot['home']>, now: number): Outgoing[] {
+    const { i, k, y } = home;
+    const game = this.game;
+    const plan = this.ensureInBelt(p, 'buildingPlan');
+    const pieces: Pick<Piece, 'kind' | 'i' | 'y' | 'k' | 'dir'>[] = [
+      { kind: 'floor', i, y, k, dir: 0 },
+      { kind: 'wall', i, y, k: k + 1, dir: 0 },
+      { kind: 'wall', i, y, k, dir: 1 },
+      { kind: 'wall', i: i + 1, y, k, dir: 1 },
+      { kind: 'wall', i, y, k, dir: 0 },
+      { kind: 'floor', i, y: y + STOREY, k, dir: 0 },
+    ];
+    const step = bot.buildStep;
+    const fail = () => {
+      // Something was in the way: tear up the plan and look for somewhere else.
+      bot.buildStep = 0;
+      bot.goal = null;
+      bot.home = null;
+      return [];
+    };
+    if (step === 1 || (step >= 4 && step <= 8)) {
+      const piece = pieces[step === 1 ? 0 : step - 3];
+      const key = pieceKey(piece);
+      if (!game.pieces.has(key)) {
+        game.players.get(bot.id)!.active = plan;
+        const out = game.place(bot.id, piece.kind, piece.i, piece.y, piece.k, piece.dir, 'wood');
+        const placed = game.pieces.get(key);
+        if (!placed) return step === 1 ? fail() : (bot.buildStep++, out);
+        placed.bot = true;
+        bot.buildStep++;
+        return out;
+      }
+      bot.buildStep++;
+      return [];
+    }
+    if (step === 2 || step === 3) {
+      // A box with some loot in it, and a cupboard to claim the land.
+      const kind = step === 2 ? 'storageBox' : 'toolCupboard';
+      addItem(p.slots, kind, 1);
+      const slot = this.ensureInBelt(p, kind);
+      const x = i * TILE + (step === 2 ? 0.8 : 2.2);
+      const z = k * TILE + 2.4;
+      const out = game.deploy(bot.id, slot, x, y, z, Math.PI);
+      const d = [...game.deployables.values()].find((d) => d.owner === bot.id && d.kind === kind && Math.hypot(d.x - x, d.z - z) < 0.1);
+      if (d && kind === 'storageBox') this.stock(d.slots);
+      if (!d) p.slots[slot] = null;
+      bot.buildStep++;
+      return out;
+    }
+    if (step === 9) {
+      bot.buildStep++;
+      return game.edit(bot.id, home.door, 'door');
+    }
+    if (step === 10) {
+      addItem(p.slots, 'woodenDoor', 1);
+      bot.buildStep++;
+      return game.hangDoor(bot.id, home.door, this.ensureInBelt(p, 'woodenDoor'));
+    }
+    if (step === 11) {
+      addItem(p.slots, 'codeLock', 1);
+      bot.buildStep = 0;
+      bot.goal = null;
+      bot.phase = 'roam';
+      const code = String(Math.floor(this.rand() * 10000)).padStart(4, '0');
+      const out = game.lock(bot.id, home.door, this.ensureInBelt(p, 'codeLock'), code);
+      // Close it, so it has to be raided.
+      const door = game.pieces.get(home.door)?.door;
+      if (door?.open) door.open = false;
+      if (!game.pieces.get(home.door)?.door) bot.home = null;
+      return out;
+    }
+    bot.buildStep = 0;
+    return [];
+  }
+
+  /** What a raider finds in a bot's box: a little of everything worth taking. */
+  private stock(slots: Slots) {
+    const r = () => this.rand();
+    addItem(slots, 'scrap', 40 + Math.floor(r() * 120));
+    addItem(slots, 'metal', 50 + Math.floor(r() * 150));
+    addItem(slots, 'cloth', 10 + Math.floor(r() * 40));
+    if (r() < 0.6) addItem(slots, 'pistolAmmo', 20 + Math.floor(r() * 40));
+    if (r() < 0.5) addItem(slots, 'gunpowder', 20 + Math.floor(r() * 60));
+    if (r() < 0.3) addItem(slots, 'bandage', 2);
+  }
+
+  /** A clear, flat tile near where it stands, away from other buildings, landmarks and radiation. */
+  private findSpot(p: Survivor): { i: number; k: number; y: number } | null {
+    const seed = this.game.seed;
+    for (let r = 4; r < 50; r += 3) {
+      for (let a = this.rand() * 6; a < this.rand() * 6 + Math.PI * 2; a += 0.5) {
+        const i = Math.round((p.x + Math.cos(a) * r) / TILE);
+        const k = Math.round((p.z + Math.sin(a) * r) / TILE);
+        const cx = i * TILE + TILE / 2;
+        const cz = k * TILE + TILE / 2;
+        if (Math.abs(cx) > HALF_WORLD - 12 || Math.abs(cz) > HALF_WORLD - 12) continue;
+        if (atLandmark(seed, cx, cz, 10) || radiationAt(seed, cx, cz) > 0) continue;
+        const y = buildBaseY(seed, cx, cz);
+        let flat = true;
+        for (let dx = -1; dx <= 4 && flat; dx++) for (let dz = -3; dz <= 4 && flat; dz++) flat = Math.abs(terrainHeight(seed, i * TILE + dx, k * TILE + dz) - y) < 0.8;
+        if (!flat) continue;
+        if (this.game.resources.some((n) => Math.hypot(n.x - cx, n.z - cz) < 4 + RESOURCE_INFO[n.kind].radius)) continue;
+        if ([...this.game.pieces.values()].some((q) => Math.hypot(q.i * TILE - cx, q.k * TILE - cz) < 14)) continue;
+        if ([...this.game.deployables.values()].some((d) => Math.hypot(d.x - cx, d.z - cz) < 8)) continue;
+        return { i, k, y };
+      }
+    }
+    return null;
+  }
+
+  // Wandering and raiding.
+
+  private roam(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    if (!bot.home && countItem(p.slots, 'wood') < HUT_WOOD) {
+      bot.phase = 'gather';
+      return [];
+    }
+    // Homeless with wood to spare, or home raided: every so often, build or mend it.
+    const door = bot.home && this.game.pieces.get(bot.home.door)?.door;
+    if ((!bot.home && this.rand() < 0.002) || (bot.home && (!door || !door.locked) && this.rand() < 0.01)) {
+      if (countItem(p.slots, 'wood') < 80) addItem(p.slots, 'wood', 80);
+      bot.phase = 'build';
+      bot.buildStep = 0;
+      return [];
+    }
+    if (!bot.goal || Math.hypot(bot.goal.x - p.x, bot.goal.z - p.z) <= bot.goal.near) {
+      // Somewhere within a stroll of home (or of here), never into a hot crater.
+      const cx = bot.home ? bot.home.i * TILE : p.x;
+      const cz = bot.home ? bot.home.k * TILE : p.z;
+      for (let tries = 0; tries < 8; tries++) {
+        const a = this.rand() * Math.PI * 2;
+        const r = 10 + this.rand() * 45;
+        const x = Math.max(-HALF_WORLD + 10, Math.min(HALF_WORLD - 10, cx + Math.cos(a) * r));
+        const z = Math.max(-HALF_WORLD + 10, Math.min(HALF_WORLD - 10, cz + Math.sin(a) * r));
+        if (radiationAt(this.game.seed, x, z) > 0) continue;
+        bot.goal = { x, z, near: 1.5 };
+        break;
+      }
+      if (!bot.goal) return [];
+    }
+    return this.walkTo(bot, p, bot.goal.x, bot.goal.z, bot.goal.near, now, dt, 0.55);
+  }
+
+  /** Someone else's door within a long walk, human-built ones first, then other bots' huts. */
+  private pickRaid(bot: Bot, p: Survivor): boolean {
+    let best: string | null = null;
+    let bestScore = Infinity;
+    for (const [key, piece] of this.game.pieces) {
+      if (!piece.door || key === bot.home?.door) continue;
+      const d = Math.hypot(piece.i * TILE - p.x, piece.k * TILE - p.z);
+      if (d > 220) continue;
+      // Bots mostly leave each other's huts alone; it's real players' bases they come for.
+      if (piece.bot && this.rand() < 0.75) continue;
+      const score = d + (piece.bot ? 120 : 0);
+      if (score < bestScore) {
+        best = key;
+        bestScore = score;
+      }
+    }
+    if (!best) {
+      bot.raidAt = this.lastTick + this.between(RAID_EVERY) * 1000;
+      return false;
+    }
+    bot.raid = { key: best, planted: 0, leaveAt: 0 };
+    bot.goal = null;
+    return true;
+  }
+
+  private doRaid(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    const raid = bot.raid!;
+    const piece = this.game.pieces.get(raid.key);
+    const done = () => {
+      bot.raid = null;
+      bot.phase = 'roam';
+      bot.goal = null;
+      bot.raidAt = now + this.between(RAID_EVERY) * 1000;
+      return [];
+    };
+    if (!piece?.door) return done();
+    // Wait out the fuse at a safe distance, then go again if the door held.
+    if (raid.leaveAt) {
+      if (now < raid.leaveAt) return this.walkTo(bot, p, bot.goal!.x, bot.goal!.z, 1, now, dt);
+      if (raid.planted >= 4) return done();
+      raid.leaveAt = 0;
+    }
+    const { x: dx, z: dz, nx, nz } = this.doorFace(piece, p);
+    const standX = dx + nx * 1.6;
+    const standZ = dz + nz * 1.6;
+    if (Math.hypot(standX - p.x, standZ - p.z) > 0.7) return this.walkTo(bot, p, standX, standZ, 0.6, now, dt);
+    if (countItem(p.slots, 'satchel') < 1) addItem(p.slots, 'satchel', 2);
+    const slot = this.ensureInBelt(p, 'satchel');
+    const out = this.face(p, dx, dz, now, slot);
+    const at: [number, number, number] = [dx + nx * 0.12, piece.y + 1.1, dz + nz * 0.12];
+    out.push(...this.game.plant(bot.id, slot, at, now, raid.key, true));
+    raid.planted++;
+    // Run back out of the blast and wait.
+    raid.leaveAt = now + 9000;
+    bot.goal = { x: dx + nx * 12, z: dz + nz * 12, near: 1 };
+    return out;
+  }
+
+  /** The middle of a doorway and the way out of it towards the bot's side. */
+  private doorFace(piece: Piece, p: Survivor): { x: number; z: number; nx: number; nz: number } {
+    const mid = (DOORWAY.from + DOORWAY.to) / 2;
+    if (piece.dir === 0) {
+      const x = piece.i * TILE + mid;
+      const z = piece.k * TILE;
+      return { x, z, nx: 0, nz: p.z < z ? -1 : 1 };
+    }
+    const x = piece.i * TILE;
+    const z = piece.k * TILE + mid;
+    return { x, z, nx: p.x < x ? -1 : 1, nz: 0 };
+  }
+
+  // Getting about.
+
+  private walkTo(bot: Bot, p: Survivor, x: number, z: number, near: number, now: number, dt: number, pace = 0.8): Outgoing[] {
+    const dx = x - p.x;
+    const dz = z - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= near) return this.step(bot, p, 0, 0, 0, p.yaw, now, dt, p.active);
+    // Stuck against something for a while: give up on this goal.
+    if (now - bot.lastPos.at > 4000) {
+      const moved = Math.hypot(p.x - bot.lastPos.x, p.z - bot.lastPos.z);
+      bot.lastPos = { x: p.x, z: p.z, at: now };
+      if (moved < 1.5) {
+        bot.goal = null;
+        bot.node = null;
+        if (bot.phase === 'build') bot.buildStep = 0;
+        if (bot.phase === 'raid') {
+          bot.raid = null;
+          bot.phase = 'roam';
+        }
+        return [];
+      }
+    }
+    return this.step(bot, p, dx / d, dz / d, PLAYER_SPEED * pace, Math.atan2(-dx, -dz), now, dt, p.active);
+  }
+
+  /** Moves along (vx, vz) at `speed`, sidestepping walls, and tells the game. */
+  private step(bot: Bot, p: Survivor, vx: number, vz: number, speed: number, yaw: number, now: number, dt: number, slot: number): Outgoing[] {
+    const len = Math.hypot(vx, vz);
+    let x = p.x;
+    let z = p.z;
+    if (len > 0.01 && speed > 0) {
+      const stride = speed * dt;
+      const base = Math.atan2(vz, vx);
+      for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
+        const nx = p.x + Math.cos(base + turn) * stride;
+        const nz = p.z + Math.sin(base + turn) * stride;
+        if (!this.walled(nx, terrainHeight(this.game.seed, nx, nz), nz)) {
+          x = nx;
+          z = nz;
+          break;
+        }
+      }
+    }
+    x = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, x));
+    z = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, z));
+    const moving = x !== p.x || z !== p.z;
+    return this.game.move(bot.id, x, terrainHeight(this.game.seed, x, z), z, yaw, moving, now, slot);
+  }
+
+  private walled(x: number, y: number, z: number): boolean {
+    const me = playerBox({ x, y: y + 0.3, z });
+    for (const piece of this.game.pieces.values()) {
+      if (Math.abs(piece.i * TILE + TILE / 2 - x) > 5 || Math.abs(piece.k * TILE + TILE / 2 - z) > 5) continue;
+      if (pieceBoxes(piece).some((b) => boxesTouch(b, me, -0.02))) return true;
+    }
+    return false;
+  }
+
+  private face(p: Survivor, x: number, z: number, now: number, slot: number): Outgoing[] {
+    return this.game.move(p.id, p.x, p.y, p.z, Math.atan2(-(x - p.x), -(z - p.z)), false, now, slot);
+  }
+
+  /** The belt slot holding an item, moving it onto the belt first if it is only in the pack. */
+  private ensureInBelt(p: Survivor, item: ItemId): number {
+    const belt = p.slots.findIndex((s, n) => n < 6 && s?.item === item);
+    if (belt >= 0) return belt;
+    const from = p.slots.findIndex((s) => s?.item === item);
+    if (from < 0) return -1;
+    // The last belt slot is the bots' spare hand.
+    const spare = 5;
+    const was = p.slots[spare];
+    p.slots[spare] = p.slots[from];
+    p.slots[from] = was;
+    return spare;
+  }
+
+  private beltSlot(p: Survivor, test: (s: NonNullable<Slots[number]>) => boolean): number {
+    return p.slots.findIndex((s, n) => n < 6 && !!s && test(s));
+  }
+
+  private between([a, b]: number[]): number {
+    return a + this.rand() * (b - a);
+  }
+}
