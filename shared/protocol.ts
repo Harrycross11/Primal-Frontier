@@ -62,6 +62,8 @@ export type ClientMessage =
   | { t: 'buy'; pack: string; token?: string }
   /** Your coins and objectives, for the pause menu. */
   | { t: 'getAccount' }
+  /** Asks for an answer straight back, to time the round trip. */
+  | { t: 'ping'; at: number }
   /** From the menu: give this browser's account a name and password. */
   | { t: 'register'; token?: string; name: string; password: string }
   /** From the menu: open an account made elsewhere. */
@@ -153,6 +155,7 @@ export type ServerMessage =
   /** Signed in (or the account was named): play on with this token from now on. */
   | { t: 'signedIn'; name: string; token: string }
   | { t: 'authError'; text: string }
+  | { t: 'pong'; at: number }
   /** You finished one of today's objectives. */
   | { t: 'objectiveDone'; label: string; reward: number }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }

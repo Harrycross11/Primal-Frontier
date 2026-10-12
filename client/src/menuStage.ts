@@ -15,6 +15,7 @@ import { VEHICLES, vehicleSpots, type VehicleKind } from '../../shared/vehicles.
 import { Avatar } from './avatar.ts';
 import { DayNight } from './daynight.ts';
 import { Graphics } from './graphics.ts';
+import { lateModels, warmShaders } from './models.ts';
 import { Vehicles } from './vehicles.ts';
 import { World } from './world.ts';
 
@@ -258,6 +259,15 @@ export class MenuStage {
     if (!this.started) {
       this.started = true;
       this.onReady();
+      // While the menu is up, build the shaders the game will need, so it doesn't stall on them.
+      // They are built for the game's lights: without the menu's key light, which goes at Play.
+      const warm = () => {
+        this.key.visible = false;
+        warmShaders(this.gfx.renderer, cam, this.world.scene);
+        this.key.visible = true;
+      };
+      warm();
+      lateModels.then(warm);
     }
   }
 

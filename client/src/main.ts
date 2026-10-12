@@ -44,7 +44,7 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { lateLoaded, lateModels, loadModels, variants } from './models.ts';
+import { lateLoaded, lateModels, loadModels, variants, warmShaders } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi, planterStatus } from './inventory.ts';
@@ -443,8 +443,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   ui.learned = new Set(welcome.learned ?? []);
   ui.render();
   // Swap the stand-ins for the scanned guns, tools and crops once they arrive.
+  // Shaders for the whole world and every model, unless the menu already built them.
+  if (!ready) warmShaders(gfx.renderer, camera, world.scene);
   if (!lateLoaded())
     lateModels.then(() => {
+      warmShaders(gfx.renderer, camera, world.scene);
       forgetIcons();
       ui.render();
       me.rebuildHeld();
@@ -461,8 +464,28 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     net.send({ t: 'move', x: p.x, y: p.y, z: p.z, yaw: controller.yaw, moving: controller.moving, slot: ui.active });
   };
 
+  // Frame rate and the round trip to the server, in the corner, so lag can be told apart:
+  // a low frame rate is this computer drawing; a high ping is the connection or the server.
+  const netstats = document.getElementById('netstats')!;
+  let frames = 0;
+  let fpsFrom = performance.now();
+  let ping = -1;
+  setInterval(() => net.send({ t: 'ping', at: performance.now() }), 2000);
+  const countFrame = () => {
+    frames++;
+    const now = performance.now();
+    if (now - fpsFrom < 1000) return;
+    const fps = Math.round((frames * 1000) / (now - fpsFrom));
+    frames = 0;
+    fpsFrom = now;
+    const pingText = ping < 0 ? '' : ` · <span class="${ping > 150 ? 'bad' : ''}">${ping} MS</span>`;
+    netstats.innerHTML = `<span class="${fps < 30 ? 'bad' : ''}">${fps} FPS</span>${pingText}`;
+  };
   net.onMessage = (m) => {
     switch (m.t) {
+      case 'pong':
+        ping = Math.round(performance.now() - m.at);
+        break;
       case 'state':
         for (const p of m.players) {
           const r = remotes.get(p.id);
@@ -1561,6 +1584,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     }),
     players: () => [...remotes.values()].map((r) => ({ id: r.state.id, name: r.state.name, x: r.state.x, y: r.state.y, z: r.state.z, dead: r.state.dead })),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
+    /** How many shader programs have been built so far: each new one is a stutter while it compiles. */
+    programs: () => gfx.renderer.info.programs?.map((p) => p.name) ?? [],
     perf: (frames = 5) => {
       const r = gfx.renderer;
       const seen = (o: THREE.Object3D) => {
@@ -1752,6 +1777,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     timer.update(now);
     // The first frame's timestamp can come from before the timer started; never step backwards.
     const dt = Math.max(0, Math.min(timer.getDelta(), 0.05));
+    countFrame();
     time += dt;
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);

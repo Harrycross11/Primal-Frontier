@@ -380,6 +380,28 @@ export function character(name: string): THREE.Object3D | undefined {
   return scene && cloneSkinned(scene);
 }
 
+/**
+ * Builds the shaders for everything in `scene`, hidden parts included, and for every model loaded
+ * so far, before any of it is on screen. Otherwise each new material compiles the first time it is
+ * seen (a land you walk into, an animal, a gun you pick up), and the frame it happens on stalls.
+ * Runs in the background where the browser can compile in parallel.
+ */
+export function warmShaders(renderer: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene): Promise<unknown> {
+  const spare = new THREE.Group();
+  for (const list of models.values()) {
+    for (const m of list) {
+      const mesh = new THREE.Mesh(m.geometry, m.material);
+      mesh.castShadow = mesh.receiveShadow = true;
+      spare.add(mesh);
+    }
+  }
+  for (const name of characters.keys()) {
+    const body = character(name);
+    if (body) spare.add(body);
+  }
+  return Promise.all([renderer.compileAsync(scene, camera), renderer.compileAsync(spare, camera, scene)]).catch(() => {});
+}
+
 /** Whether a rigged character has loaded. */
 export const hasCharacter = (name: string) => characters.has(name);
 
