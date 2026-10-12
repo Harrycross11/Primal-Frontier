@@ -25,7 +25,7 @@ import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ASHHOUND, MOUNT_RANGE, SPECIES } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
-import { atLandmark } from '../../shared/landmarks.ts';
+import { atLandmark, landmarks } from '../../shared/landmarks.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
 import { MATERIALS, RESOURCE_INFO, generateDecor, type Material, type ResourceNode } from '../../shared/world.ts';
 import { Avatar } from './avatar.ts';
@@ -53,6 +53,7 @@ import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.t
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { forgetIcons, itemIconUrl } from './itemIcons.ts';
+import { Compass, type CompassMark } from './compass.ts';
 import { ViewModel } from './viewModel.ts';
 import { daylight } from '../../shared/sky.ts';
 
@@ -249,7 +250,36 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const vehicles = new Vehicles(world.scene, effects, welcome.seed);
   vehicles.sync(welcome.vehicles);
   const map = new WorldMap(welcome.seed, generateDecor(welcome.seed), () => world.aerial(gfx.renderer, [gfx.sky]));
+  /** Your nearest sleeping bag or tool cupboard. */
+  const home = () => {
+    let best: { x: number; z: number } | null = null;
+    let bestD = Infinity;
+    for (const d of world.deployables.values()) {
+      if (d.owner !== welcome.you.id || (d.kind !== 'sleepingBag' && d.kind !== 'toolCupboard')) continue;
+      const dist = Math.hypot(d.x - controller.position.x, d.z - controller.position.z);
+      if (dist < bestD) {
+        best = d;
+        bestD = dist;
+      }
+    }
+    return best;
+  };
+  /** Where you last died, until you get back there or it has been half an hour. */
+  let deathSpot: { x: number; z: number; at: number } | null = null;
+  const sites = landmarks(welcome.seed).map(({ site, landmark }) => ({ kind: 'landmark' as const, x: site.x, z: site.z, label: landmark.name }));
+  const compass = new Compass(document.getElementById('hud')!);
+  const compassMarks = (): CompassMark[] => {
+    const out: CompassMark[] = [...sites];
+    const h = home();
+    if (h) out.push({ kind: 'home', x: h.x, z: h.z });
+    if (deathSpot) out.push({ kind: 'death', x: deathSpot.x, z: deathSpot.z });
+    for (const d of world.deployables.values()) if (d.kind === 'supplyDrop') out.push({ kind: 'drop', x: d.x, z: d.z });
+    for (const r of mates()) out.push({ kind: 'mate', x: r.avatar.root.position.x, z: r.avatar.root.position.z, label: r.state.name });
+    return out;
+  };
   const mapMarks = () => ({
+    home: home(),
+    death: deathSpot,
     x: controller.position.x,
     z: controller.position.z,
     yaw: controller.yaw,
@@ -589,6 +619,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         break;
       case 'died': {
         dead = true;
+        deathSpot = { x: controller.position.x, z: controller.position.z, at: performance.now() };
         triggerHeld = aiming = false;
         // Thrown off whatever you were riding or driving.
         riding = driving = vehicles.mine = creatures.mine = null;
@@ -1831,6 +1862,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       effects.surroundings(biomeWeights(world.seed, p.x, p.z), daylight(dayNight.now), world.nearest('scrap', p, 28), fire, machine);
     }
     map.update(dt, mapMarks());
+    if (deathSpot && !dead && (Math.hypot(deathSpot.x - controller.position.x, deathSpot.z - controller.position.z) < 5 || performance.now() - deathSpot.at > 30 * 60_000)) deathSpot = null;
+    compass.update(controller.position.x, controller.position.z, controller.yaw, compassMarks());
     gfx.render();
   });
 }

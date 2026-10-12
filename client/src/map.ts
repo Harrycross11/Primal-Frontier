@@ -43,6 +43,10 @@ export interface MapMarks {
   cars: { x: number; z: number }[];
   /** Your teammates, wherever they are. */
   mates: { x: number; z: number; name: string }[];
+  /** Your nearest sleeping bag or tool cupboard. */
+  home: { x: number; z: number } | null;
+  /** Where you last died, while it still matters. */
+  death: { x: number; z: number } | null;
 }
 
 export class WorldMap {
@@ -321,6 +325,39 @@ export class WorldMap {
       ctx.arc(px, py, 6.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+    }
+    // Home: a small house; where you died: a red cross.
+    if (marks.home) {
+      const [hx, hy] = this.toPx(marks.home.x, marks.home.z);
+      ctx.fillStyle = '#ebe6da';
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - 13);
+      ctx.lineTo(hx + 12, hy - 2);
+      ctx.lineTo(hx + 8, hy - 2);
+      ctx.lineTo(hx + 8, hy + 9);
+      ctx.lineTo(hx - 8, hy + 9);
+      ctx.lineTo(hx - 8, hy - 2);
+      ctx.lineTo(hx - 12, hy - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (marks.death) {
+      const [dx, dy] = this.toPx(marks.death.x, marks.death.z);
+      ctx.lineCap = 'round';
+      for (const [w, colour] of [[7, '#1c1a18'], [4, '#d23a2c']] as const) {
+        ctx.lineWidth = w;
+        ctx.strokeStyle = colour;
+        ctx.beginPath();
+        ctx.moveTo(dx - 8, dy - 8);
+        ctx.lineTo(dx + 8, dy + 8);
+        ctx.moveTo(dx + 8, dy - 8);
+        ctx.lineTo(dx - 8, dy + 8);
+        ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = '#1c1a18';
+      ctx.lineWidth = 2;
     }
     // You: an arrow pointing the way you face, and the grid square you are in.
     const [px, py] = this.toPx(marks.x, marks.z);

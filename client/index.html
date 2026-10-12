@@ -621,6 +621,9 @@
       .map-key span { display: inline-flex; align-items: center; gap: 7px; }
       .map-key i { display: inline-block; width: 10px; height: 10px; border: 1.5px solid #141210; }
       .map-key .k-you { width: 0; height: 0; border: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 11px solid #fff; }
+      .map-key .k-home { width: 11px; height: 11px; border: 0; background: #ebe6da; clip-path: polygon(50% 0, 100% 45%, 85% 45%, 85% 100%, 15% 100%, 15% 45%, 0 45%); }
+      .map-key .k-death { border: 0; width: 11px; height: 11px; background: linear-gradient(45deg, transparent 40%, #d23a2c 40% 60%, transparent 60%), linear-gradient(-45deg, transparent 40%, #d23a2c 40% 60%, transparent 60%); }
+      #compass { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); pointer-events: none; z-index: 5; }
       .map-key .k-team { border-radius: 50%; background: #5fd06a; }
       .map-key .k-pet { border-radius: 50%; background: #c0502e; }
       .map-key .k-car { width: 14px; height: 9px; background: #4c7480; }
@@ -728,7 +731,7 @@
       <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
       <div id="top-left"><div id="land-name"></div><div id="clock"></div><div id="player-count"></div><div id="player-list"></div></div>
       <div id="land-banner"><div id="banner-name"></div><div id="banner-perk"></div></div>
-      <div id="map" hidden><div class="map-card"><div class="map-head"><h2>Map</h2><span id="map-grid"></span><span class="map-close"><kbd>M</kbd> Close</span></div><canvas id="map-canvas"></canvas><div class="map-key"><span><i class="k-you"></i>You</span><span><i class="k-team"></i>Team</span><span><i class="k-pet"></i>Your animals</span><span><i class="k-car"></i>Vehicles</span><span><i class="k-mark"></i>Landmark</span><span><i class="k-rad"></i>Radiation</span></div></div></div>
+      <div id="map" hidden><div class="map-card"><div class="map-head"><h2>Map</h2><span id="map-grid"></span><span class="map-close"><kbd>M</kbd> Close</span></div><canvas id="map-canvas"></canvas><div class="map-key"><span><i class="k-you"></i>You</span><span><i class="k-home"></i>Home</span><span><i class="k-death"></i>Where you died</span><span><i class="k-team"></i>Team</span><span><i class="k-pet"></i>Your animals</span><span><i class="k-car"></i>Vehicles</span><span><i class="k-mark"></i>Landmark</span><span><i class="k-rad"></i>Radiation</span></div></div></div>
       <div id="resources"></div>
       <div id="kill-feed"></div>
       <div id="pickups"></div>
