@@ -338,6 +338,8 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
 const isLate = (name: string) => /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
+/** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */
+const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 
 /**
  * Loads the models the menu and the world need; resolves even if some fail, so a missing file
@@ -350,16 +352,16 @@ export async function loadModels(progress?: (done: number, total: number) => voi
   const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
   const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
   const names = Object.keys(FIT);
-  const jobs = [lodReady, ...names.filter((n) => !isLate(n)).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.map((n) => loadCharacter(loader, n).catch(warn(n)))];
+  const jobs = [lodReady, ...names.filter((n) => !isLate(n)).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.filter((n) => !LATE_CHARACTERS.includes(n)).map((n) => loadCharacter(loader, n).catch(warn(n)))];
   let done = 0;
   progress?.(0, jobs.length);
   await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
   // A few at a time, so they never crowd out anything the menu fetches.
-  const late = names.filter(isLate);
+  const late = [...LATE_CHARACTERS, ...names.filter(isLate)];
   const next = async (): Promise<void> => {
     const n = late.shift();
     if (!n) return;
-    await load(loader, n).catch(warn(n));
+    await (LATE_CHARACTERS.includes(n) ? loadCharacter(loader, n) : load(loader, n)).catch(warn(n));
     return next();
   };
   Promise.all([next(), next(), next(), next()]).then(() => gotLate());
@@ -367,7 +369,7 @@ export async function loadModels(progress?: (done: number, total: number) => voi
 
 let late = false;
 let gotLate!: () => void;
-/** Resolves once the guns and tools have loaded (or failed to), after `loadModels`. */
+/** Resolves once the animals, guns and tools have loaded (or failed to), after `loadModels`. */
 export const lateModels = new Promise<void>((resolve) => (gotLate = resolve)).then(() => void (late = true));
 /** Whether `lateModels` has resolved. */
 export const lateLoaded = () => late;
@@ -377,6 +379,9 @@ export function character(name: string): THREE.Object3D | undefined {
   const scene = characters.get(name);
   return scene && cloneSkinned(scene);
 }
+
+/** Whether a rigged character has loaded. */
+export const hasCharacter = (name: string) => characters.has(name);
 
 /** The animations a rigged character came with (none if it has none or didn't load). */
 export function characterClips(name: string): THREE.AnimationClip[] {

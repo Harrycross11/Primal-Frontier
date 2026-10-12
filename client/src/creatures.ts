@@ -8,7 +8,7 @@ import { SPECIES, rayCreature, type CreatureAnim, type CreatureState, type Speci
 import type { Vec3 } from '../../shared/combat.ts';
 import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
-import { character, characterClips, model, soleMaterial } from './models.ts';
+import { character, characterClips, hasCharacter, model, soleMaterial } from './models.ts';
 
 /** The scanned saddle's fitted length (models.ts FIT). */
 const SADDLE_LENGTH = 1;
@@ -144,6 +144,8 @@ let ashMaterial: Map<THREE.Material, THREE.Material> | null = null;
 class HoundView {
   readonly root = new THREE.Group();
   state: CreatureState;
+  /** Whether its model was there to build it with; animals load just after the menu shows. */
+  loaded = false;
   private mixer: THREE.AnimationMixer | null = null;
   private actions = new Map<CreatureAnim, THREE.AnimationAction>();
   private playing: CreatureAnim | null = null;
@@ -175,6 +177,7 @@ class HoundView {
     const look = LOOKS[this.species];
     const body = character(look.model);
     if (!body) return;
+    this.loaded = true;
     body.updateMatrixWorld(true);
     body.traverse((o) => (o as THREE.SkinnedMesh).skeleton?.update());
     // Turn it to face +z, the way the server's animals look: towards its head.
@@ -333,6 +336,11 @@ export class Creatures {
     for (const s of list) {
       seen.add(s.id);
       let view = this.views.get(s.id);
+      // One made before its model arrived is built again now it has.
+      if (view && !view.loaded && hasCharacter(LOOKS[view.species].model)) {
+        this.scene.remove(view.root);
+        view = undefined;
+      }
       if (!view) {
         view = new HoundView(s);
         this.views.set(s.id, view);

@@ -88,6 +88,13 @@ export class ViewModel {
     this.root.traverse((o) => (o.userData.noAO = true));
   }
 
+  /** Builds what is in your hands again, once its scanned model has arrived. */
+  rebuild() {
+    const { item, paint } = this;
+    this.paint = -1;
+    this.set(item, paint);
+  }
+
   /** What is in your hands, and its paint. */
   set(item: ItemId | null, paint = 0) {
     if (item === this.item && paint === this.paint) return;

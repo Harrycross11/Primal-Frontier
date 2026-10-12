@@ -2,8 +2,9 @@
 so the game downloads faster and fits in an ordinary laptop's graphics memory.
 
 Colour maps keep up to 1024 pixels; normal, roughness and occlusion maps go down to 512,
-as their detail barely shows at the size these models are seen. Natural scans (boulders,
-rubble, ruins, logs, wrecks, plants) are left alone: they are big on screen and fill the
+as their detail barely shows at the size these models are seen. The same goes for the small
+things lying about (logs, stumps, stones, branches, bushes) and everything players place.
+Big natural scans (boulders, rubble, ruins, trees, wrecks) are left alone: they fill the
 view up close. Only the images change; the meshes are copied over untouched, so there is
 nothing to re-check in the game. Safe to run again: images already small enough are kept.
 
@@ -19,7 +20,15 @@ import struct
 from PIL import Image
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', 'client', 'public', 'models')
-SHRINK = ('gun-', 'tool-', 'lm-', 'vehicle-', 'gear-', 'crate', 'barrel', 'tyre', 'plane', 'parachute')
+SHRINK = (
+    'gun-', 'tool-', 'lm-', 'vehicle-', 'gear-', 'crate', 'barrel', 'tyre', 'plane', 'parachute',
+    # Small natural props.
+    'branches', 'dead-branch', 'dry-bush', 'dry-grass', 'log', 'stump', 'stones', 'mushroom',
+    # Things players place, and the parts and props around landmarks.
+    'campfire', 'charge-', 'cupboard', 'door-', 'furnace', 'keypad', 'loot-bag', 'part-', 'planter',
+    'power-pole', 'rad-sign', 'recycler', 'sleeping-bag', 'storage-box', 'toolchest', 'water-drum',
+    'workbench-',
+)
 COLOUR_MAX = 1024
 DETAIL_MAX = 512
 
