@@ -247,6 +247,9 @@ wss.on('connection', (ws) => {
         deliver([{ to: id, msg: { t: 'notice', text: result.text } }, ...[game.account(id, now)].filter((o) => o !== null)]);
         break;
       }
+      case 'ping':
+        send(ws, { t: 'pong', at: Number(msg.at) || 0 });
+        break;
       case 'getAccount': {
         const o = game.account(id, now);
         if (o) deliver([o]);
