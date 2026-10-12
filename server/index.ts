@@ -11,6 +11,7 @@ import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
 import { Bots } from './bots.ts';
 import { Game, cleanToken, type Outgoing } from './game.ts';
 import { openStore } from './store.ts';
+import type { RegisterResult } from './accounts.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const SEED = Number(process.env.SEED ?? Math.floor(Math.random() * 2 ** 31));
@@ -154,8 +155,18 @@ function deliver(out: Outgoing[]) {
   }
 }
 
+/** What to tell someone whose account couldn't be named. */
+const REGISTER_ERRORS: Record<Exclude<RegisterResult, 'ok'>, string> = {
+  badName: 'Names are 3 to 16 letters, numbers, spaces, dashes or underscores.',
+  badPassword: 'Passwords need at least 6 characters.',
+  already: 'This account already has a name. Sign out to make another.',
+  taken: 'That name is taken. Try another.',
+};
+
 wss.on('connection', (ws) => {
   let id: number | null = null;
+  /** When this connection last tried to sign in or make an account. */
+  let tries: number[] = [];
 
   ws.on('message', (raw) => {
     let msg: ClientMessage;
@@ -176,6 +187,31 @@ wss.on('connection', (ws) => {
         }
         const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
         send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
+        return;
+      }
+      if (msg.t === 'register' || msg.t === 'signIn') {
+        // A few tries a minute, so passwords can't be guessed by the thousand.
+        tries = tries.filter((t) => now - t < 60_000);
+        if (tries.length >= 8) {
+          send(ws, { t: 'authError', text: 'Too many tries. Wait a minute and try again.' });
+          return;
+        }
+        tries.push(now);
+        const name = String(msg.name ?? '').trim();
+        const password = String(msg.password ?? '');
+        if (msg.t === 'signIn') {
+          game.accounts.signIn(name, password).then((found) => {
+            if (!found) send(ws, { t: 'authError', text: 'That name and password don\'t match an account.' });
+            else send(ws, { t: 'signedIn', ...found });
+          });
+          return;
+        }
+        const token = cleanToken(msg.token);
+        if (!token) return;
+        game.accounts.register(token, name, password, now).then((result) => {
+          if (result === 'ok') send(ws, { t: 'signedIn', name, token });
+          else send(ws, { t: 'authError', text: REGISTER_ERRORS[result] });
+        });
         return;
       }
       if (msg.t !== 'join') return;

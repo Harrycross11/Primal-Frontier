@@ -154,9 +154,31 @@ const lobbyMessages = (m: ServerMessage) => {
     }
   }
   if (m.t === 'notice') lobby.toast(m.text);
+  if (m.t === 'authError') lobby.authError(m.text);
+  if (m.t === 'signedIn') {
+    // This browser plays as that account from now on.
+    try {
+      localStorage.setItem('pf-token', m.token);
+    } catch {
+      /* storage unavailable */
+    }
+    lobby.signedIn(m.name);
+    net.send({ t: 'hello', token: survivorToken() });
+  }
 };
 net.onMessage = lobbyMessages;
 lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
+lobby.onSignIn = (name, password) => net.send({ t: 'signIn', name, password });
+lobby.onRegister = (name, password) => net.send({ t: 'register', name, password, token: survivorToken() });
+lobby.onSignOut = () => {
+  try {
+    localStorage.setItem('pf-token', crypto.randomUUID());
+  } catch {
+    /* storage unavailable */
+  }
+  lobby.toast('Signed out. Sign in again to get your survivor back.');
+  net.send({ t: 'hello', token: survivorToken() });
+};
 net
   .opened()
   .then(() => net.send({ t: 'hello', token: survivorToken() }))
