@@ -54,6 +54,11 @@ export class Compass {
     this.drawn = key;
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
+    // A flat dark band like the other HUD panels, so it reads against a bright sky.
+    ctx.fillStyle = 'rgba(13,12,10,.55)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(235,230,218,.08)';
+    ctx.fillRect(0, H - 1, W, 1);
     const toX = (deg: number) => {
       const off = ((deg - heading + 540) % 360) - 180;
       return Math.abs(off) > SPAN ? null : W / 2 + (off / SPAN) * (W / 2 - 14);
