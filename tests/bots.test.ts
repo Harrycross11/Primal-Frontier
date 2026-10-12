@@ -93,3 +93,19 @@ test('bots leave a fresh spawn alone for the first minute', () => {
   }
   assert.equal(shots, 0);
 });
+
+test('a raider goes through the broken door and empties the box inside', () => {
+  const game = new Game(1234);
+  const bots = new Bots(game, 3, mulberry32(2));
+  bots.balance(0, 0);
+  let now = run(game, bots, 0, 600);
+  const boxes = [...game.deployables.values()].filter((d) => d.kind === 'storageBox' && bots.isBot(d.owner));
+  assert.ok(boxes.length >= 2, `boxes: ${boxes.length}`);
+  const stacks = () => boxes.reduce((n, b) => n + b.slots.filter(Boolean).length, 0);
+  const before = stacks();
+  // Every hut counts as a player's, and everyone goes raiding now.
+  for (const p of game.pieces.values()) p.bot = false;
+  for (const b of (bots as unknown as { bots: Map<number, { raidAt: number }> }).bots.values()) b.raidAt = now;
+  for (let n = 0; n < 40 && stacks() >= before; n++) now = run(game, bots, now, 30);
+  assert.ok(stacks() < before, 'no box was looted');
+});

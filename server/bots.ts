@@ -7,7 +7,8 @@
 import { PLAYER_HEIGHT, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
 import { EYE_HEIGHT } from '../shared/combat.ts';
 import { DOORWAY, STOREY, TILE, boxesTouch, buildBaseY, pieceBoxes, pieceKey, type Piece } from '../shared/building.ts';
-import { ITEMS, addItem, countItem, type ItemId, type Slots } from '../shared/items.ts';
+import { BELT_SIZE, ITEMS, addItem, countItem, type ItemId, type Slots } from '../shared/items.ts';
+import type { Deployable, DeployableKind } from '../shared/deployables.ts';
 import { randomLook } from '../shared/look.ts';
 import { atLandmark } from '../shared/landmarks.ts';
 import { radiationAt } from '../shared/survival.ts';
@@ -37,6 +38,10 @@ const HUT_WOOD = 200;
 /** Seconds between raids for each bot, roughly. */
 const RAID_EVERY = [360, 720];
 const RESPAWN_AFTER = 8;
+/** Seconds a raider spends going through a base's boxes once the door is down. */
+const LOOT_FOR = 60;
+/** What a raider empties. */
+const LOOTED: DeployableKind[] = ['storageBox', 'furnace', 'campfire', 'lootBag'];
 
 type Phase = 'gather' | 'build' | 'roam' | 'raid' | 'fight';
 
@@ -54,13 +59,25 @@ interface Bot {
   buildStep: number;
   spotTries: number;
   raidAt: number;
-  raid: { key: string; planted: number; leaveAt: number } | null;
+  raid: Raid | null;
   deadAt: number;
   nextShotAt: number;
   strafe: number;
   strafeUntil: number;
   /** For noticing when it is stuck against something. */
   lastPos: { x: number; z: number; at: number };
+}
+
+interface Raid {
+  /** The doorway being blown open. */
+  key: string;
+  planted: number;
+  leaveAt: number;
+  /** The middle of the doorway and the way out of it, towards where the raider came from. */
+  door: { x: number; z: number; nx: number; nz: number } | null;
+  /** Once the door is down: when it stops going through the boxes, and when it takes the next stack. */
+  lootUntil: number;
+  nextTake: number;
 }
 
 type Survivor = NonNullable<ReturnType<Game['players']['get']>>;
@@ -549,7 +566,7 @@ export class Bots {
       bot.raidAt = this.lastTick + this.between(RAID_EVERY) * 1000;
       return false;
     }
-    bot.raid = { key: best, planted: 0, leaveAt: 0 };
+    bot.raid = { key: best, planted: 0, leaveAt: 0, door: null, lootUntil: 0, nextTake: 0 };
     bot.goal = null;
     return true;
   }
@@ -564,7 +581,8 @@ export class Bots {
       bot.raidAt = now + this.between(RAID_EVERY) * 1000;
       return [];
     };
-    if (!piece?.door) return done();
+    // The door is down: go in and empty the boxes.
+    if (!piece?.door) return raid.door ? this.loot(bot, p, raid, now, dt, done) : done();
     // Wait out the fuse at a safe distance, then go again if the door held.
     if (raid.leaveAt) {
       if (now < raid.leaveAt) return this.walkTo(bot, p, bot.goal!.x, bot.goal!.z, 1, now, dt);
@@ -581,9 +599,47 @@ export class Bots {
     const at: [number, number, number] = [dx + nx * 0.12, piece.y + 1.1, dz + nz * 0.12];
     out.push(...this.game.plant(bot.id, slot, at, now, raid.key, true));
     raid.planted++;
+    raid.door = { x: dx, z: dz, nx, nz };
     // Run back out of the blast and wait.
     raid.leaveAt = now + 9000;
     bot.goal = { x: dx + nx * 12, z: dz + nz * 12, near: 1 };
+    return out;
+  }
+
+  /**
+   * Through the broken doorway to the boxes inside, taking one stack at a time until they are
+   * empty, its pockets are full or a minute is up. What it takes drops with it when it dies.
+   */
+  private loot(bot: Bot, p: Survivor, raid: Raid, now: number, dt: number, done: () => Outgoing[]): Outgoing[] {
+    const door = raid.door!;
+    raid.lootUntil ||= now + LOOT_FOR * 1000;
+    if (now > raid.lootUntil) return done();
+    const inward = (x: number, z: number) => (door.x - x) * door.nx + (door.z - z) * door.nz;
+    let box: Deployable | null = null;
+    let best = Infinity;
+    for (const d of this.game.deployables.values()) {
+      if (!LOOTED.includes(d.kind) || !d.slots.some(Boolean)) continue;
+      if (Math.hypot(d.x - door.x, d.z - door.z) > 9 || inward(d.x, d.z) < 0) continue;
+      const dist = Math.hypot(d.x - p.x, d.z - p.z);
+      if (dist < best) {
+        box = d;
+        best = dist;
+      }
+    }
+    if (!box) return done();
+    // Line up outside the doorway first, so it walks straight through rather than into a wall.
+    const outside = -inward(p.x, p.z);
+    if (outside > 2.3) return this.walkTo(bot, p, door.x + door.nx * 1.6, door.z + door.nz * 1.6, 0.6, now, dt);
+    if (outside > -0.6) return this.walkTo(bot, p, door.x - door.nx * 1.2, door.z - door.nz * 1.2, 0.4, now, dt);
+    if (best > 1.6) return this.walkTo(bot, p, box.x, box.z, 1.4, now, dt);
+    const out = this.face(p, box.x, box.z, now, p.active);
+    if (now < raid.nextTake) return out;
+    raid.nextTake = now + 700;
+    const from = box.slots.findIndex(Boolean);
+    // The backpack before the belt, which holds its weapons.
+    const free = p.slots.findIndex((s, i) => !s && i >= BELT_SIZE);
+    if (free < 0) return done();
+    out.push(...this.game.moveItem(bot.id, { c: box.id, i: from }, { c: 'me', i: free }));
     return out;
   }
 
@@ -606,7 +662,11 @@ export class Bots {
     const dx = x - p.x;
     const dz = z - p.z;
     const d = Math.hypot(dx, dz);
-    if (d <= near) return this.step(bot, p, 0, 0, 0, p.yaw, now, dt, p.active);
+    if (d <= near) {
+      // Standing still on purpose isn't being stuck.
+      bot.lastPos = { x: p.x, z: p.z, at: now };
+      return this.step(bot, p, 0, 0, 0, p.yaw, now, dt, p.active);
+    }
     // Stuck against something for a while: give up on this goal.
     if (now - bot.lastPos.at > 4000) {
       const moved = Math.hypot(p.x - bot.lastPos.x, p.z - bot.lastPos.z);
@@ -618,6 +678,8 @@ export class Bots {
         if (bot.phase === 'raid') {
           bot.raid = null;
           bot.phase = 'roam';
+          // Not straight back to the same door.
+          bot.raidAt = now + this.between(RAID_EVERY) * 1000;
         }
         return [];
       }
@@ -636,7 +698,7 @@ export class Bots {
       for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
         const nx = p.x + Math.cos(base + turn) * stride;
         const nz = p.z + Math.sin(base + turn) * stride;
-        if (!this.walled(nx, terrainHeight(this.game.seed, nx, nz), nz)) {
+        if (!this.walled(nx, this.standY(nx, nz, p.y), nz)) {
           x = nx;
           z = nz;
           break;
@@ -646,7 +708,19 @@ export class Bots {
     x = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, x));
     z = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, z));
     const moving = x !== p.x || z !== p.z;
-    return this.game.move(bot.id, x, terrainHeight(this.game.seed, x, z), z, yaw, moving, now, slot);
+    return this.game.move(bot.id, x, this.standY(x, z, p.y), z, yaw, moving, now, slot);
+  }
+
+  /** The ground at a point, or the floor laid over it if that is within a step of `from`. */
+  private standY(x: number, z: number, from: number): number {
+    let y = terrainHeight(this.game.seed, x, z);
+    const i = Math.floor(x / TILE);
+    const k = Math.floor(z / TILE);
+    for (const piece of this.game.pieces.values()) {
+      if (piece.i !== i || piece.k !== k || (piece.kind !== 'floor' && piece.kind !== 'foundation')) continue;
+      if (piece.y > y && piece.y <= from + 0.8) y = piece.y;
+    }
+    return y;
   }
 
   private walled(x: number, y: number, z: number): boolean {
