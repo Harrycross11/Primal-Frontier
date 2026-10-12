@@ -44,7 +44,7 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { lateLoaded, lateModels, loadModels, variants } from './models.ts';
+import { lateLoaded, lateModels, loadModels, variants, warmShaders } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi, planterStatus } from './inventory.ts';
@@ -443,8 +443,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   ui.learned = new Set(welcome.learned ?? []);
   ui.render();
   // Swap the stand-ins for the scanned guns, tools and crops once they arrive.
+  // Shaders for the whole world and every model, unless the menu already built them.
+  if (!ready) warmShaders(gfx.renderer, camera, world.scene);
   if (!lateLoaded())
     lateModels.then(() => {
+      warmShaders(gfx.renderer, camera, world.scene);
       forgetIcons();
       ui.render();
       me.rebuildHeld();
