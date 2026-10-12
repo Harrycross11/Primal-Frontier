@@ -1061,6 +1061,15 @@ export class World {
     if (this.pieceMeshes.has(key)) this.pops.set(key, { t: kind === 'rise' ? 0.28 : 0.18, kind });
   }
 
+  /** Builds every deployable of a kind again, once its scanned model has arrived. */
+  rebuildDeployables(kind: Deployable['kind']) {
+    for (const [id, d] of [...this.deployables]) {
+      if (d.kind !== kind) continue;
+      this.setDeployable(id, null);
+      this.setDeployable(id, d);
+    }
+  }
+
   setDeployable(id: number, d: Deployable | null) {
     const old = this.deployableMeshes.get(id);
     if (!d) {

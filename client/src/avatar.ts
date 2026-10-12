@@ -329,6 +329,14 @@ export class Avatar {
     this.tag = tag;
   }
 
+  /** Builds what they hold again, once its scanned model has arrived. */
+  rebuildHeld() {
+    const item = this.held;
+    if (item === undefined) return;
+    this.held = undefined;
+    this.setHeld(item, this.heldPaint);
+  }
+
   /** Shows the item in their right hand. */
   setHeld(item: ItemId | null, paint = 0) {
     if (item === this.held && paint === this.heldPaint) return;

@@ -52,7 +52,7 @@ import { Net } from './net.ts';
 import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.ts';
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
-import { itemIconUrl } from './itemIcons.ts';
+import { forgetIcons, itemIconUrl } from './itemIcons.ts';
 import { ViewModel } from './viewModel.ts';
 import { daylight } from '../../shared/sky.ts';
 
@@ -177,13 +177,9 @@ hud.onPlay(async (name) => {
       return;
     }
   }
-  // Join only with everything loaded, so you never stand in the world unable to act.
+  // The animals, guns and tools may still be arriving; held things show a simple stand-in
+  // until they do (see `lateModels` in startGame).
   await modelsReady;
-  if (!lateLoaded()) {
-    hud.setPlayWaiting(true);
-    await lateModels;
-    hud.setPlayWaiting(false);
-  }
   net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
   const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
     net.onMessage = (m) => {
@@ -394,6 +390,16 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   ui.wear = welcome.wear;
   ui.learned = new Set(welcome.learned ?? []);
   ui.render();
+  // Swap the stand-ins for the scanned guns, tools and crops once they arrive.
+  if (!lateLoaded())
+    lateModels.then(() => {
+      forgetIcons();
+      ui.render();
+      me.rebuildHeld();
+      view.rebuild();
+      for (const r of remotes.values()) r.avatar.rebuildHeld();
+      world.rebuildDeployables('planter');
+    });
   const refreshPlayers = () =>
     hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
   refreshPlayers();

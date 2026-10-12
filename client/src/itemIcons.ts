@@ -40,6 +40,11 @@ function setup() {
   return studio;
 }
 
+/** Drops the rendered icons, so the next ask draws them again (once the scanned models have come). */
+export function forgetIcons() {
+  urls.clear();
+}
+
 /** An image URL of the item's model, or null where WebGL or a model isn't available. */
 export function itemIconUrl(item: ItemId): string | null {
   if (urls.has(item)) return urls.get(item)!;
