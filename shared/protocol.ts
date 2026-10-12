@@ -62,6 +62,10 @@ export type ClientMessage =
   | { t: 'buy'; pack: string; token?: string }
   /** Your coins and objectives, for the pause menu. */
   | { t: 'getAccount' }
+  /** From the menu: give this browser's account a name and password. */
+  | { t: 'register'; token?: string; name: string; password: string }
+  /** From the menu: open an account made elsewhere. */
+  | { t: 'signIn'; name: string; password: string }
   | { t: 'move'; x: number; y: number; z: number; yaw: number; moving: boolean; slot: number }
   /** Hit a resource node with the item in a belt slot. */
   | { t: 'gather'; id: number; slot: number }
@@ -146,6 +150,9 @@ export type ServerMessage =
   /** The main menu's view: your account (if your browser has a token) and the server. */
   | { t: 'lobby'; account: AccountView | null; online: number; max: number; wipeIn: number; seed: number; now: number }
   | { t: 'account'; account: AccountView }
+  /** Signed in (or the account was named): play on with this token from now on. */
+  | { t: 'signedIn'; name: string; token: string }
+  | { t: 'authError'; text: string }
   /** You finished one of today's objectives. */
   | { t: 'objectiveDone'; label: string; reward: number }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }

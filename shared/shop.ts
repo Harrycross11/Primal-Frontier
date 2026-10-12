@@ -92,4 +92,6 @@ export interface AccountView {
   objectives: ObjectiveState[];
   /** Milliseconds until tomorrow's objectives. */
   resetIn: number;
+  /** The name it signs in with, or null for a guest playing on this browser only. */
+  name: string | null;
 }

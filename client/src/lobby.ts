@@ -56,6 +56,12 @@ export class Lobby {
   private toastTimer = 0;
   /** Asks the server to unlock a pack. */
   onBuy: (pack: string) => void = () => {};
+  /** Asks the server to open an account by name and password. */
+  onSignIn: (name: string, password: string) => void = () => {};
+  /** Asks the server to give this browser's account a name and password. */
+  onRegister: (name: string, password: string) => void = () => {};
+  /** Goes back to being a fresh guest on this browser. */
+  onSignOut: () => void = () => {};
 
   private stage: MenuStage | null = null;
   /** The store's pictures of each pack, rendered from the menu's stage. */
@@ -67,6 +73,7 @@ export class Lobby {
     const chip = () => ($('lobby-name-chip').textContent = name.value.trim() || 'Survivor');
     name.addEventListener('input', chip);
     setTimeout(chip, 0);
+    this.wireAccount();
     this.renderBundles();
     this.renderStore();
     this.renderGarage();
@@ -104,6 +111,63 @@ export class Lobby {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen?.().catch(() => {});
     });
+  }
+
+  /** The sign-in box, and the line under Play that opens it. */
+  private wireAccount() {
+    const box = $('lobby-account');
+    const name = $('account-name') as HTMLInputElement;
+    const password = $('account-password') as HTMLInputElement;
+    const buttons = [$('account-signin'), $('account-create')] as HTMLButtonElement[];
+    const close = () => (box.hidden = true);
+    const send = (create: boolean) => {
+      const n = name.value.trim();
+      if (!n || !password.value) return this.authError('Type an account name and a password.');
+      $('account-error').textContent = '';
+      for (const b of buttons) b.disabled = true;
+      (create ? this.onRegister : this.onSignIn)(n, password.value);
+    };
+    $('account-open').addEventListener('click', () => {
+      if (this.account?.name) {
+        this.onSignOut();
+        return;
+      }
+      $('account-error').textContent = '';
+      password.value = '';
+      for (const b of buttons) b.disabled = false;
+      box.hidden = false;
+      name.focus();
+    });
+    $('account-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      send(false);
+    });
+    $('account-create').addEventListener('click', () => send(true));
+    $('account-cancel').addEventListener('click', close);
+    box.addEventListener('click', (e) => e.target === box && close());
+  }
+
+  /** The server turned down a sign-in or a new account. */
+  authError(text: string) {
+    $('account-error').textContent = text;
+    for (const b of [$('account-signin'), $('account-create')] as HTMLButtonElement[]) b.disabled = false;
+  }
+
+  /** Signed in: close the box and play under the account's name. */
+  signedIn(name: string) {
+    $('lobby-account').hidden = true;
+    ($('account-password') as HTMLInputElement).value = '';
+    const input = $('name') as HTMLInputElement;
+    input.value = name;
+    input.dispatchEvent(new Event('input'));
+    this.toast(`Signed in as ${name}`);
+  }
+
+  private renderAccount() {
+    const name = this.account?.name;
+    $('account-state').innerHTML = name ? `Signed in as <b></b>` : 'Guest on this browser';
+    if (name) $('account-state').querySelector('b')!.textContent = name;
+    $('account-open').textContent = name ? 'Sign out' : 'Sign in';
   }
 
   show(tab: Tab) {
@@ -148,6 +212,7 @@ export class Lobby {
     }
     this.renderStore();
     this.renderGarage();
+    this.renderAccount();
   }
 
   toast(text: string) {

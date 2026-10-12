@@ -90,3 +90,27 @@ test('playing counts towards objectives and says when one is done', () => {
   assert.ok(heard, 'told after 20 minutes alive');
   assert.ok(game.accounts.view(TOKEN, start).objectives.find((o) => o.id === 'survive')!.done);
 });
+
+test('an account with a name and password can be signed in to from anywhere', async () => {
+  const accounts = new Accounts();
+  const token = 'browser-token-aaaaaaaa';
+  accounts.get(token, 0).coins = 777;
+  assert.equal(await accounts.register(token, 'Ash', 'hunter22', 0), 'ok');
+  assert.equal(accounts.view(token, 0).name, 'Ash');
+  // Another browser, another guest, can't take the name.
+  assert.equal(await accounts.register('other-token-bbbbbbbb', 'ash', 'whatever1', 0), 'taken');
+  assert.equal(await accounts.register(token, 'Ash2', 'hunter22', 0), 'already');
+  assert.equal(await accounts.register('third-token-cccccccc', 'x', 'hunter22', 0), 'badName');
+  assert.equal(await accounts.register('third-token-cccccccc', 'Rowan', '123', 0), 'badPassword');
+  // Signing in hands back the same account, whatever the case of the name.
+  assert.deepEqual(await accounts.signIn('ASH', 'hunter22'), { token, name: 'Ash' });
+  assert.equal(await accounts.signIn('Ash', 'wrong-one'), null);
+  assert.equal(await accounts.signIn('Nobody', 'hunter22'), null);
+  // The password itself is never kept.
+  assert.ok(!JSON.stringify(accounts.dump()).includes('hunter22'));
+  // And it all survives a save and load.
+  const again = new Accounts();
+  again.load(JSON.parse(JSON.stringify(accounts.dump())));
+  assert.deepEqual(await again.signIn('ash', 'hunter22'), { token, name: 'Ash' });
+  assert.equal(again.view(token, 0).coins, 777);
+});
