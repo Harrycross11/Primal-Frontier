@@ -389,6 +389,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
 
   // Inventory and what is in your hands.
   let slots: Slots = welcome.slots;
+  guide.inventory(slots);
   let pieceKind: PieceKind = 'wall';
   let material: Material = 'wood';
   /** The paint new building pieces go up in. */
