@@ -54,6 +54,7 @@ import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
 import { forgetIcons, itemIconUrl } from './itemIcons.ts';
 import { Compass, type CompassMark } from './compass.ts';
+import { Guide } from './guide.ts';
 import { ViewModel } from './viewModel.ts';
 import { daylight } from '../../shared/sky.ts';
 
@@ -290,6 +291,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let deathSpot: { x: number; z: number; at: number } | null = null;
   const sites = landmarks(welcome.seed).map(({ site, landmark }) => ({ kind: 'landmark' as const, x: site.x, z: site.z, label: landmark.name }));
   const compass = new Compass(document.getElementById('hud')!);
+  const guide = new Guide(document.getElementById('hud')!, (text) => {
+    hud.notice(text, 3);
+    effects.objective();
+  });
   const compassMarks = (): CompassMark[] => {
     const out: CompassMark[] = [...sites];
     const h = home();
@@ -384,6 +389,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
 
   // Inventory and what is in your hands.
   let slots: Slots = welcome.slots;
+  guide.inventory(slots);
   let pieceKind: PieceKind = 'wall';
   let material: Material = 'wood';
   /** The paint new building pieces go up in. */
@@ -540,6 +546,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         ui.slots = slots;
         ui.wear = m.wear;
         ui.render();
+        guide.inventory(slots);
         break;
       }
       case 'crafting':
@@ -561,6 +568,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const old = world.pieces.get(m.key);
         world.setPiece(m.key, m.piece);
         pieceEffects(old ?? null, m.piece);
+        if (!old && m.piece && m.by === welcome.id) guide.happened('built');
         if (m.by !== welcome.id) remotes.get(m.by)?.avatar.swing();
         break;
       }
@@ -568,6 +576,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const old = world.deployables.get(m.id);
         world.setDeployable(m.id, m.d);
         const kind = (m.d ?? old)?.kind;
+        if (m.by === welcome.id && kind === 'sleepingBag' && !old && m.d) guide.happened('bagPlaced');
+        if (m.by === welcome.id && kind && CRATE_KINDS.includes(kind) && old) guide.happened('crateLooted');
         if (kind && kind !== 'lootBag' && kind !== 'supplySignal' && !CHARGE_KINDS.includes(kind) && !CRATE_KINDS.includes(kind)) deployableEffects(old ?? null, m.d);
         if (!old && (m.d?.kind === 'beancan' || m.d?.kind === 'supplySignal')) {
           // The grenade or signal flies there from the thrower's hand before it shows where it landed.
@@ -856,6 +866,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
     if (e.code === 'KeyH') hud.toggleHelp();
+    if (e.code === 'KeyJ' && guide.active) {
+      guide.dismiss();
+      hud.notice('Guide hidden');
+    }
     if (e.code === 'KeyV') {
       firstPerson = !firstPerson;
       try {
