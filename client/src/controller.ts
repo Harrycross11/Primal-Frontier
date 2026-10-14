@@ -167,7 +167,7 @@ export class Controller {
     }
     this.raycaster.set(pivot, back);
     this.raycaster.far = dist;
-    const hit = this.raycaster.intersectObjects(this.world.cameraBlockers, true)[0];
+    const hit = this.raycaster.intersectObjects(this.world.within(this.world.cameraBlockers, pivot, dist), true)[0];
     const d = hit ? Math.max(hit.distance - 0.25, 0.4) : dist;
     const cam = pivot.clone().addScaledVector(back, d);
     cam.y = Math.max(cam.y, terrainHeight(this.world.seed, cam.x, cam.z) + 0.3);

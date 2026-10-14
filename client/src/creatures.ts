@@ -10,6 +10,11 @@ import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
 import { character, characterClips, hasCharacter, model, soleMaterial } from './models.ts';
 
+/** Past this far the fog has all but hidden an animal, so it isn't drawn or animated. */
+const HIDE_BEYOND = 170;
+/** Past this far its legs move at a quarter of the frame rate, which nobody can see. */
+const STEP_SLOWLY_BEYOND = 50;
+
 /** The scanned saddle's fitted length (models.ts FIT). */
 const SADDLE_LENGTH = 1;
 
@@ -288,8 +293,15 @@ class HoundView {
     }
   }
 
-  update(dt: number) {
+  /** Animation time saved up while it is far enough off to be stepped less often. */
+  private owed = 0;
+  private frame = Math.floor(Math.random() * 4);
+
+  /** `away` is how far it is from the camera. */
+  update(dt: number, away = 0) {
     this.root.position.lerp(this.target, Math.min(1, dt * 10));
+    // Lost in the fog: not drawn or animated at all. A way off: animated every fourth frame.
+    this.root.visible = away < HIDE_BEYOND;
     // Legs keep pace with how fast it is really going, so a ridden animal never skates.
     if (dt > 0) {
       const v = Math.hypot(this.root.position.x - this.lastAt.x, this.root.position.z - this.lastAt.z) / dt;
@@ -307,7 +319,10 @@ class HoundView {
     let d = this.state.yaw - this.root.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     this.root.rotation.y += d * Math.min(1, dt * 10);
-    this.mixer?.update(dt);
+    this.owed += dt;
+    if (!this.root.visible || (away > STEP_SLOWLY_BEYOND && ++this.frame % 4 !== 0)) return;
+    this.mixer?.update(this.owed);
+    this.owed = 0;
     if (this.collar && this.neck && this.head) {
       // Round the neck, wherever the animation has put it.
       const neck = this.neck.getWorldPosition(new THREE.Vector3());
@@ -369,9 +384,9 @@ export class Creatures {
     else if (anim === 'eat' && view.species === 'ashhound') this.effects.creatureSound('hound-grumble', at, 0.6);
   }
 
-  update(dt: number) {
+  update(dt: number, camera: THREE.Vector3) {
     for (const view of this.views.values()) {
-      view.update(dt);
+      view.update(dt, view.root.position.distanceTo(camera));
       if (view.state.anim === 'dead') continue;
       // Now and then a low growl, more often when squaring up to a fight.
       view.growlIn -= dt * (view.state.anim === 'snarl' ? 4 : 1);

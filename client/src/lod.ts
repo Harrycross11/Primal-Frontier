@@ -87,5 +87,17 @@ export function scanMesh(geo: THREE.BufferGeometry, material: THREE.Material | T
   lod.addLevel(level(geo), 0);
   lod.addLevel(level(mid), near);
   lod.addLevel(level(low), far);
+  return rayOnce(lod);
+}
+
+/**
+ * Makes a ray test only the level the LOD would show from where the ray starts. Without this,
+ * three.js tests that level and then every level again as children, at full detail.
+ */
+export function rayOnce(lod: THREE.LOD): THREE.LOD {
+  lod.raycast = (raycaster, hits) => {
+    THREE.LOD.prototype.raycast.call(lod, raycaster, hits);
+    return false;
+  };
   return lod;
 }

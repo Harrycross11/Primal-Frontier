@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { scanMesh } from './lod.ts';
+import { gridRaycast } from './gridRaycast.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WORLD_SIZE } from '../../shared/constants.ts';
 import { DOORWAY, MAX_HP, ROOF_RISE, STOREY, THICK, TILE, pieceBoxes, pieceKey, type Box, type Piece } from '../../shared/building.ts';
@@ -73,6 +74,25 @@ export class World {
   readonly decorColliders: Box[] = [];
   /** Objects the camera should not pass through. */
   readonly cameraBlockers: THREE.Object3D[] = [];
+  /** Where each pickable or blocker sits and how big it is, worked out the first time it's asked. */
+  private bounds = new WeakMap<THREE.Object3D, THREE.Sphere>();
+
+  /**
+   * The objects in `list` that come within `reach` metres of `at`, so a short ray only has to be
+   * tested against what is near it rather than everything on the map.
+   */
+  within(list: THREE.Object3D[], at: THREE.Vector3, reach: number): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const o of list) {
+      let s = this.bounds.get(o);
+      if (!s) {
+        s = new THREE.Box3().setFromObject(o).getBoundingSphere(new THREE.Sphere());
+        this.bounds.set(o, s);
+      }
+      if (s.isEmpty() || s.center.distanceTo(at) - s.radius <= reach) out.push(o);
+    }
+    return out;
+  }
   private bounce = new Map<number, number>();
   /** Pieces settling into place after being built (rise) or jolted by a hit (shake): seconds left. */
   private pops = new Map<string, { t: number; kind: 'rise' | 'shake' }>();
@@ -335,6 +355,7 @@ export class World {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.name = 'terrain';
+    gridRaycast(mesh, WORLD_SIZE, segments);
     return mesh;
   }
 
@@ -465,6 +486,7 @@ export class World {
           continue;
         }
         mesh.count = placed;
+        mesh.userData.placed = placed;
         mesh.receiveShadow = true;
         // The occlusion pass would shade each card as a solid square.
         mesh.userData.noAO = true;
@@ -492,11 +514,31 @@ export class World {
     return cell;
   }
 
+  private grassView = GRASS_VIEW;
+
+  /**
+   * Low graphics: half the grass, drawn less far and without shadows on it, and the scattered
+   * stones, bushes and logs cast no shadows. Everything else looks the same.
+   */
+  setLow(low: boolean) {
+    this.grassView = low ? 55 : GRASS_VIEW;
+    for (const g of this.grassCells) {
+      g.count = low ? Math.ceil(g.userData.placed / 2) : g.userData.placed;
+      g.receiveShadow = !low;
+    }
+    for (const p of this.patches) {
+      p.mesh.traverse((o) => {
+        o.userData.casts ??= o.castShadow;
+        o.castShadow = !low && o.userData.casts;
+      });
+    }
+  }
+
   /** Hides the squares too far off to see through the haze, and the grass beyond a short way. */
   private cull(focus: THREE.Vector3) {
     const flat = (v: THREE.Vector3) => Math.hypot(v.x - focus.x, v.z - focus.z);
     for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < cell.userData.view + CELL * 0.71;
-    for (const g of this.grassCells) g.visible = flat(g.userData.centre) < GRASS_VIEW + GRASS_CELL * 0.71;
+    for (const g of this.grassCells) g.visible = flat(g.userData.centre) < this.grassView + GRASS_CELL * 0.71;
     for (const p of this.patches) {
       const far = flat(p.centre);
       p.mesh.visible = far < p.view;

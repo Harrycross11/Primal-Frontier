@@ -327,8 +327,15 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
     if (!mesh.isMesh) return;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    // Skinned bounds are taken from the bind pose; animated limbs would get culled at screen edges.
-    mesh.frustumCulled = false;
+    // Skinned bounds come from the bind pose, so give them room for swinging limbs (and lying
+    // down) rather than switching culling off: then animals and players behind you or far off in
+    // the fog are not drawn, and only those near you go into the shadow map.
+    if (mesh.isSkinnedMesh) {
+      mesh.geometry.computeBoundingSphere();
+      const sphere = mesh.geometry.boundingSphere!.clone();
+      sphere.radius *= 1.6;
+      mesh.boundingSphere = sphere;
+    }
     const m = mesh.material as THREE.MeshStandardMaterial;
     if (m.map) m.map.anisotropy = 8;
   });

@@ -11,7 +11,7 @@ import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { BOULDERS, model, soleMaterial } from './models.ts';
-import { lodIndex, withIndex } from './lod.ts';
+import { lodIndex, rayOnce, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, soilSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -183,7 +183,7 @@ export function scannedRock(
   lod.addLevel(level(painted), 0);
   lod.addLevel(level(withIndex(painted, mid)), 25);
   lod.addLevel(level(withIndex(painted, tiny)), 70);
-  return lod;
+  return rayOnce(lod);
 }
 
 function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | undefined {
@@ -585,28 +585,20 @@ function scannedDeployable(kind: DeployableKind, g: THREE.Group): THREE.Group | 
     }
     flames.visible = false;
     g.add(flames);
-    const light = new THREE.PointLight(0xff8a3a, 0, 9, 1.5);
-    light.position.set(0, 0.7, 0);
-    g.add(light);
     g.userData.setOn = (on: boolean) => {
       flames.visible = on;
       coalMat.emissive.set(on ? 0xff5a14 : 0x000000);
       coalMat.emissiveIntensity = on ? 2 : 0;
-      light.intensity = on ? 8 : 0;
     };
   }
   if (kind === 'furnace') {
-    // Coals glowing in the open top of the barrel, and the light they throw.
+    // Coals glowing in the open top of the barrel; the world's fire lamps light the ground round it.
     const fireMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, emissive: 0x000000, roughness: 1 });
     const r = scan.geometry.boundingBox!.max.x * 0.88;
     g.add(mesh(new THREE.CircleGeometry(r, 20).rotateX(-Math.PI / 2), fireMat, 0, top - 0.12, 0));
-    const light = new THREE.PointLight(0xff8a3a, 0, 6, 1.5);
-    light.position.set(0, top + 0.4, 0);
-    g.add(light);
     g.userData.setOn = (on: boolean) => {
       fireMat.emissive.set(on ? 0xff6a1a : 0x000000);
       fireMat.emissiveIntensity = on ? 2.2 : 0;
-      light.intensity = on ? 6 : 0;
     };
   }
   return g;
@@ -672,13 +664,9 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     door.rotation.x = -0.06;
     g.add(door);
     g.add(mesh(new THREE.TorusGeometry(0.21, 0.03, 6, 16), metalMat(), 0, 0.4, 0.47));
-    const light = new THREE.PointLight(0xff8a3a, 0, 6, 1.5);
-    light.position.set(0, 0.5, 0.8);
-    g.add(light);
     g.userData.setOn = (on: boolean) => {
       fireMat.emissive.set(on ? 0xff6a1a : 0x000000);
       fireMat.emissiveIntensity = on ? 2.2 : 0;
-      light.intensity = on ? 6 : 0;
     };
   } else if (kind === 'toolCupboard') {
     // A tall plank cabinet with its tools hung on the front: a hammer, a saw and a wrench.

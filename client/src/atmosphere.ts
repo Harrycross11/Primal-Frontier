@@ -25,7 +25,8 @@ THREE.ShaderChunk.fog_pars_vertex = /* glsl */ `
 THREE.ShaderChunk.fog_vertex = /* glsl */ `
 #ifdef USE_FOG
   // mvPosition exists in every built-in vertex shader (meshes, points, lines, sprites).
-  vFogWorld = (inverse(viewMatrix) * mvPosition).xyz;
+  // The view matrix only turns and moves, so undoing it needs no full matrix inverse per vertex.
+  vFogWorld = (mvPosition.xyz - viewMatrix[3].xyz) * mat3(viewMatrix);
 #endif`;
 
 THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
