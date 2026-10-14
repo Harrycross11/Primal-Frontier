@@ -5,7 +5,7 @@ import { BIOME_IDS, biomeAt, biomeWeights, climateAt, type BiomeId } from '../sh
 import { HALF_WORLD } from '../shared/constants.ts';
 import { packDens } from '../shared/creatures.ts';
 import { tickVitals } from '../shared/survival.ts';
-import { generateResources } from '../shared/world.ts';
+import { RESOURCE_INFO, generateResources } from '../shared/world.ts';
 
 const SEEDS = [1234, 4321, 99];
 
@@ -81,4 +81,16 @@ test('the flats make you thirsty and the peaks make you hungry', () => {
   assert.ok(drain('flats').water > home.water * 1.5);
   assert.ok(Math.abs(drain('flats').food - home.food) < 1e-9);
   assert.ok(drain('frost').food > home.food * 1.5);
+});
+
+test('survivors never wake up inside a tree, a rock or a base', () => {
+  for (const seed of SEEDS) {
+    const game = new Game(seed);
+    for (let n = 0; n < 8; n++) {
+      const p = game.players.get(game.join(`S${n}`, 0)!.id)!;
+      for (const r of game.resources) {
+        if (r.amount > 0) assert.ok(Math.hypot(r.x - p.x, r.z - p.z) > RESOURCE_INFO[r.kind].radius * r.scale + 1, `${r.kind} on seed ${seed}`);
+      }
+    }
+  }
 });
