@@ -108,9 +108,13 @@ export class Controller {
       dir.normalize().multiplyScalar(speed * dt);
       // Sub-steps stop fast movement from tunnelling through thin walls.
       const steps = Math.ceil(dir.length() / 0.1);
+      // Anything you are already inside (woken up in a wall, a car wreck or a hut) lets you
+      // walk out of it, so nobody is ever stuck.
+      const p = this.position;
+      const free = colliders.filter((c) => !this.blocked(p.x, p.y, p.z, [c]));
       for (let s = 0; s < steps; s++) {
-        this.tryMove(dir.x / steps, 0, colliders);
-        this.tryMove(0, dir.z / steps, colliders);
+        this.tryMove(dir.x / steps, 0, free);
+        this.tryMove(0, dir.z / steps, free);
       }
     }
 

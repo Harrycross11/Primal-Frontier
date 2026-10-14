@@ -486,7 +486,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     fpsFrom = now;
     const pingText = ping < 0 ? '' : ` · <span class="${ping > 150 ? 'bad' : ''}">${ping} MS</span>`;
     netstats.innerHTML = `<span class="${fps < 30 ? 'bad' : ''}">${fps} FPS</span>${pingText}`;
+    // Slow for a while on a setting that can go lower: say how, once per setting.
+    slowFor = fps < 30 && gfx.quality !== 'low' && !dead ? slowFor + 1 : 0;
+    if (slowFor >= 8 && !hinted.has(gfx.quality)) {
+      hinted.add(gfx.quality);
+      hud.notice('Low frame rate: press O for lighter graphics', 6);
+    }
   };
+  let slowFor = 0;
+  const hinted = new Set<string>();
   net.onMessage = (m) => {
     switch (m.t) {
       case 'pong':
@@ -692,10 +700,14 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
           }));
         hud.showDeath(
           m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.',
-          () => net.send({ t: 'respawn' }),
+          () => {
+            net.send({ t: 'respawn' });
+            canvas.requestPointerLock?.();
+          },
           bags,
           (bag) => {
             net.send({ t: 'respawn', bag });
+            canvas.requestPointerLock?.();
             bagReadyAt.set(bag, performance.now() + BAG_COOLDOWN * 1000);
           },
         );
@@ -896,6 +908,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (e.code === 'KeyO') {
       gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
+      hud.notice(`Graphics: ${gfx.quality[0].toUpperCase()}${gfx.quality.slice(1)}`);
     }
   });
   function selectSlot(n: number) {

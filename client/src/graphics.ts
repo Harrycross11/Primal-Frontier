@@ -350,7 +350,8 @@ export class Graphics {
     // Ambient occlusion is the costliest pass, and high-density screens draw up to three times
     // the pixels; the lower settings drop both.
     this.gtao.enabled = q === 'high';
-    const ratio = q === 'high' ? Math.min(devicePixelRatio, 1.75) : Math.min(devicePixelRatio, 1);
+    // Low also draws a little under full size, which slower laptops need most.
+    const ratio = q === 'high' ? Math.min(devicePixelRatio, 1.75) : q === 'medium' ? Math.min(devicePixelRatio, 1) : Math.min(devicePixelRatio, 1) * 0.8;
     if (ratio !== this.renderer.getPixelRatio()) {
       this.renderer.setPixelRatio(ratio);
       this.composer.setPixelRatio(ratio);

@@ -1883,9 +1883,21 @@ export class Game {
       const a = this.rand() * Math.PI * 2;
       const r = Math.sqrt(this.rand()) * CORE_RADIUS * 0.8;
       spot = [Math.cos(a) * r, Math.sin(a) * r];
-      if (radiationAt(this.seed, spot[0], spot[1]) === 0 && biomeAt(this.seed, spot[0], spot[1]) === 'ashlands') break;
+      if (radiationAt(this.seed, spot[0], spot[1]) === 0 && biomeAt(this.seed, spot[0], spot[1]) === 'ashlands' && this.clearToSpawn(spot[0], spot[1])) break;
     }
     return spot;
+  }
+
+  /** Nothing built, laid down or growing there, so a fresh survivor never wakes up inside it. */
+  private clearToSpawn(x: number, z: number): boolean {
+    const near = (box: { min: number[]; max: number[] }, pad: number) =>
+      x > box.min[0] - pad && x < box.max[0] + pad && z > box.min[2] - pad && z < box.max[2] + pad;
+    for (const piece of this.pieces.values()) if (near(pieceBounds(piece), 3)) return false;
+    for (const d of this.deployables.values()) if (near(deployableBox(d), 2)) return false;
+    for (const n of this.resources) {
+      if (n.amount > 0 && Math.hypot(n.x - x, n.z - z) < RESOURCE_INFO[n.kind].radius * n.scale + 1.5) return false;
+    }
+    return !atLandmark(this.seed, x, z, 4) && clearOfRuins(this.seed, x, z, 4);
   }
 
   /** A player who is connected and not dead. */
