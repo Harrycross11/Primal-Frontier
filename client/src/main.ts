@@ -233,6 +233,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const gfx = ready?.gfx ?? new Graphics(document.getElementById('game')!, world.scene);
   const camera = gfx.camera;
   hud.setQuality(gfx.quality);
+  world.setLow(gfx.quality === 'low');
 
   const resources = welcome.resources;
   if (ready) {
@@ -411,9 +412,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   pause.onQuality = (q) => {
     gfx.setQuality(q);
     hud.setQuality(gfx.quality);
+    world.setLow(gfx.quality === 'low');
   };
   gfx.onAutoQuality = (q) => {
     hud.setQuality(q);
+    world.setLow(gfx.quality === 'low');
     pause.quality = q;
   };
   // Letting go of the mouse (Esc) in the middle of play brings up the menu.
@@ -908,6 +911,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (e.code === 'KeyO') {
       gfx.setQuality(QUALITIES[(QUALITIES.indexOf(gfx.quality) + 1) % QUALITIES.length]);
       hud.setQuality(gfx.quality);
+      world.setLow(gfx.quality === 'low');
       hud.notice(`Graphics: ${gfx.quality[0].toUpperCase()}${gfx.quality.slice(1)}`);
     }
   });
@@ -951,7 +955,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   function roomAhead(): number {
     roomRay.set(camera.position, camera.getWorldDirection(new THREE.Vector3()));
     roomRay.far = 1.5;
-    return roomRay.intersectObjects(world.cameraBlockers, true)[0]?.distance ?? 1.5;
+    return roomRay.intersectObjects(world.within(world.cameraBlockers, camera.position, 1.5), true)[0]?.distance ?? 1.5;
   }
 
   /** What a bullet struck at `end`, fired from `from`: a hole, dust and chips, or a spray of blood. */
@@ -964,7 +968,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     impactRay.set(from, dir.normalize());
     impactRay.near = Math.max(0, length - 1.5);
     impactRay.far = length + 0.4;
-    const hit = impactRay.intersectObjects(world.pickables, true).find((h) => isVisible(h.object));
+    const hit = impactRay.intersectObjects(world.within(world.pickables, from, impactRay.far), true).find((h) => isVisible(h.object));
     if (!hit) {
       if (body) effects.blood(end);
       return;
@@ -999,7 +1003,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     const d = ray.ray.direction;
     ray.far = range + camera.position.distanceTo(controller.eye);
     let t = ray.far;
-    for (const h of ray.intersectObjects(world.pickables, true)) {
+    for (const h of ray.intersectObjects(world.within(world.pickables, o, ray.far), true)) {
       if (!isVisible(h.object) || h.distance < camera.position.distanceTo(controller.eye) - 0.5) continue;
       t = h.distance;
       break;
@@ -1115,7 +1119,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     aimSurface = null;
     aimNormal = null;
     aimDoor = false;
-    for (const h of raycaster.intersectObjects(world.pickables, true)) {
+    for (const h of raycaster.intersectObjects(world.within(world.pickables, raycaster.ray.origin, raycaster.far), true)) {
       if (!isVisible(h.object)) continue;
       // Ignore things between the camera and the player's back.
       if (h.distance < camera.position.distanceTo(controller.eye) - 0.5) continue;
@@ -1763,6 +1767,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     setQuality: (q: 'high' | 'low') => {
       gfx.setQuality(q);
       hud.setQuality(q);
+      world.setLow(gfx.quality === 'low');
     },
     /** Nearest open patch of ground with nothing to bump into, for building in tests. */
     findClearSpot: (clear = 9) => {
@@ -1894,7 +1899,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
       r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
-    creatures.update(dt);
+    creatures.update(dt, camera.position);
     vehicles.update(dt);
 
     updateAim();
