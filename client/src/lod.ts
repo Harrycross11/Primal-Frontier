@@ -14,37 +14,75 @@ export const lodReady = MeshoptSimplifier.ready.then(
   () => {},
 );
 
-const lists = new WeakMap<THREE.BufferGeometry, Map<number, THREE.BufferAttribute | null>>();
+/** A lighter triangle list, and where each material's part of it starts and ends. */
+interface Lighter {
+  index: THREE.BufferAttribute;
+  groups: { start: number; count: number; materialIndex: number }[];
+}
+
+const lists = new WeakMap<THREE.BufferGeometry, Map<number, Lighter | null>>();
+
+/** One run of triangles cut to about `fraction` of its length. */
+function simplify(indices: Uint32Array, positions: Float32Array, fraction: number): Uint32Array {
+  const target = Math.max(36, Math.floor((indices.length * fraction) / 3) * 3);
+  let [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08);
+  // Seams in the photo's layout stop the plain simplifier early; let it cut across them.
+  if (list.length > target * 1.5) [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08, ['Permissive']);
+  return list;
+}
 
 /**
  * The triangle list for a copy of `geo` with about `fraction` of its triangles, worked out once
  * per model, or null if it can't be made (the simplifier didn't start, or the model isn't indexed).
+ * A model with several materials (bark and leaves, say) is cut part by part, and parts with only
+ * a small share of the triangles, like leaf cards, are kept whole so the crown doesn't fall apart.
  */
-export function lodIndex(geo: THREE.BufferGeometry, fraction: number): THREE.BufferAttribute | null {
+function lighterList(geo: THREE.BufferGeometry, fraction: number): Lighter | null {
   let known = lists.get(geo);
   if (!known) lists.set(geo, (known = new Map()));
   if (known.has(fraction)) return known.get(fraction)!;
-  let out: THREE.BufferAttribute | null = null;
+  let out: Lighter | null = null;
   const index = geo.index;
   const pos = geo.getAttribute('position');
   if (ready && index && pos && !(pos as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute) {
     const indices = new Uint32Array(index.array);
     const positions = pos.array instanceof Float32Array ? pos.array : new Float32Array(pos.array);
-    const target = Math.max(36, Math.floor((indices.length * fraction) / 3) * 3);
-    let [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08);
-    // Seams in the photo's layout stop the plain simplifier early; let it cut across them.
-    if (list.length > target * 1.5) [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08, ['Permissive']);
-    if (list.length < indices.length) out = new THREE.BufferAttribute(list, 1);
+    const parts = geo.groups.length > 1 ? geo.groups : [{ start: 0, count: indices.length, materialIndex: 0 }];
+    const lists: Uint32Array[] = [];
+    const groups: Lighter['groups'] = [];
+    let at = 0;
+    for (const part of parts) {
+      const run = indices.subarray(part.start, Math.min(indices.length, part.start + part.count));
+      const list = run.length > indices.length * 0.15 ? simplify(run, positions, fraction) : run;
+      lists.push(list);
+      groups.push({ start: at, count: list.length, materialIndex: part.materialIndex ?? 0 });
+      at += list.length;
+    }
+    if (at < indices.length) {
+      const all = new Uint32Array(at);
+      let o = 0;
+      for (const list of lists) {
+        all.set(list, o);
+        o += list.length;
+      }
+      out = { index: new THREE.BufferAttribute(all, 1), groups: geo.groups.length > 1 ? groups : [] };
+    }
   }
   known.set(fraction, out);
   return out;
 }
 
+/** The triangle list for a single-material copy of `geo` with about `fraction` of its triangles. */
+export function lodIndex(geo: THREE.BufferGeometry, fraction: number): THREE.BufferAttribute | null {
+  return lighterList(geo, fraction)?.index ?? null;
+}
+
 /** A geometry drawing `geo`'s vertices with another triangle list. */
-export function withIndex(geo: THREE.BufferGeometry, index: THREE.BufferAttribute): THREE.BufferGeometry {
+export function withIndex(geo: THREE.BufferGeometry, index: THREE.BufferAttribute, groups: Lighter['groups'] = []): THREE.BufferGeometry {
   const out = new THREE.BufferGeometry();
   for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
   out.setIndex(index);
+  for (const g of groups) out.addGroup(g.start, g.count, g.materialIndex);
   if (!geo.boundingSphere) geo.computeBoundingSphere();
   if (!geo.boundingBox) geo.computeBoundingBox();
   out.boundingSphere = geo.boundingSphere!.clone();
@@ -56,15 +94,14 @@ const shared = new WeakMap<THREE.BufferGeometry, Map<number, THREE.BufferGeometr
 
 /**
  * A copy of `geo` with about `fraction` of its triangles, shared by everything that asks for the
- * same one, or null where it can't be made (several materials, or no simplifier).
+ * same one, or null where it can't be made (no simplifier, or nothing to cut).
  */
 export function lighter(geo: THREE.BufferGeometry, fraction: number): THREE.BufferGeometry | null {
-  if (geo.groups.length > 1) return null;
   let copies = shared.get(geo);
   if (!copies) shared.set(geo, (copies = new Map()));
   if (!copies.has(fraction)) {
-    const index = lodIndex(geo, fraction);
-    copies.set(fraction, index ? withIndex(geo, index) : null);
+    const list = lighterList(geo, fraction);
+    copies.set(fraction, list ? withIndex(geo, list.index, list.groups) : null);
   }
   return copies.get(fraction)!;
 }
@@ -80,8 +117,8 @@ export function scanMesh(geo: THREE.BufferGeometry, material: THREE.Material | T
     mesh.receiveShadow = true;
     return mesh;
   };
-  const mid = Array.isArray(material) ? null : lighter(geo, 0.25);
-  const low = Array.isArray(material) ? null : lighter(geo, 0.06);
+  const mid = lighter(geo, 0.25);
+  const low = lighter(geo, 0.06);
   if (!mid || !low) return level(geo);
   const lod = new THREE.LOD();
   lod.addLevel(level(geo), 0);

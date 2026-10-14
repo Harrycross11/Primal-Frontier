@@ -11,7 +11,7 @@ import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
 import { BOULDERS, model, soleMaterial } from './models.ts';
-import { lodIndex, rayOnce, withIndex } from './lod.ts';
+import { lighter, lodIndex, rayOnce, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, soilSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -377,8 +377,11 @@ export function buildMushrooms(rand: () => number): THREE.Group {
   if (scan) {
     const g = new THREE.Group();
     const n = 3 + Math.floor(rand() * 4);
+    // The scan has nearly 9,000 triangles for a cap a few centimetres across; an eighth of that
+    // looks the same at any distance you can see it from.
+    const geo = lighter(scan.geometry, 0.12) ?? scan.geometry;
     for (let k = 0; k < n; k++) {
-      const m = new THREE.Mesh(scan.geometry, scan.material);
+      const m = new THREE.Mesh(geo, scan.material);
       const a = rand() * Math.PI * 2;
       const r = k === 0 ? 0 : 0.06 + rand() * 0.16;
       m.position.set(Math.cos(a) * r, -0.005, Math.sin(a) * r);
