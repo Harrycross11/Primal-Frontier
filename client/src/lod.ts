@@ -24,11 +24,16 @@ const lists = new WeakMap<THREE.BufferGeometry, Map<number, Lighter | null>>();
 
 /** One run of triangles cut to about `fraction` of its length. */
 function simplify(indices: Uint32Array, positions: Float32Array, fraction: number): Uint32Array {
-  const target = Math.max(36, Math.floor((indices.length * fraction) / 3) * 3);
-  let [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08);
-  // Seams in the photo's layout stop the plain simplifier early; let it cut across them.
-  if (list.length > target * 1.5) [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08, ['Permissive']);
-  return list;
+  const target = Math.min(indices.length, Math.max(36, Math.floor((indices.length * fraction) / 3) * 3));
+  try {
+    let [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08);
+    // Seams in the photo's layout stop the plain simplifier early; let it cut across them.
+    if (list.length > target * 1.5) [list] = MeshoptSimplifier.simplify(indices, positions, 3, target, 0.08, ['Permissive']);
+    return list;
+  } catch {
+    // A model the simplifier can't take just stays at full detail.
+    return indices;
+  }
 }
 
 /**
@@ -53,7 +58,7 @@ function lighterList(geo: THREE.BufferGeometry, fraction: number): Lighter | nul
     let at = 0;
     for (const part of parts) {
       const run = indices.subarray(part.start, Math.min(indices.length, part.start + part.count));
-      const list = run.length > indices.length * 0.15 ? simplify(run, positions, fraction) : run;
+      const list = run.length > indices.length * 0.15 && run.length >= 300 && run.length % 3 === 0 ? simplify(run, positions, fraction) : run;
       lists.push(list);
       groups.push({ start: at, count: list.length, materialIndex: part.materialIndex ?? 0 });
       at += list.length;
