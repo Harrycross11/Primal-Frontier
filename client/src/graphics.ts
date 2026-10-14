@@ -247,7 +247,16 @@ export class Graphics {
     container: HTMLElement,
     private scene: THREE.Scene,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+    // High and Medium smooth edges in their own render target, so the screen itself only needs
+    // it on Low, which draws straight to it. Nothing reads the screen back after the frame, so
+    // the browser may throw the old frame away rather than copy it.
+    let startLow = false;
+    try {
+      startLow = localStorage.getItem('pf-quality') === 'low';
+    } catch {
+      /* storage unavailable */
+    }
+    this.renderer = new THREE.WebGLRenderer({ antialias: startLow, powerPreference: 'high-performance', preserveDrawingBuffer: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = true;

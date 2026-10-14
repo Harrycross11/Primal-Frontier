@@ -893,7 +893,8 @@ export class World {
     if (scans.length) {
       const scan = scans[id % scans.length];
       const g = new THREE.Group();
-      const tree = scanMesh(scan.geometry, scan.material);
+      // Trees are tall and catch the eye, so they keep full detail a little further out.
+      const tree = scanMesh(scan.geometry, scan.material, 45, 110);
       tree.position.y = -0.08;
       g.add(tree);
       return g;
