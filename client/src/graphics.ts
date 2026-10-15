@@ -4,7 +4,6 @@
 // "Low" renders directly.
 
 import * as THREE from 'three';
-import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -25,12 +24,12 @@ const ZENITH = new THREE.Color(0x56708e);
 /**
  * The photographed sky (Poly Haven's "Wasteland Clouds", CC0), and where its sun is: 7.7° up,
  * 0.6 of the way across the image. The photo is turned and stretched so its sun sits on ours.
+ * Only its top half, above the horizon, packed small by scripts/pack-sky.py with the brightness
+ * below already applied.
  */
-const SKY_URL = '/textures/sky.hdr';
+const SKY_URL = '/textures/sky.webp';
 const PHOTO_SUN_U = 0.5996;
 const PHOTO_SUN_ELEVATION = THREE.MathUtils.degToRad(7.7);
-/** Scales the photo's brightness to match the lighting the game was tuned under. */
-const PHOTO_EXPOSURE = 0.3;
 
 interface PhotoSky {
   map: { value: THREE.Texture | null };
@@ -64,7 +63,6 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
       photoMix: photo.mix,
       photoTurn: photo.turn,
       photoSun: photo.sun,
-      photoExposure: { value: PHOTO_EXPOSURE },
       daylight: photo.daylight,
       storm: photo.storm,
       stormColor: photo.stormColor,
@@ -72,7 +70,7 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
     vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`,
     fragmentShader: `
       uniform vec3 horizon; uniform vec3 zenith; uniform vec3 sunDir; uniform vec3 sunColor; uniform float time; varying vec3 vDir;
-      uniform sampler2D photoMap; uniform float photoMix; uniform float photoTurn; uniform vec2 photoSun; uniform float photoExposure;
+      uniform sampler2D photoMap; uniform float photoMix; uniform float photoTurn; uniform vec2 photoSun;
       uniform float daylight; uniform float storm; uniform vec3 stormColor;
       const float PI = 3.141592653589793;
       // The photographed sky in direction d, its elevations bent so the photo's sun (photoSun.y)
@@ -83,13 +81,13 @@ function skyDome(radius: number, time: { value: number }, photo: PhotoSky): THRE
         float p = photoSun.y;
         float e2 = e < s ? e * p / s : p + (e - s) * (PI * 0.5 - p) / (PI * 0.5 - s);
         float a = atan(d.z, d.x) + photoTurn;
-        vec2 uv = vec2(fract(a / (2.0 * PI) + 0.5), e2 / PI + 0.5);
-        vec3 c = texture2D(photoMap, uv).rgb * photoExposure;
-        // The photo's glow round its sun is far brighter than ours and would flood the light
-        // shafts; squash everything above white. Our own sun disc is drawn on top.
-        float l = max(max(c.r, c.g), c.b);
-        if (l > 1.0) c *= (1.0 + (l - 1.0) * 0.12) / l;
-        return c;
+        // The image holds the horizon (0) up to straight overhead (1).
+        vec2 uv = vec2(fract(a / (2.0 * PI) + 0.5), e2 / (PI * 0.5));
+        // Stored as c / (1 + c), so it can run above white; scaled to the lighting the game
+        // was tuned under, and the photo's glow round its sun, far brighter than ours, squashed
+        // so it never floods the light shafts (see scripts/pack-sky.py).
+        vec3 x = min(texture2D(photoMap, uv).rgb, vec3(0.996));
+        return x / (1.0 - x);
       }
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
@@ -296,7 +294,8 @@ export class Graphics {
     bakeEnvironment();
     this.bake = bakeEnvironment;
     scene.environmentIntensity = 0.55;
-    new HDRLoader().load(SKY_URL, (tex) => {
+    new THREE.TextureLoader().load(SKY_URL, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = THREE.RepeatWrapping;
       tex.minFilter = tex.magFilter = THREE.LinearFilter;
       tex.generateMipmaps = false;

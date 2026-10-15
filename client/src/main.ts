@@ -451,7 +451,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   ui.wear = welcome.wear;
   ui.learned = new Set(welcome.learned ?? []);
   ui.render();
-  // Swap the stand-ins for the scanned guns, tools and crops once they arrive.
+  // Swap the stand-ins for the scanned guns, tools and crops once they arrive (the world swaps its own).
   // Shaders for the whole world and every model, unless the menu already built them.
   if (!ready) warmShaders(gfx.renderer, camera, world.scene);
   if (!lateLoaded())
@@ -462,7 +462,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       me.rebuildHeld();
       view.rebuild();
       for (const r of remotes.values()) r.avatar.rebuildHeld();
-      world.rebuildDeployables('planter');
+      // Rebuilds the preview of a bench or box in your hands.
+      deployGhostKind = null;
     });
   const refreshPlayers = () =>
     hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);

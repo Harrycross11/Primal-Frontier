@@ -18,6 +18,8 @@ from PIL import Image
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', 'client', 'public')
 GLTF = ['npx', '--yes', '@gltf-transform/cli@4']
+# Must match LAYERS in client/src/terrainLayers.ts.
+TERRAIN = ('ground', 'forest-floor', 'red-earth', 'lake-bed', 'snow', 'cliff', 'dirt')
 
 
 def compressed(glb: str) -> bool:
@@ -47,6 +49,10 @@ def textures():
         # quality, as their errors show up as false bumps in the lighting.
         if kind == 'rough' and img.width > 1024:
             img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        # The ground's photos are packed into 1024-pixel layers (terrainLayers.ts), so any
+        # more is downloaded for nothing.
+        if os.path.basename(jpg).split('_')[0] in TERRAIN and img.width > 1024:
+            img = img.resize((1024, 1024), Image.LANCZOS)
         img.save(out, quality={'nor': 82, 'diff': 78}.get(kind, 70), method=6)
         print(f'{os.path.basename(jpg)}: {os.path.getsize(jpg) // 1024} KB -> {os.path.getsize(out) // 1024} KB')
         os.remove(jpg)

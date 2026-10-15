@@ -2,6 +2,7 @@
 
 import type { Species } from '../shared/creatures.ts';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { extname, join, normalize, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -51,6 +52,20 @@ function cacheFor(path: string): string {
   return 'no-cache';
 }
 
+/**
+ * A tag naming each file's content. Every deploy writes the files afresh, so their dates change
+ * even when nothing in them did; the tag lets a returning browser keep the models and textures it
+ * already has, instead of fetching the whole game again after each update.
+ */
+const tags = new Map<string, { mtime: number; size: number; tag: string }>();
+function contentTag(file: string, mtime: number, size: number): string {
+  const hit = tags.get(file);
+  if (hit && hit.mtime === mtime && hit.size === size) return hit.tag;
+  const tag = `"${createHash('sha1').update(readFileSync(file)).digest('base64url')}"`;
+  tags.set(file, { mtime, size, tag });
+  return tag;
+}
+
 const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname === '/health') {
@@ -74,10 +89,15 @@ const http = createServer((req, res) => {
     'content-type': TYPES[ext] ?? 'application/octet-stream',
     'cache-control': cacheFor(relative(CLIENT_DIR, file).replaceAll('\\', '/')),
     'last-modified': stat.mtime.toUTCString(),
+    etag: contentTag(file, stat.mtimeMs, stat.size),
     vary: 'accept-encoding',
   };
+  // A browser sending the tag is asking by content, which outlasts a deploy; the date is only
+  // checked when it has no tag.
+  const match = req.headers['if-none-match'];
   const since = req.headers['if-modified-since'];
-  if (since && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000)) {
+  const fresh = match ? match.split(',').some((t) => t.trim().replace(/^W\//, '') === headers.etag) : since && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000);
+  if (fresh) {
     res.writeHead(304, headers).end();
     return;
   }

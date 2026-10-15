@@ -15,7 +15,7 @@ import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildDoorLeaf, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
-import { BOULDERS, WRECKS, model, variants, type Model } from './models.ts';
+import { BOULDERS, WRECKS, lateModels, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery, type Patch } from './scenery.ts';
 import { terrainLayers } from './terrainLayers.ts';
@@ -111,6 +111,8 @@ export class World {
 
   constructor(readonly seed: number) {
     this.scene.fog = new THREE.FogExp2(HAZE, 0.0085);
+    // Benches, boxes, bags and the like load after the menu; until then they are simple stand-ins.
+    lateModels.then(() => this.rebuildDeployables());
 
     // Shade is lit by the sky, so it runs cool and blue against the warm sun, with a little
     // warm light bounced up off the ground.
@@ -380,7 +382,7 @@ export class World {
     const mat = new THREE.MeshStandardMaterial({ alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 });
     /** Clumps side by side in the texture; each tuft shows one of them. */
     const cards = { value: 4 };
-    mat.map = new THREE.TextureLoader().load('/models/grass-cards.png', undefined, undefined, () => {
+    mat.map = new THREE.TextureLoader().load('/models/grass-cards.webp', undefined, undefined, () => {
       mat.map = grassTexture();
       cards.value = 1;
       mat.needsUpdate = true;
@@ -1104,10 +1106,10 @@ export class World {
     if (this.pieceMeshes.has(key)) this.pops.set(key, { t: kind === 'rise' ? 0.28 : 0.18, kind });
   }
 
-  /** Builds every deployable of a kind again, once its scanned model has arrived. */
-  rebuildDeployables(kind: Deployable['kind']) {
+  /** Builds every deployable (or every one of a kind) again, once their scanned models have arrived. */
+  rebuildDeployables(kind?: Deployable['kind']) {
     for (const [id, d] of [...this.deployables]) {
-      if (d.kind !== kind) continue;
+      if (kind && d.kind !== kind) continue;
       this.setDeployable(id, null);
       this.setDeployable(id, d);
     }
