@@ -81,8 +81,10 @@ def main():
     asset, res = SKY
     if not only:
         files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
-        with open(os.path.join(OUT, 'sky.hdr'), 'wb') as f:
+        # The full photo is kept out of the download; pack-sky.py makes the small one the game loads.
+        with open(os.path.join(os.path.dirname(__file__), '..', 'art', 'sky.hdr'), 'wb') as f:
             f.write(get(files['hdri'][res]['hdr']['url']))
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), 'pack-sky.py')], check=True)
     credits.append(f'- sky: https://polyhaven.com/a/{asset}')
     with open(os.path.join(OUT, 'CREDITS.md'), 'w') as f:
         f.write('# Textures\n\nPhoto-scanned textures and sky from Poly Haven, all CC0 (public domain).\n\n' + '\n'.join(credits) + '\n')

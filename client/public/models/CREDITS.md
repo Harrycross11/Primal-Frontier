@@ -27,7 +27,7 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - toolchest: https://polyhaven.com/a/metal_tool_chest
 - tree-quiver: https://polyhaven.com/a/quiver_tree_01
 - tree-dead-quiver: https://polyhaven.com/a/dead_quiver_trunk
-- grass-cards.png: rendered from https://polyhaven.com/a/grass_medium_02
+- grass-cards.webp: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
 

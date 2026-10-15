@@ -343,8 +343,10 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
   clips.set(name, gltf.animations);
 }
 
+/** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
+const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
-const isLate = (name: string) => /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
+const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */
 const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 
@@ -364,7 +366,7 @@ export async function loadModels(progress?: (done: number, total: number) => voi
   progress?.(0, jobs.length);
   await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
   // A few at a time, so they never crowd out anything the menu fetches.
-  const late = [...LATE_CHARACTERS, ...names.filter(isLate)];
+  const late = [...names.filter((n) => LATE_BUILT.test(n)), ...LATE_CHARACTERS, ...names.filter((n) => isLate(n) && !LATE_BUILT.test(n))];
   const next = async (): Promise<void> => {
     const n = late.shift();
     if (!n) return;
@@ -376,7 +378,7 @@ export async function loadModels(progress?: (done: number, total: number) => voi
 
 let late = false;
 let gotLate!: () => void;
-/** Resolves once the animals, guns and tools have loaded (or failed to), after `loadModels`. */
+/** Resolves once the built things, animals, guns and tools have loaded (or failed to), after `loadModels`. */
 export const lateModels = new Promise<void>((resolve) => (gotLate = resolve)).then(() => void (late = true));
 /** Whether `lateModels` has resolved. */
 export const lateLoaded = () => late;
