@@ -144,7 +144,7 @@ export class Hud {
     }, kill ? 380 : 110);
     if (dmg === undefined) return;
     const n = document.createElement('div');
-    n.className = `hit-dmg${head ? ' head' : ''}${kill ? ' kill' : ''}${armour && !head ? ' armour' : ''}`;
+    n.className = `hit-dmg${head ? ' head' : ''}${kill ? ' fatal' : ''}${armour && !head ? ' armour' : ''}`;
     n.textContent = String(dmg);
     // Each one starts a little apart, so a burst reads as separate hits.
     n.style.left = `${16 + Math.random() * 14}px`;
