@@ -211,11 +211,14 @@ wss.on('connection', (ws) => {
     const now = Date.now();
     if (id === null) {
       // The main menu asks after your account and the server before you play.
-      if (msg.t === 'hello' || msg.t === 'buy') {
+      if (msg.t === 'hello' || msg.t === 'buy' || msg.t === 'wearTitle') {
         const token = cleanToken(msg.token);
         if (msg.t === 'buy') {
           const result = game.buy({ token }, String(msg.pack), now);
           send(ws, { t: 'notice', text: result.text });
+        }
+        if (msg.t === 'wearTitle' && token && !game.accounts.wearTitle(token, typeof msg.id === 'string' ? msg.id : null, now)) {
+          send(ws, { t: 'notice', text: 'Reach that tier of the season pass to wear its title' });
         }
         const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
         send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.headCount, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });

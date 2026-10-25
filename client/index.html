@@ -187,6 +187,69 @@
         .lobby-shade { background: linear-gradient(to bottom, rgba(8,7,6,.7) 0%, transparent 20%, rgba(8,7,6,.55) 50%, rgba(8,7,6,.9) 100%); }
       }
 
+      /* Season pass */
+      .page.season { flex-direction: column; overflow-y: auto; max-width: 1240px; width: 100%; margin: 0 auto; }
+      .season-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+      .season-head .store-sub { margin-bottom: 22px; }
+      .season-kicker { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--rust-hi); margin-bottom: 6px; }
+      .season-tier { width: 340px; flex: none; margin-bottom: 22px; padding: 14px 18px; border-top: 2px solid var(--rust); }
+      .season-tier-n { display: flex; align-items: baseline; gap: 10px; font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; }
+      .season-tier-n span { font-size: 13px; font-weight: 600; letter-spacing: .24em; color: var(--muted); }
+      .season-tier-n b { font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: .04em; }
+      .season-tier-n small { font-size: 18px; color: var(--muted); font-weight: 600; }
+      .season-bar { height: 4px; margin-top: 10px; background: rgba(235,230,218,.12); }
+      .season-bar i { display: block; height: 100%; width: 0; background: var(--rust); transition: width .4s; }
+      .season-xp { font-size: 13px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+      .season-track { display: grid; grid-auto-flow: column; grid-auto-columns: 158px; gap: 10px; overflow-x: auto; padding: 4px 2px 14px; scroll-snap-type: x proximity; flex: none; }
+      .season-track::-webkit-scrollbar { height: 6px; }
+      .season-track::-webkit-scrollbar-thumb { background: rgba(235,230,218,.2); }
+      .tier { background: var(--sheet); border: 1px solid var(--line); display: flex; flex-direction: column; scroll-snap-align: start; backdrop-filter: blur(10px); position: relative; }
+      .tier .num { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .2em; color: var(--muted); padding: 7px 10px 6px; border-top: 3px solid rgba(235,230,218,.12); display: flex; justify-content: space-between; }
+      .tier .art { aspect-ratio: 1; margin: 0 10px; background: #1a1714 center / cover no-repeat; display: grid; place-items: center; position: relative; overflow: hidden; }
+      .tier .art .swatch { width: 54%; aspect-ratio: 1; box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 8px 20px rgba(0,0,0,.4); }
+      .tier .art .part { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); }
+      .tier .art .plate { padding: 7px 10px; border-top: 1px solid var(--gold); border-bottom: 1px solid var(--gold); font-family: 'Barlow Condensed', sans-serif; font-size: 17px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); text-align: center; line-height: 1.1; }
+      .tier .art .big-coin { display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 600; letter-spacing: .04em; }
+      .tier .art .big-coin .coin { width: 36px; height: 36px; }
+      .tier .label { padding: 9px 10px 11px; font-size: 13px; font-weight: 600; line-height: 1.25; min-height: 52px; }
+      .tier .label small { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+      .tier.got .num { border-top-color: var(--gold); color: var(--gold); }
+      .tier.got .label small { color: var(--gold); }
+      .tier.next { border-color: rgba(201,86,42,.7); }
+      .tier.next .num { border-top-color: var(--rust); color: var(--bone); }
+      .tier.locked .art > * { opacity: .5; }
+      .tier.final { border-color: rgba(214,176,106,.55); }
+      .tier.final .num { border-top-color: var(--gold); color: var(--gold); }
+      .tier.locked .art::after { content: ''; position: absolute; right: 8px; top: 8px; width: 10px; height: 12px;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M2.5 5V3.5a2.5 2.5 0 0 1 5 0V5' fill='none' stroke='%23fff' stroke-width='1.4'/%3E%3Crect x='1' y='5' width='8' height='6.5' fill='%23fff'/%3E%3C/svg%3E") center / contain no-repeat; opacity: .7; }
+      .season-lower { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; flex: none; }
+      .earn-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+      .earn-row:first-of-type { border-top: 0; }
+      .earn-row b { font-weight: 600; color: var(--bone); text-align: right; }
+      .earn-row span { color: var(--muted); }
+      #season-titles { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+      #season-titles button { padding: 8px 14px; border: 1px solid rgba(235,230,218,.25); background: none; color: var(--bone); cursor: pointer; font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+      #season-titles button:hover { border-color: var(--bone); }
+      #season-titles button.on { border-color: var(--gold); color: var(--gold); background: rgba(214,176,106,.08); }
+      #season-titles button.locked { color: var(--muted); border-style: dashed; cursor: default; }
+      #season-titles button.locked:hover { border-color: rgba(235,230,218,.25); }
+      .season-mini { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; width: 100%; margin-top: 6px; padding: 10px 0 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left;
+        font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
+      .season-mini b { color: var(--bone); font-weight: 600; letter-spacing: .12em; }
+      .season-mini .season-bar { grid-column: 1 / -1; display: block; margin-top: 7px; height: 3px; }
+      .season-mini:hover b, .season-mini:hover { color: var(--bone); }
+      .objective .xp, #objective-banner .xp { color: var(--rust-hi); font-weight: 600; }
+      .pause-season { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+      .pause-season .row { display: flex; justify-content: space-between; color: var(--muted); }
+      .pause-season .row b { color: var(--bone); font-weight: 600; }
+      .pause-season .season-bar { margin-top: 7px; height: 3px; }
+      .pause-season .count { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      @media (max-width: 760px) {
+        .season-head { flex-direction: column; align-items: stretch; gap: 0; }
+        .season-tier { width: 100%; }
+        .season-lower { grid-template-columns: 1fr; }
+      }
+
       /* Logo, news, settings and motion */
       .brand { display: flex; align-items: center; gap: 12px; }
       .brand::before { display: none; }
@@ -678,6 +741,7 @@
           <div class="brand"><svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg><div class="word"><b>PRIME</b></div></div>
           <nav id="lobby-tabs">
             <button data-tab="play" class="on">Play</button>
+            <button data-tab="season">Season</button>
             <button data-tab="store">Store</button>
             <button data-tab="character">Character</button>
             <button data-tab="car">Car</button>
@@ -690,15 +754,16 @@
           <div class="lobby-left">
             <button class="news" id="news-card" type="button">
               <div class="news-art" id="news-art"></div>
-              <div class="news-body"><div class="kicker">New update</div><div class="news-title">Take to the skies</div><div class="news-sub">A minicopter waits beside Smith's Garage and the Mining Outpost. Fuel it up and fly.</div></div>
+              <div class="news-body"><div class="kicker">Season 1 is live</div><div class="news-title">Ashfall season pass</div><div class="news-sub">30 free tiers of paints, outfits, titles and coins. Earn XP from daily challenges and time alive.</div></div>
             </button>
             <div class="lobby-foot"><span class="pin"></span><span id="land-title">The Wasteland</span><span class="dot">·</span><span id="land-sub">Survival</span></div>
           </div>
-          <div class="build-tag">Early access · build 0.13</div>
+          <div class="build-tag">Early access · build 0.14</div>
           <div class="side">
             <div class="panel-dark objectives">
               <h3>Daily challenges <small id="objective-reset"></small></h3>
               <div id="objective-list"><div class="objective"><div class="row">Connecting…</div></div></div>
+              <button type="button" class="season-mini" id="season-mini"><span id="season-mini-name">Season pass</span><b id="season-mini-tier">–</b><span class="season-bar"><i id="season-mini-fill"></i></span></button>
             </div>
             <div class="play-box panel-dark">
               <div class="mode-card"><div class="kicker">Survival · official</div><div class="mode">Wasteland</div><div class="meta" id="server-meta">Finding the server…</div></div>
@@ -710,6 +775,35 @@
                 <div id="join-error"></div>
                 <div id="account-line"><span id="account-state">Guest on this browser</span><button type="button" class="link" id="account-open">Sign in</button></div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page season" data-page="season">
+          <div class="season-head">
+            <div>
+              <div class="season-kicker" id="season-kicker">Season 1 · free pass</div>
+              <h2 id="season-name">Season</h2>
+              <div class="store-sub" id="season-sub">Climb the pass with season XP. Every tier unlocks something, and it's yours to keep.</div>
+            </div>
+            <div class="season-tier panel-dark">
+              <div class="season-tier-n"><span>Tier</span><b id="season-tier">0</b><small id="season-of">/ 30</small></div>
+              <div class="season-bar"><i id="season-fill"></i></div>
+              <div class="season-xp" id="season-xp">–</div>
+            </div>
+          </div>
+          <div class="store-section">Rewards</div>
+          <div class="season-track" id="season-track"></div>
+          <div class="season-lower">
+            <div class="panel-dark season-earn">
+              <h3>Earning XP</h3>
+              <div class="earn-row"><span>Daily challenge done</span><b>2 XP per coin it pays</b></div>
+              <div class="earn-row"><span>Time alive in the world</span><b id="earn-minute">10 XP a minute</b></div>
+              <div class="earn-row"><span>Today's challenges left</span><b id="earn-today">–</b></div>
+            </div>
+            <div class="panel-dark season-titles">
+              <h3>Title <small>Shown over your name</small></h3>
+              <div id="season-titles"></div>
             </div>
           </div>
         </section>
@@ -801,7 +895,7 @@
       <div id="death" hidden><div class="card"><h1>YOU DIED</h1><p id="death-text"></p><p>Everything you carried is in a loot bag where you fell.</p><div id="bags"></div><button id="respawn">Respawn somewhere random</button></div></div>
       <div id="code" hidden><div class="card"><h2 id="code-title">Enter the code</h2><input id="code-input" inputmode="numeric" maxlength="4" autocomplete="off" /><div class="row"><button id="code-cancel">Cancel</button><button id="code-ok">OK</button></div></div></div>
       <div id="paint" hidden><div class="card"><div id="paint-tabs"></div><h2 id="paint-title">Paint</h2><button id="paint-preset" hidden></button><div id="paint-models"></div><div id="paint-swatches"></div><div id="paint-name"></div><label id="paint-all-row"><input type="checkbox" id="paint-all" /> Paint the whole base around it</label><div class="row"><button id="paint-done">Done</button></div></div></div>
-      <div id="objective-banner"><small>Challenge complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin"></span><span id="objective-banner-reward"></span></span></div>
+      <div id="objective-banner"><small id="objective-banner-kicker">Challenge complete</small><b id="objective-banner-label"></b><span class="reward"><span class="coin" id="objective-banner-coin"></span><span id="objective-banner-reward"></span><span class="xp" id="objective-banner-xp"></span></span></div>
       <div id="pause" hidden>
         <div class="pause-left">
           <div class="brand"><svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg><div class="word"><b>PRIME</b></div></div>
@@ -816,6 +910,7 @@
             <h3>Daily challenges <small id="pause-reset"></small></h3>
             <div id="pause-objectives"></div>
             <div class="pause-coins"><span class="coin"></span><b id="pause-coins">–</b> coins to spend in the store on the main menu</div>
+            <div class="pause-season"><div class="row"><span id="pause-season-name">Season</span><b id="pause-season-tier">–</b></div><div class="season-bar"><i id="pause-season-fill"></i></div><div class="count" id="pause-season-xp"></div></div>
           </div>
           <div class="panel-dark pause-page" data-page="settings" hidden>
             <h3>Graphics</h3>

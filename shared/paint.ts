@@ -1,6 +1,6 @@
 // Paint that players pick for their cars, building pieces, guns and tools. One palette for all of
-// them; 0 leaves the thing as it was made. The plain colours are free; the finishes at the end
-// come in packs from the store.
+// them; 0 leaves the thing as it was made. The plain colours are free; the finishes after them
+// come in packs from the store, and the last ones are season pass rewards.
 
 export type Finish = 'chrome' | 'neon' | 'pearl' | 'camo';
 
@@ -8,8 +8,10 @@ export interface Paint {
   name: string;
   /** sRGB colour, or null to leave the original look. */
   hex: number | null;
-  /** The store pack it comes in; free if none. */
+  /** The store pack (or season pass reward) that unlocks it; free if none. */
   pack?: string;
+  /** The season whose pass gives it, for season rewards. */
+  season?: number;
   finish?: Finish;
   /** For camo: the three blotch colours over `hex`. */
   camo?: [number, number, number];
@@ -48,6 +50,12 @@ export const PAINTS: readonly Paint[] = [
   { name: 'Blood Moon', hex: 0x8a0e16, pack: 'legend', finish: 'pearl' },
   { name: 'Toxic', hex: 0x9cff2a, pack: 'legend', finish: 'neon' },
   { name: 'Galaxy', hex: 0x3a1a78, pack: 'legend', finish: 'pearl' },
+  // Season 1, Ashfall. New paints only ever go on the end: items and pieces keep their number.
+  { name: 'Ash', hex: 0x5e5b57, pack: 'ashfall-ash', season: 1, finish: 'pearl' },
+  { name: 'Ember', hex: 0xff4f1f, pack: 'ashfall-ember', season: 1, finish: 'neon' },
+  { name: 'Rust Chrome', hex: 0xb5653c, pack: 'ashfall-rust-chrome', season: 1, finish: 'chrome' },
+  { name: 'Ashfall Camo', hex: 0x5c5955, pack: 'ashfall-camo', season: 1, finish: 'camo', camo: [0x34312e, 0x8e8880, 0x1c1a19] },
+  { name: 'Firestorm', hex: 0x2a1a14, pack: 'ashfall-firestorm', season: 1, finish: 'camo', camo: [0xc9562a, 0xff8a2a, 0x120c0a] },
 ];
 
 /** True when the paint is free or its pack is among `packs`. */

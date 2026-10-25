@@ -51,9 +51,14 @@ const PACK_SHOTS: Record<string, { kind: VehicleKind; paint: number }> = {
   neon: { kind: 'pickup', paint: 21 },
   camo: { kind: 'jeep', paint: 24 },
   legend: { kind: 'van', paint: 31 },
-  /** The news card's picture: the minicopter. */
-  news: { kind: 'heli', paint: 0 },
 };
+
+/** A season pass paint's picture: a car in that paint, a different model for each. */
+function seasonShot(unlock: string): { kind: VehicleKind; paint: number } | undefined {
+  const paint = PAINTS.findIndex((p) => p.season && p.pack === unlock);
+  const kinds: VehicleKind[] = ['sedan', 'pickup', 'van'];
+  return paint < 0 ? undefined : { kind: kinds[paint % kinds.length], paint };
+}
 
 export class MenuStage {
   readonly world: World;
@@ -291,7 +296,7 @@ export class MenuStage {
     const vw = Math.min(width, Math.floor(canvas.width / ratio));
     const vh = Math.min(height, Math.floor(canvas.height / ratio));
     for (const pack of packs) {
-      const shot = PACK_SHOTS[pack];
+      const shot = PACK_SHOTS[pack] ?? seasonShot(pack);
       if (!shot || PAINTS[shot.paint] === undefined) continue;
       this.park(shot);
       this.cars.update(0.016);
