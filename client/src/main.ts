@@ -1975,7 +1975,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     map.update(dt, mapMarks());
     if (deathSpot && !dead && (Math.hypot(deathSpot.x - controller.position.x, deathSpot.z - controller.position.z) < 5 || performance.now() - deathSpot.at > 30 * 60_000)) deathSpot = null;
     compass.update(controller.position.x, controller.position.z, controller.yaw, compassMarks());
-    eventBanner.update(liveEvent, controller.position.x, controller.position.z, dayNight.now);
+    // Out of the way while a screen is open.
+    eventBanner.update(ui.open ? null : liveEvent, controller.position.x, controller.position.z, dayNight.now);
     gfx.render();
   });
 }
