@@ -80,6 +80,8 @@ SCANS = {
     'crop-pumpkin': ('5866a5b13bac4a01918d2b1eb80ad2ff', 3000, ['--keep-heading', '--drop=Plane', '--metalrough'], 1024),
     # A cob of sweet corn, for the item.
     'food-corn': ('effa9692c0b64245aba9c163c991b21c', 3000, ['--keep-heading'], 1024),
+    # A rugged field laptop, wired into the locked crate the raiders guard: hack it to open it.
+    'laptop': ('0dd4a117aad04fdaa3eb127c153f50b3', 4000, ['--keep-heading'], 1024),
 }
 
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).

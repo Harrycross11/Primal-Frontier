@@ -6,7 +6,7 @@ import type { BiomeId } from './biomes.ts';
 import { newStack, type ItemId, type Stack } from './items.ts';
 import { rollBlueprint } from './techTree.ts';
 
-export type LootKind = 'crate' | 'militaryCrate' | 'supplyDrop';
+export type LootKind = 'crate' | 'militaryCrate' | 'supplyDrop' | 'lockedCrate';
 
 /** One thing a crate can hold: how many, and how likely it is next to the rest. */
 interface Roll {
@@ -115,6 +115,30 @@ export const LOOT: Record<LootKind, { rolls: [number, number]; table: Roll[] }> 
       r('metalLegPlates', 1, 1, 1),
     ],
   },
+  // What the raiders were guarding: more of the supply drop's best, and plenty of it.
+  lockedCrate: {
+    rolls: [6, 8],
+    table: [
+      r('rifleAmmo', 90, 180, 3),
+      r('syringe', 3, 5, 2),
+      r('explosives', 4, 8, 1.2),
+      r('c4', 1, 2, 0.8),
+      r('satchel', 2, 3, 1),
+      r('hqm', 40, 80, 1.2),
+      r('assaultRifle', 1, 1, 1),
+      r('lr300', 1, 1, 0.8),
+      r('m4', 1, 1, 0.7),
+      r('hk416', 1, 1, 0.6),
+      r('scarH', 1, 1, 0.5),
+      r('svd', 1, 1, 0.5),
+      r('l96', 1, 1, 0.5),
+      r('m249', 1, 1, 0.4),
+      r('m60', 1, 1, 0.3),
+      r('metalFacemask', 1, 1, 1),
+      r('metalChestplate', 1, 1, 1),
+      r('metalLegPlates', 1, 1, 1),
+    ],
+  },
 };
 
 /**
@@ -125,6 +149,7 @@ export const BLUEPRINTS: Record<LootKind, { chance: number; levels: (1 | 2 | 3)[
   crate: { chance: 0.3, levels: [1] },
   militaryCrate: { chance: 0.5, levels: [1, 2, 2] },
   supplyDrop: { chance: 0.85, levels: [2, 3, 3] },
+  lockedCrate: { chance: 1, levels: [3] },
 };
 
 /** What each land's crates hold extra of. */

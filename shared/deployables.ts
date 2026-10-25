@@ -24,6 +24,8 @@ export type DeployableKind =
   | 'crate'
   | 'militaryCrate'
   | 'supplyDrop'
+  // The crate raiders guard during a live event (see shared/events.ts), shut until it is hacked.
+  | 'lockedCrate'
   // A thrown supply signal, smoking.
   | 'supplySignal'
   // Explosives once they are lit: thrown, or stuck to a wall or door.
@@ -35,7 +37,7 @@ export const DEPLOYABLE_KINDS: DeployableKind[] = ['workbench', 'workbench2', 'w
 /** Lit explosives waiting to go off. */
 export const CHARGE_KINDS: DeployableKind[] = ['beancan', 'satchel', 'c4'];
 /** Crates full of loot that nobody owns: you can only take from them, and they can't be broken. */
-export const CRATE_KINDS: DeployableKind[] = ['crate', 'militaryCrate', 'supplyDrop'];
+export const CRATE_KINDS: DeployableKind[] = ['crate', 'militaryCrate', 'supplyDrop', 'lockedCrate'];
 
 export interface Deployable {
   id: number;
@@ -62,6 +64,10 @@ export interface Deployable {
   spot?: string;
   /** Supply drops: the height it was dropped from and when (server ms) it left the plane and lands. */
   fall?: { from: number; start: number; land: number };
+  /** Locked crates: shut until hacked open. */
+  locked?: boolean;
+  /** Locked crates: when the hack finishes (server ms), once somebody has started it. */
+  hackEnd?: number;
 }
 
 export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [number, number, number]; hp: number; slots: number }> = {
@@ -79,6 +85,7 @@ export const DEPLOYABLE_INFO: Record<DeployableKind, { name: string; size: [numb
   crate: { name: 'Wooden Crate', size: [0.49, 0.28, 1.5], hp: 1e9, slots: 12 },
   militaryCrate: { name: 'Military Crate', size: [0.71, 0.77, 1.3], hp: 1e9, slots: 12 },
   supplyDrop: { name: 'Supply Drop', size: [1.4, 1.37, 1.4], hp: 1e9, slots: 18 },
+  lockedCrate: { name: 'Locked Crate', size: [1.05, 1.15, 1.9], hp: 1e9, slots: 18 },
   supplySignal: { name: 'Supply Signal', size: [0.09, 0.2, 0.09], hp: 1e9, slots: 0 },
   beancan: { name: 'Beancan Grenade', size: [0.14, 0.16, 0.14], hp: 1e9, slots: 0 },
   satchel: { name: 'Satchel Charge', size: [0.3, 0.3, 0.16], hp: 1e9, slots: 0 },

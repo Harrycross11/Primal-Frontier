@@ -47,6 +47,8 @@ export interface MapMarks {
   home: { x: number; z: number } | null;
   /** Where you last died, while it still matters. */
   death: { x: number; z: number } | null;
+  /** The landmark raiders hold in a live event, if any. */
+  raid?: { x: number; z: number; label: string } | null;
 }
 
 export class WorldMap {
@@ -293,6 +295,29 @@ export class WorldMap {
       ctx.arc(px, py, pulse, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+    }
+    // A raid: pulsing amber rings round the landmark the raiders hold, with what is going on.
+    if (marks.raid) {
+      const [px, py] = this.toPx(marks.raid.x, marks.raid.z);
+      const grow = (performance.now() / 1400) % 1;
+      ctx.strokeStyle = `rgba(224, 138, 30, ${1 - grow})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(px, py, 14 + grow * 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#e08a1e';
+      ctx.beginPath();
+      ctx.arc(px, py, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = "700 18px 'Barlow Condensed', 'Barlow', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#1c1a18';
+      ctx.strokeText(marks.raid.label, px, py - 18);
+      ctx.fillStyle = '#ffb347';
+      ctx.fillText(marks.raid.label, px, py - 18);
+      ctx.lineWidth = 2;
     }
     // Cars: small dark blocks.
     ctx.fillStyle = '#4c7480';
