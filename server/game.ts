@@ -17,6 +17,7 @@ import {
 import type { CraftJob, DeathCause, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
 import { cleanLook } from '../shared/look.ts';
+import { CoverMap } from '../shared/cover.ts';
 import {
   DOOR_HP,
   DOOR_KINDS,
@@ -303,6 +304,8 @@ const INVITE_RANGE = 8;
 export class Game {
   readonly seed: number;
   readonly resources: ResourceNode[];
+  /** Trunks, boulders, wrecks and landmark walls: what stops a bullet besides buildings. */
+  readonly cover: CoverMap;
   readonly pieces = new Map<string, Piece>();
   readonly deployables = new Map<number, Deployable>();
   readonly players = new Map<number, Player>();
@@ -383,6 +386,7 @@ export class Game {
   ) {
     this.seed = seed;
     this.resources = generateResources(seed);
+    this.cover = new CoverMap(seed, this.resources);
     this.rand = mulberry32(seed ^ 0x5bd1e995);
     this.lootRand = mulberry32(seed ^ 0x2545f491);
     this.houndRand = mulberry32(seed ^ 0x3c6ef372);
@@ -1763,19 +1767,7 @@ export class Game {
    * the ground. Returns how far it went.
    */
   private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } {
-    let t = range;
-    for (const piece of this.pieces.values()) {
-      for (const b of pieceBoxes(piece)) {
-        const hit = rayBox(o, d, b, t);
-        if (hit !== null) t = hit;
-      }
-    }
-    for (const dep of this.deployables.values()) {
-      const hit = rayBox(o, d, deployableBox(dep), t);
-      if (hit !== null) t = hit;
-    }
-    const ground = rayTerrain(this.seed, o, d, t);
-    if (ground !== null) t = ground;
+    const t = this.obstacle(o, d, range);
     let best: { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
     for (const v of this.vehicles.values()) {
       // Never the car you are driving, which is all round you.
@@ -1795,6 +1787,35 @@ export class Game {
       if (hit) best = { t: hit.t, hound: h, head: hit.head, zone: 'chest' };
     }
     return best;
+  }
+
+  /**
+   * How far a ray gets before a building piece, a deployable, cover or the ground stops it
+   * (`max` if nothing does). Bots use it too, to see whether they have a clear shot.
+   */
+  obstacle(o: Vec3, d: Vec3, max: number): number {
+    let t = max;
+    for (const piece of this.pieces.values()) {
+      for (const b of pieceBoxes(piece)) {
+        const hit = rayBox(o, d, b, t);
+        if (hit !== null) t = hit;
+      }
+    }
+    for (const dep of this.deployables.values()) {
+      const hit = rayBox(o, d, deployableBox(dep), t);
+      if (hit !== null) t = hit;
+    }
+    const cover = this.cover.ray(o, d, t);
+    if (cover !== null) t = cover;
+    const ground = rayTerrain(this.seed, o, d, t);
+    if (ground !== null) t = ground;
+    return t;
+  }
+
+  /** The player who last hurt this one, if they did within the last `seconds`. */
+  lastHurtBy(id: number, seconds: number): number | null {
+    const h = this.hurtBy.get(id);
+    return h && h.prey.kind === 'player' && Math.max(0, this.lastTick) - h.at < seconds * 1000 ? h.prey.id : null;
   }
 
   /** Wears down the weapon in a slot by one use; it breaks at zero. */
@@ -1818,7 +1839,7 @@ export class Game {
     const kill = victim.hp <= 0;
     const armour = [...zones].some((z) => victim.wear[ARMOUR_SLOTS.indexOf(z)]);
     const out: Outgoing[] = [
-      { to: by.id, msg: { t: 'hitmarker', head, kill, armour } },
+      { to: by.id, msg: { t: 'hitmarker', head, kill, armour, dmg: Math.max(1, Math.round(amount)) } },
       { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z], armour } },
     ];
     if (kill) return [...out, ...this.kill(victim, by, item, head)];
@@ -1870,7 +1891,18 @@ export class Game {
       { to: victim.id, msg: { t: 'died', by: by?.name ?? killer ?? null, item, ...(cause && { cause }) } },
       this.inventory(victim),
       this.crafting(victim),
-      { to: 'all', msg: { t: 'kill', killer: by?.name ?? killer ?? null, victim: victim.name, item: by ? item : null, head, ...(cause && { cause }) } },
+      {
+        to: 'all',
+        msg: {
+          t: 'kill',
+          killer: by?.name ?? killer ?? null,
+          victim: victim.name,
+          item: by ? item : null,
+          head,
+          ...(cause && { cause }),
+          ...(by && by !== victim && { dist: Math.round(Math.hypot(by.x - victim.x, by.y - victim.y, by.z - victim.z)) }),
+        },
+      },
     );
     return out;
   }
@@ -2299,7 +2331,7 @@ export class Game {
     const out: Outgoing[] = [];
     if (shooter) {
       this.hurt.set(shooter.id, { prey: { kind: 'hound', id: h.id }, at: now });
-      out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0 } });
+      out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0, dmg: Math.max(1, Math.round(amount)) } });
     }
     if (h.hp <= 0) return [...out, ...(shooter && h.species === 'ashhound' && h.owner === null ? this.progress(shooter, 'hounds', 1, now) : []), ...this.houndDies(h, now)];
     if (now >= h.animUntil || h.anim !== 'attack') {

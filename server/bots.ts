@@ -1,11 +1,14 @@
 // Computer-controlled survivors, so a quiet server still feels lived in. Each one plays through
 // the same Game calls a connected player's messages make: it walks, chops wood, builds and locks
 // a small hut with a box of loot inside, fights whoever comes too close and now and then raids
-// someone's door with satchel charges. Bots fill the server up to a target head count and leave
+// someone's door with satchel charges. In a gunfight it runs for cover, ducks out to shoot,
+// reloads and patches itself up out of sight, and crewmates spread out to come at you from
+// the sides. Bots fill the server up to a target head count and leave
 // one by one as real players join.
 
-import { PLAYER_HEIGHT, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
-import { EYE_HEIGHT } from '../shared/combat.ts';
+import { PLAYER_HEIGHT, PLAYER_RADIUS, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
+import { EYE_HEIGHT, type Vec3 } from '../shared/combat.ts';
+import { coverExtent, type Cover } from '../shared/cover.ts';
 import { DOORWAY, STOREY, TILE, boxesTouch, buildBaseY, pieceBoxes, pieceKey, type Piece } from '../shared/building.ts';
 import { BELT_SIZE, ITEMS, addItem, countItem, type ItemId, type Slots } from '../shared/items.ts';
 import type { Deployable, DeployableKind } from '../shared/deployables.ts';
@@ -29,6 +32,20 @@ const ENGAGE = 30;
 /** Closer than this, bots of rival crews fight each other too. */
 const ENGAGE_BOT = 16;
 const GIVE_UP = 45;
+/** How far it follows someone who shot it from further off. */
+const GIVE_UP_SHOT = 90;
+/** How far a crewmate's fight draws a bot in to help. */
+const HELP = 45;
+/** How far a bot will run to get behind something, in metres. */
+const COVER_RUN = 15;
+/** Cover lower than this hides nobody standing behind it. */
+const COVER_LOW = 1.15;
+/** Below this health it ducks into cover to bandage itself. */
+const HURT = 50;
+/** Seconds without sight of its enemy before it goes round the side. */
+const FLANK_AFTER = 5;
+/** How far round its enemy a flanker swings, in radians. */
+const FLANK_ANGLE = 1.15;
 /** Seconds after the hounds' own grace that bots leave a fresh spawn alone too. */
 const GRACE = 40;
 /** Radians of aim error, so bots can be outshot. */
@@ -64,6 +81,22 @@ interface Bot {
   nextShotAt: number;
   strafe: number;
   strafeUntil: number;
+  /** What it is hiding behind, and which side of it it leans out of to shoot. */
+  cover: { c: Cover; side: number; checkAt: number; saw: boolean; blind: number } | null;
+  /** Cover it couldn't see its enemy from either side of, and until when to leave it be. */
+  blind: Map<Cover, number>;
+  /** When it may next look round for cover, after finding none. */
+  coverLookAt: number;
+  /** In cover it hides until `hideUntil`, then leans out to shoot until `peekUntil`, and again. */
+  hideUntil: number;
+  peekUntil: number;
+  /** When it last had a clear line to its enemy, and when it first did in this stretch of sight. */
+  sawAt: number;
+  sightAt: number;
+  /** Where it is going to come at its enemy from the side, and when it last set off to. */
+  flank: { x: number; z: number; until: number } | null;
+  flankedAt: number;
+  nextHealAt: number;
   /** For noticing when it is stuck against something. */
   lastPos: { x: number; z: number; at: number };
 }
@@ -148,6 +181,16 @@ export class Bots {
       nextShotAt: 0,
       strafe: 1,
       strafeUntil: 0,
+      cover: null,
+      blind: new Map(),
+      coverLookAt: 0,
+      hideUntil: 0,
+      peekUntil: 0,
+      sawAt: 0,
+      sightAt: 0,
+      flank: null,
+      flankedAt: 0,
+      nextHealAt: 0,
       lastPos: { x: p.x, z: p.z, at: now },
     });
     // Others still hear that someone joined; the bot itself has nobody to send to.
@@ -166,12 +209,13 @@ export class Bots {
     p.y = terrainHeight(this.game.seed, x, z);
   }
 
-  /** A hatchet and a weapon with ammunition, loaded, on top of the starting rock and building plan. */
+  /** A hatchet, a weapon with ammunition, loaded, and two bandages, on top of the starting rock and building plan. */
   private kit(p: Survivor) {
     const [weapon, ammo, rounds] = LOADOUTS[Math.floor(this.rand() * LOADOUTS.length)];
     addItem(p.slots, 'stoneHatchet', 1);
     addItem(p.slots, weapon, 1);
     addItem(p.slots, ammo, rounds);
+    addItem(p.slots, 'bandage', 2);
     const gun = p.slots.find((s) => s?.item === weapon);
     if (gun) gun.ammo = ITEMS[weapon].weapon?.mag ?? 1;
   }
@@ -215,7 +259,7 @@ export class Bots {
       bot.deadAt = 0;
       bot.phase = bot.home ? 'roam' : 'gather';
       bot.raid = null;
-      bot.enemy = null;
+      this.calm(bot);
       bot.goal = null;
       const out = this.game.respawn(bot.id, undefined, now);
       this.scatter(p);
@@ -233,7 +277,7 @@ export class Bots {
       bot.enemy = foe;
       return this.fight(bot, p, now, dt);
     }
-    bot.enemy = null;
+    if (bot.enemy) this.calm(bot);
     if (bot.phase === 'fight') bot.phase = bot.raid ? 'raid' : bot.home ? 'roam' : 'gather';
     if (bot.phase !== 'raid' && bot.home && now > bot.raidAt && this.pickRaid(bot, p)) bot.phase = 'raid';
     switch (bot.phase) {
@@ -251,9 +295,11 @@ export class Bots {
   // Fighting.
 
   private findEnemy(bot: Bot, p: Survivor, now: number): Bot['enemy'] {
+    const shotBy = this.game.lastHurtBy(p.id, 8);
     if (bot.enemy) {
       const at = this.enemyAt(bot.enemy);
-      if (at && Math.hypot(at.x - p.x, at.z - p.z) < GIVE_UP) return bot.enemy;
+      const limit = bot.enemy.kind === 'player' && bot.enemy.id === shotBy ? GIVE_UP_SHOT : GIVE_UP;
+      if (at && Math.hypot(at.x - p.x, at.z - p.z) < limit) return bot.enemy;
     }
     let best: Bot['enemy'] = null;
     let bestD = Infinity;
@@ -261,10 +307,13 @@ export class Bots {
       if (other.id === p.id || other.dead) continue;
       const mate = this.bots.get(other.id);
       if (mate && mate.crew === bot.crew) continue;
-      // Fresh spawns get a minute's grace, so nobody is shot before they've found their feet.
-      if (!mate && now < other.safeUntil + GRACE * 1000) continue;
+      // Fresh spawns get a minute's grace, so nobody is shot before they've found their feet,
+      // unless they start it.
+      if (!mate && other.id !== shotBy && now < other.safeUntil + GRACE * 1000) continue;
       const d = Math.hypot(other.x - p.x, other.z - p.z);
-      if (d < (mate ? ENGAGE_BOT : ENGAGE) && d < bestD) {
+      // Whoever just shot it, from however far, or anyone close.
+      const reach = other.id === shotBy ? GIVE_UP_SHOT : mate ? ENGAGE_BOT : ENGAGE;
+      if (d < reach && d < bestD) {
         best = { kind: 'player', id: other.id };
         bestD = d;
       }
@@ -278,7 +327,24 @@ export class Bots {
         bestD = d;
       }
     }
-    return best;
+    if (best) return best;
+    // A crewmate in a gunfight nearby: go and help.
+    for (const mate of this.bots.values()) {
+      if (mate === bot || mate.crew !== bot.crew || mate.enemy?.kind !== 'player') continue;
+      const m = this.game.players.get(mate.id);
+      const foe = this.game.players.get(mate.enemy.id);
+      if (!m || m.dead || !foe || foe.dead || this.bots.get(foe.id)?.crew === bot.crew) continue;
+      if (Math.hypot(m.x - p.x, m.z - p.z) < HELP && Math.hypot(foe.x - p.x, foe.z - p.z) < HELP) return mate.enemy;
+    }
+    return null;
+  }
+
+  /** Forgets the fight it was in. */
+  private calm(bot: Bot) {
+    bot.enemy = null;
+    bot.cover = null;
+    bot.flank = null;
+    bot.sawAt = bot.sightAt = 0;
   }
 
   private enemyAt(e: NonNullable<Bot['enemy']>): { x: number; y: number; z: number; height: number } | null {
@@ -293,16 +359,24 @@ export class Bots {
   private fight(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
     bot.phase = 'fight';
     const t = this.enemyAt(bot.enemy!)!;
-    const dx = t.x - p.x;
-    const dz = t.z - p.z;
-    const dist = Math.hypot(dx, dz);
     const gunSlot = this.beltSlot(p, (s) => !!ITEMS[s.item].weapon && ITEMS[s.item].weapon!.class !== 'melee');
     const gun = gunSlot >= 0 ? p.slots[gunSlot]! : null;
     const w = gun ? ITEMS[gun.item].weapon! : null;
     const hasAmmo = !!gun && ((gun.ammo ?? 0) > 0 || countItem(p.slots, w!.ammo!) > 0);
+    // Against people it fights like one; an animal, or with nothing to shoot, it just goes at.
+    if (hasAmmo && bot.enemy!.kind === 'player') return this.gunfight(bot, p, t, gunSlot, now, dt);
+    return this.brawl(bot, p, t, hasAmmo ? gunSlot : -1, now, dt);
+  }
+
+  /** Out in the open: keeps at range sidestepping, or with nothing to shoot, closes in to swing. */
+  private brawl(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, gunSlot: number, now: number, dt: number): Outgoing[] {
+    const gun = gunSlot >= 0 ? p.slots[gunSlot]! : null;
+    const w = gun ? ITEMS[gun.item].weapon! : null;
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const dist = Math.hypot(dx, dz);
     const out: Outgoing[] = [];
-    // Keep at a comfortable range for the weapon, sidestepping; with nothing to shoot, close in.
-    const want = hasAmmo ? Math.min(w!.range * 0.4, 14) : 1.2;
+    const want = w ? Math.min(w.range * 0.4, 14) : 1.2;
     if (now > bot.strafeUntil) {
       bot.strafe = this.rand() < 0.5 ? -1 : 1;
       bot.strafeUntil = now + 900 + this.rand() * 1400;
@@ -310,32 +384,308 @@ export class Bots {
     const ux = dx / (dist || 1);
     const uz = dz / (dist || 1);
     const closing = dist > want + 2 ? 1 : dist < want - 3 ? -0.7 : 0;
-    const vx = ux * closing + -uz * bot.strafe * (hasAmmo ? 0.6 : 0);
-    const vz = uz * closing + ux * bot.strafe * (hasAmmo ? 0.6 : 0);
-    const yaw = Math.atan2(-dx, -dz);
-    out.push(...this.step(bot, p, vx, vz, PLAYER_SPEED * 0.9, yaw, now, dt, hasAmmo ? gunSlot : 0));
+    const vx = ux * closing + -uz * bot.strafe * (w ? 0.6 : 0);
+    const vz = uz * closing + ux * bot.strafe * (w ? 0.6 : 0);
+    out.push(...this.step(bot, p, vx, vz, PLAYER_SPEED * 0.9, Math.atan2(-dx, -dz), now, dt, gun ? gunSlot : 0));
     if (now < bot.nextShotAt) return out;
-    const eye = p.y + EYE_HEIGHT;
-    const aim = (): [number, number, number] => {
-      const dy = t.y + t.height - eye;
-      const len = Math.hypot(dx, dy, dz) || 1;
-      const e = () => (this.rand() - 0.5) * 2 * AIM_ERROR;
-      return [dx / len + e(), dy / len + e(), dz / len + e()];
-    };
-    if (hasAmmo && gun) {
-      if ((gun.ammo ?? 0) === 0) {
-        bot.nextShotAt = now + (w!.reload ?? 1) * 1000 + 200;
-        return [...out, ...this.game.reload(bot.id, gunSlot, now)];
-      }
-      if (dist > w!.range * 0.9) return out;
-      bot.nextShotAt = now + Math.max(w!.delay * 1000, 450) + this.rand() * 250;
-      return [...out, ...this.game.fire(bot.id, gunSlot, aim(), false, now)];
+    if (gun && w) {
+      const shot = this.shoot(bot, p, t, gunSlot, now);
+      return shot ? [...out, ...shot] : out;
     }
     if (dist < 2.2) {
       bot.nextShotAt = now + 700;
-      return [...out, ...this.game.melee(bot.id, 0, aim(), now)];
+      return [...out, ...this.game.melee(bot.id, 0, this.aim(p, t, t.y + t.height), now)];
     }
     return out;
+  }
+
+  /**
+   * A gunfight with a person. It gets behind the nearest tree, rock, wreck or wall that hides it
+   * from them, leans out to fire a few shots and ducks back, reloads and bandages out of sight,
+   * and when it has lost sight of them for a while (or a crewmate is already pinning them down)
+   * it swings round to come at them from the side.
+   */
+  private gunfight(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, gunSlot: number, now: number, dt: number): Outgoing[] {
+    const gun = p.slots[gunSlot]!;
+    const w = ITEMS[gun.item].weapon!;
+    const dist = Math.hypot(t.x - p.x, t.z - p.z);
+    const want = Math.min(w.range * 0.4, 14);
+    const view = this.sight(p, t);
+    if (view !== null) {
+      // A beat to react when someone first comes into view, so it can be outdrawn.
+      if (now - bot.sawAt > 1500) {
+        bot.sightAt = now;
+        bot.nextShotAt = Math.max(bot.nextShotAt, now + 350 + this.rand() * 350);
+      }
+      bot.sawAt = now;
+    } else if (!bot.sawAt) bot.sawAt = now;
+    const reloading = (gun.ammo ?? 0) === 0;
+    const bandage = this.beltOrPack(p, 'bandage');
+    const patching = p.hp < HURT && bandage;
+    const yaw = Math.atan2(-(t.x - p.x), -(t.z - p.z));
+    const run = (x: number, z: number, near = 0.35) => {
+      const dx = x - p.x;
+      const dz = z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d <= near) return this.step(bot, p, 0, 0, 0, yaw, now, dt, gunSlot);
+      return this.step(bot, p, dx / d, dz / d, PLAYER_SPEED * (d > 3 ? 0.95 : 0.6), yaw, now, dt, gunSlot);
+    };
+
+    // Going round the side: until it gets there, or sees them well from the new angle.
+    if (bot.flank) {
+      const there = Math.hypot(bot.flank.x - p.x, bot.flank.z - p.z) < 1.5;
+      const seen = view !== null && now - bot.sightAt > 600 && this.angleRound(bot, p, t) > 0.6;
+      if (there || seen || now > bot.flank.until) {
+        bot.flank = null;
+        bot.cover = null;
+      } else {
+        const out = run(bot.flank.x, bot.flank.z);
+        return [...out, ...(this.shootIfClear(bot, p, t, gunSlot, view, now) ?? [])];
+      }
+    }
+    if (this.shouldFlank(bot, p, t, view, now, reloading || !!patching)) {
+      const spot = this.flankSpot(bot, p, t, want);
+      if (spot) {
+        bot.flank = { ...spot, until: now + 9000 };
+        bot.flankedAt = now;
+        bot.cover = null;
+        return run(spot.x, spot.z);
+      }
+    }
+
+    // Keep the cover it has while it still hides it; look again every so often.
+    if (bot.cover && now > bot.cover.checkAt) {
+      const spot = this.coverSpot(bot.cover.c, t);
+      const ok = this.hides(t, spot) && Math.hypot(spot.x - p.x, spot.z - p.z) < COVER_RUN && Math.hypot(spot.x - t.x, spot.z - t.z) > 4;
+      if (ok) bot.cover.checkAt = now + 1000;
+      else bot.cover = null;
+    }
+    if (!bot.cover && now >= bot.coverLookAt) {
+      bot.cover = this.findCover(bot, p, t, want, w.range, now);
+      if (!bot.cover) bot.coverLookAt = now + 1000;
+      if (bot.cover) {
+        // Get there and settle before the first lean out.
+        bot.hideUntil = now + 500;
+        bot.peekUntil = bot.hideUntil + 1600 + this.rand() * 1400;
+      }
+    }
+
+    if (!bot.cover) {
+      // Nothing to hide behind: fight in the open, closing in when it can't see them.
+      if (view === null && now - bot.sawAt > 1500) {
+        const out = run(t.x, t.z, want * 0.6);
+        return out;
+      }
+      return this.brawl(bot, p, t, gunSlot, now, dt);
+    }
+
+    const c = bot.cover;
+    const hide = this.coverSpot(c.c, t);
+    const out: Outgoing[] = [];
+    // Hiding to reload or bandage, or between leans.
+    if (reloading || patching || now < bot.hideUntil) {
+      out.push(...run(hide.x, hide.z));
+      const behind = Math.hypot(hide.x - p.x, hide.z - p.z) < 0.8;
+      if (reloading && now >= bot.nextShotAt) {
+        bot.nextShotAt = now + (w.reload ?? 1) * 1000 + 200;
+        bot.hideUntil = Math.max(bot.hideUntil, bot.nextShotAt);
+        bot.peekUntil = bot.hideUntil + 1600 + this.rand() * 1400;
+        out.push(...this.game.reload(bot.id, gunSlot, now));
+      }
+      if (patching && behind && now >= bot.nextHealAt) {
+        bot.nextHealAt = now + 1200;
+        out.push(...this.game.use(bot.id, this.ensureInBelt(p, 'bandage'), now));
+      }
+      return out;
+    }
+    if (now > bot.peekUntil) {
+      // Back in for a moment, then out again, sometimes from the other side. Out of both sides
+      // with nothing to shoot at, this cover is no good: find another, or go round.
+      if (!c.saw && ++c.blind >= 2) {
+        bot.blind.set(c.c, now + 15000);
+        bot.cover = null;
+        return run(hide.x, hide.z);
+      }
+      bot.hideUntil = now + 700 + this.rand() * 1300;
+      bot.peekUntil = bot.hideUntil + 1400 + this.rand() * 1600;
+      if (!c.saw || this.rand() < 0.3) c.side = this.peekSide(c.c, t, -c.side).side;
+      if (c.saw) c.blind = 0;
+      c.saw = false;
+      return run(hide.x, hide.z);
+    }
+    const peek = this.peekSpot(c.c, t, c.side);
+    if (view !== null && Math.hypot(peek.x - p.x, peek.z - p.z) < 0.5) c.saw = true;
+    out.push(...run(peek.x, peek.z, 0.25));
+    out.push(...(this.shootIfClear(bot, p, t, gunSlot, view, now) ?? []));
+    return out;
+  }
+
+  /** Fires (or reloads) if it has a clear line to its enemy and its next shot is ready. */
+  private shootIfClear(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, gunSlot: number, view: number | null, now: number): Outgoing[] | null {
+    if (view === null || now < bot.nextShotAt) return null;
+    return this.shoot(bot, p, t, gunSlot, now, view);
+  }
+
+  private shoot(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, gunSlot: number, now: number, at = t.y + t.height): Outgoing[] | null {
+    const gun = p.slots[gunSlot]!;
+    const w = ITEMS[gun.item].weapon!;
+    if ((gun.ammo ?? 0) === 0) {
+      bot.nextShotAt = now + (w.reload ?? 1) * 1000 + 200;
+      return this.game.reload(bot.id, gunSlot, now);
+    }
+    if (Math.hypot(t.x - p.x, t.z - p.z) > w.range * 0.9) return null;
+    bot.nextShotAt = now + Math.max(w.delay * 1000, 450) + this.rand() * 250;
+    return this.game.fire(bot.id, gunSlot, this.aim(p, t, at), false, now);
+  }
+
+  /** Where to aim at the enemy's height `at`, a little off, so bots can be outshot. */
+  private aim(p: Survivor, t: { x: number; z: number }, at: number): Vec3 {
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const dy = at - (p.y + EYE_HEIGHT);
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const e = () => (this.rand() - 0.5) * 2 * AIM_ERROR;
+    return [dx / len + e(), dy / len + e(), dz / len + e()];
+  }
+
+  /** The height on its enemy it has a clear line to from where it stands (chest, else head), or null. */
+  private sight(p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>): number | null {
+    const eye: Vec3 = [p.x, p.y + EYE_HEIGHT, p.z];
+    for (const y of [t.y + t.height, t.y + EYE_HEIGHT]) if (this.clear(eye, [t.x, y, t.z])) return y;
+    return null;
+  }
+
+  /** True when nothing solid stands between two points. */
+  private clear(from: Vec3, to: Vec3): boolean {
+    const d: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const len = Math.hypot(...d);
+    if (len < 0.01) return true;
+    return this.game.obstacle(from, [d[0] / len, d[1] / len, d[2] / len], len) >= len - 0.3;
+  }
+
+  /** True when a survivor standing at `spot` is hidden, chest and all, from the enemy's eyes. */
+  private hides(t: { x: number; y: number; z: number }, spot: { x: number; z: number }): boolean {
+    const gy = terrainHeight(this.game.seed, spot.x, spot.z);
+    const eye: Vec3 = [t.x, t.y + EYE_HEIGHT, t.z];
+    return !this.clear(eye, [spot.x, gy + 1.1, spot.z]) && !this.clear(eye, [spot.x, gy + 0.6, spot.z]);
+  }
+
+  /** Just behind a piece of cover, on the far side from the enemy. */
+  private coverSpot(c: Cover, t: { x: number; z: number }): { x: number; z: number } {
+    const [ux, uz] = unit(c.x - t.x, c.z - t.z);
+    const back = coverExtent(c, ux, uz) + PLAYER_RADIUS + 0.4;
+    return { x: c.x + ux * back, z: c.z + uz * back };
+  }
+
+  /** Leaning out of one side of a piece of cover, far enough to see past it. */
+  private peekSpot(c: Cover, t: { x: number; z: number }, side: number): { x: number; z: number } {
+    const [ux, uz] = unit(c.x - t.x, c.z - t.z);
+    const back = coverExtent(c, ux, uz) + PLAYER_RADIUS + 0.4;
+    const out = coverExtent(c, -uz, ux) + PLAYER_RADIUS + 0.35;
+    return { x: c.x + ux * back - uz * side * out, z: c.z + uz * back + ux * side * out };
+  }
+
+  /** The side of a piece of cover it can see its enemy from, `prefer` if both will do, and whether either will. */
+  private peekSide(c: Cover, t: NonNullable<ReturnType<Bots['enemyAt']>>, prefer: number): { side: number; sees: boolean } {
+    for (const side of [prefer, -prefer]) {
+      const s = this.peekSpot(c, t, side);
+      const gy = terrainHeight(this.game.seed, s.x, s.z);
+      if (this.walled(s.x, gy, s.z)) continue;
+      if (this.clear([s.x, gy + EYE_HEIGHT, s.z], [t.x, t.y + t.height, t.z])) return { side, sees: true };
+    }
+    return { side: prefer, sees: false };
+  }
+
+  /** The best thing to hide behind within a short run, not too close to the enemy nor out of range. */
+  private findCover(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, want: number, range: number, now: number): Bot['cover'] {
+    const seed = this.game.seed;
+    const taken = [...this.bots.values()].filter((b) => b !== bot && b.cover).map((b) => b.cover!.c);
+    let best: Cover | null = null;
+    let bestSide = { side: 1, sees: false };
+    let bestScore = Infinity;
+    for (const c of this.game.cover.near(p.x, p.z, COVER_RUN)) {
+      if ((bot.blind.get(c) ?? 0) > now) continue;
+      const spot = this.coverSpot(c, t);
+      const gy = terrainHeight(seed, spot.x, spot.z);
+      if (c.top - gy < COVER_LOW) continue;
+      const run = Math.hypot(spot.x - p.x, spot.z - p.z);
+      const from = Math.hypot(spot.x - t.x, spot.z - t.z);
+      if (run > COVER_RUN || from < 5 || from > range * 0.85) continue;
+      if (this.walled(spot.x, gy, spot.z) || radiationAt(seed, spot.x, spot.z) > 0) continue;
+      // Taller than a head is better; a crewmate's spot is theirs; nearer to the range it likes is better.
+      let score = run + Math.abs(from - want) * 0.35 + (c.top - gy < EYE_HEIGHT + 0.25 ? 3 : 0);
+      if (taken.includes(c)) score += 25;
+      if (score >= bestScore || !this.hides(t, spot)) continue;
+      // Somewhere it can lean out and see them from, if it can.
+      const side = this.peekSide(c, t, this.rand() < 0.5 ? -1 : 1);
+      if (!side.sees) score += 12;
+      if (score >= bestScore) continue;
+      best = c;
+      bestSide = side;
+      bestScore = score;
+    }
+    if (!best) return null;
+    return { c: best, side: bestSide.side, checkAt: now + 1000, saw: false, blind: 0 };
+  }
+
+  /**
+   * Time to go round the side: when a crewmate is already in this fight and this bot is the
+   * one to swing wide, or when it hasn't seen its enemy for a while. Not while hiding to
+   * reload or bandage, and not again too soon.
+   */
+  private shouldFlank(bot: Bot, p: Survivor, t: { x: number; z: number }, view: number | null, now: number, busy: boolean): boolean {
+    if (busy || now - bot.flankedAt < 12000) return false;
+    if (Math.hypot(t.x - p.x, t.z - p.z) < 7) return false;
+    if (this.crew(bot).indexOf(bot) > 0 && now - bot.flankedAt > 20000) return true;
+    return view === null && now - bot.sawAt > FLANK_AFTER * 1000;
+  }
+
+  /** Its crewmates in the same fight, itself among them, in a fixed order. */
+  private crew(bot: Bot): Bot[] {
+    const e = bot.enemy;
+    return [...this.bots.values()].filter((b) => b.crew === bot.crew && b.enemy?.kind === e?.kind && b.enemy?.id === e?.id).sort((a, b) => a.id - b.id);
+  }
+
+  /** How far round its enemy it has come from where its first crewmate is shooting from, in radians. */
+  private angleRound(bot: Bot, p: Survivor, t: { x: number; z: number }): number {
+    const lead = this.crew(bot).find((b) => b !== bot);
+    const q = lead && this.game.players.get(lead.id);
+    if (!q) return Math.PI;
+    const a = Math.atan2(p.z - t.z, p.x - t.x) - Math.atan2(q.z - t.z, q.x - t.x);
+    return Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+  }
+
+  /** A spot swung round the enemy from where it stands, preferring cover there. */
+  private flankSpot(bot: Bot, p: Survivor, t: NonNullable<ReturnType<Bots['enemyAt']>>, want: number): { x: number; z: number } | null {
+    const seed = this.game.seed;
+    const team = this.crew(bot);
+    const n = team.indexOf(bot);
+    // Crewmates go opposite ways; on its own it picks a side.
+    const first = n > 0 ? (n % 2 ? 1 : -1) : this.rand() < 0.5 ? -1 : 1;
+    const from = Math.atan2(p.z - t.z, p.x - t.x);
+    const r = Math.max(8, Math.min(Math.hypot(p.x - t.x, p.z - t.z), want + 4));
+    for (const side of [first, -first]) {
+      for (const swing of [FLANK_ANGLE, FLANK_ANGLE * 0.6]) {
+        const a = from + side * swing;
+        const x = t.x + Math.cos(a) * r;
+        const z = t.z + Math.sin(a) * r;
+        if (Math.abs(x) > HALF_WORLD - 4 || Math.abs(z) > HALF_WORLD - 4 || radiationAt(seed, x, z) > 0) continue;
+        if (this.walled(x, terrainHeight(seed, x, z), z)) continue;
+        // Something to duck behind when it gets there, if there is anything close by.
+        let spot = { x, z };
+        let bestD = 6;
+        for (const c of this.game.cover.near(x, z, 6)) {
+          const s = this.coverSpot(c, t);
+          const d = Math.hypot(s.x - x, s.z - z);
+          if (d < bestD && c.top - terrainHeight(seed, s.x, s.z) >= COVER_LOW && !this.walled(s.x, terrainHeight(seed, s.x, s.z), s.z)) {
+            spot = s;
+            bestD = d;
+          }
+        }
+        return spot;
+      }
+    }
+    return null;
   }
 
   // Wood, and a hut.
@@ -502,7 +852,14 @@ export class Bots {
         if (atLandmark(seed, cx, cz, 10) || radiationAt(seed, cx, cz) > 0) continue;
         const y = buildBaseY(seed, cx, cz);
         let flat = true;
-        for (let dx = -1; dx <= 4 && flat; dx++) for (let dz = -3; dz <= 4 && flat; dz++) flat = Math.abs(terrainHeight(seed, i * TILE + dx, k * TILE + dz) - y) < 0.8;
+        // Ground no higher than the floor, so nobody walking in through the doorway hits their
+        // head, and in front of the doorway no more than a step below it.
+        for (let dx = -1; dx <= 4 && flat; dx++) {
+          for (let dz = -3; dz <= 4 && flat; dz++) {
+            const h = terrainHeight(seed, i * TILE + dx, k * TILE + dz) - y;
+            flat = h > (dz < 1 && dx >= 0 && dx <= 3 ? -0.25 : -0.8) && h < 0.15;
+          }
+        }
         if (!flat) continue;
         if (this.game.resources.some((n) => Math.hypot(n.x - cx, n.z - cz) < 4 + RESOURCE_INFO[n.kind].radius)) continue;
         if ([...this.game.pieces.values()].some((q) => Math.hypot(q.i * TILE - cx, q.k * TILE - cz) < 14)) continue;
@@ -723,7 +1080,9 @@ export class Bots {
     return y;
   }
 
+  /** True if a survivor standing at (x, y, z) would be in a building piece, a tree trunk, a rock or a wreck. */
   private walled(x: number, y: number, z: number): boolean {
+    if (this.game.cover.solidAt(x, y, z, PLAYER_RADIUS * 0.8)) return true;
     const me = playerBox({ x, y: y + 0.3, z });
     for (const piece of this.game.pieces.values()) {
       if (Math.abs(piece.i * TILE + TILE / 2 - x) > 5 || Math.abs(piece.k * TILE + TILE / 2 - z) > 5) continue;
@@ -750,6 +1109,11 @@ export class Bots {
     return spare;
   }
 
+  /** True if it carries any of an item, on the belt or in the pack. */
+  private beltOrPack(p: Survivor, item: ItemId): boolean {
+    return p.slots.some((s) => s?.item === item);
+  }
+
   private beltSlot(p: Survivor, test: (s: NonNullable<Slots[number]>) => boolean): number {
     return p.slots.findIndex((s, n) => n < 6 && !!s && test(s));
   }
@@ -757,4 +1121,9 @@ export class Bots {
   private between([a, b]: number[]): number {
     return a + this.rand() * (b - a);
   }
+}
+
+function unit(x: number, z: number): [number, number] {
+  const l = Math.hypot(x, z) || 1;
+  return [x / l, z / l];
 }

@@ -356,6 +356,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   welcome.players.forEach(addRemote);
   /** Who last asked you onto their team. */
   let invitedBy: string | null = null;
+  /** Kills since you last died, for the kill confirmation. */
+  let streak = 0;
 
   // Health and combat.
   let hp = welcome.hp;
@@ -660,7 +662,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         break;
       }
       case 'hitmarker':
-        hud.hitmarker(m.head);
+        hud.hitmarker(m.head, m.kill, !!m.armour, m.dmg);
         effects.hitSound(m.head, m.kill, m.armour);
         break;
       case 'health':
@@ -760,8 +762,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         });
         break;
       case 'kill': {
-        const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
-        hud.killFeed(m.killer, m.victim, m.item ? ITEMS[m.item].name : null, m.head, mine, m.cause ? SURVIVAL_FEED[m.cause] : null);
+        const me = welcome.you.name;
+        const role = m.killer === me && m.victim !== me ? 'killer' : m.victim === me ? 'victim' : null;
+        const weapon = m.item ? { icon: iconSvg(m.item), name: ITEMS[m.item].name } : null;
+        hud.killFeed(m.killer, m.victim, weapon, m.head, role, m.cause ? SURVIVAL_FEED[m.cause] : null, m.dist ?? null);
+        if (role === 'victim') streak = 0;
+        if (role === 'killer') hud.killConfirm(m.victim, weapon?.name ?? null, m.dist ?? null, m.head, ++streak);
         break;
       }
     }

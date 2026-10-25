@@ -568,7 +568,7 @@ test('dying drops everything in a loot bag, and you respawn with a rock', () => 
   const out = [...game.fire(a, 2, AT_BODY, true, 1000), ...game.fire(a, 2, AT_BODY, true, 4000)];
   assert.equal(target.dead, true);
   const feed = out.find((o) => o.msg.t === 'kill');
-  assert.deepEqual(feed, { to: 'all', msg: { t: 'kill', killer: 'Ash', victim: 'Bo', item: 'l96', head: false } }, 'everyone sees it in the kill feed');
+  assert.deepEqual(feed, { to: 'all', msg: { t: 'kill', killer: 'Ash', victim: 'Bo', item: 'l96', head: false, dist: 10 } }, 'everyone sees it in the kill feed');
   const bag = [...game.deployables.values()].find((d) => d.kind === 'lootBag')!;
   assert.ok(bag, 'a loot bag was left');
   assert.equal(bag.label, 'Bo');

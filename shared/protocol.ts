@@ -184,14 +184,14 @@ export type ServerMessage =
   /** You climbed on an animal (id), or got off one (id null) at this spot. */
   | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }
-  /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
-  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause }
+  /** Someone died, for the kill feed: who killed them (null if nobody), with what, if it was a headshot, and from how far (m). */
+  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause; dist?: number }
   /** Your hunger, thirst and radiation poisoning, and the radiation per second where you stand (after protection). */
   | { t: 'vitals'; food: number; water: number; rads: number; level: number }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
   | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
-  /** You hit someone (for the hit marker); `armour` when the hit landed on armour. */
-  | { t: 'hitmarker'; head: boolean; kill: boolean; armour?: boolean }
+  /** You hit someone (for the hit marker); `armour` when the hit landed on armour, `dmg` how much it did. */
+  | { t: 'hitmarker'; head: boolean; kill: boolean; armour?: boolean; dmg?: number }
   /** Your health changed; `from` is where the damage came from, if anywhere, and `armour` if your armour took some of it. */
   | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
