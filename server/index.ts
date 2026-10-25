@@ -10,6 +10,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
 import { Bots } from './bots.ts';
+import { Events } from './events.ts';
+import { EVENT_EVERY, FIRST_EVENT } from '../shared/events.ts';
 import { Game, cleanToken, type Outgoing } from './game.ts';
 import { openStore } from './store.ts';
 import type { RegisterResult } from './accounts.ts';
@@ -147,6 +149,16 @@ if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Num
 // should feel like it has, and bots make up whatever real players don't. None by default in
 // screenshot runs (START_AT), where they would wander into shot.
 const bots = new Bots(game, Number(process.env.BOTS ?? (process.env.START_AT ? 0 : 5)));
+// HOLD_FIRE=1 stops bots and raiders shooting (for screenshots).
+bots.holdFire = !!process.env.HOLD_FIRE;
+// Raiders take a landmark every so often (EVENT_FIRST and EVENT_EVERY, in minutes, change when;
+// EVENT_AT names the landmark or land to always use).
+// None in screenshot runs unless asked for.
+const events = new Events(game, bots, {
+  first: Number(process.env.EVENT_FIRST ?? (process.env.START_AT ? Infinity : FIRST_EVENT)),
+  every: Number(process.env.EVENT_EVERY ?? EVENT_EVERY),
+  at: process.env.EVENT_AT,
+});
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
@@ -209,7 +221,7 @@ wss.on('connection', (ws) => {
           send(ws, { t: 'notice', text: 'Reach that tier of the season pass to wear its title' });
         }
         const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
-        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.players.size, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
+        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.headCount, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
         return;
       }
       if (msg.t === 'register' || msg.t === 'signIn') {
@@ -239,7 +251,7 @@ wss.on('connection', (ws) => {
       }
       if (msg.t !== 'join') return;
       // A bot gives up its place to a real player.
-      if (game.players.size >= MAX_PLAYERS) deliver(bots.removeOne());
+      if (game.headCount >= MAX_PLAYERS) deliver(bots.removeOne());
       const joined = game.join(msg.name, now, msg.look, msg.token);
       if (!joined) {
         send(ws, { t: 'full' });
@@ -249,6 +261,7 @@ wss.on('connection', (ws) => {
       id = joined.id;
       sockets.set(id, ws);
       deliver(joined.out);
+      deliver(events.welcome(id));
       // START_PET=mule gives everyone who joins a tame one beside them (for screenshots).
       if (process.env.START_PET) game.givePet(id, process.env.START_PET as Species);
       deliver(bots.balance(sockets.size, now));
@@ -371,6 +384,9 @@ wss.on('connection', (ws) => {
       case 'throw':
         deliver(game.throwGrenade(id, msg.slot, msg.d, now));
         break;
+      case 'hack':
+        deliver(events.hack(id, Number(msg.id), now));
+        break;
     }
   });
 
@@ -388,6 +404,7 @@ if (!process.env.BOTS_WAIT) bots.balance(0, Date.now());
 setInterval(() => {
   const now = Date.now();
   deliver(bots.tick(now));
+  deliver(events.tick(now));
   deliver(game.tick(now));
 }, 1000 / TICK_RATE);
 

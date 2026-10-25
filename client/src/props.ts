@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DOORWAY, type DoorKind } from '../../shared/building.ts';
 import { DEPLOYABLE_INFO, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
+import { HACK_SECONDS, countdown } from '../../shared/events.ts';
 import { PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
 import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
@@ -745,6 +746,8 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     const charge = buildCharge(kind, true);
     g.add(charge);
     g.userData.tick = charge.userData.tick;
+  } else if (kind === 'lockedCrate') {
+    buildLockedCrate(g, w, h, l);
   } else if (kind === 'crate' || kind === 'militaryCrate' || kind === 'supplyDrop') {
     const scan = model(kind === 'crate' ? 'crate' : kind === 'militaryCrate' ? 'crate-military' : 'crate-drop');
     if (scan) g.add(shared(new THREE.Mesh(scan.geometry, scan.material)));
@@ -787,6 +790,104 @@ export function buildDeployable(kind: DeployableKind): THREE.Group {
     g.add(mesh(new THREE.BoxGeometry(0.1, 0.12, 0.03), metalMat(), 0, h - 0.18, l / 2 + 0.01));
   }
   return g;
+}
+
+/**
+ * The crate a live event's raiders guard: a big scanned military crate with a rugged field laptop
+ * wired to it. The laptop's screen shows LOCKED, the hack counting down, then OPEN, and a beacon
+ * on the lid glows red, blinks amber while it is hacked and turns green once it opens.
+ */
+function buildLockedCrate(g: THREE.Group, w: number, h: number, l: number) {
+  const scan = model('crate-military');
+  if (scan) {
+    const c = shared(new THREE.Mesh(scan.geometry, scan.material));
+    // The scan is fitted 1.3 m long; this one is bigger.
+    c.scale.setScalar(l / 1.3);
+    g.add(c);
+  } else g.add(mesh(new RoundedBoxGeometry(w, h, l, 2, 0.02), plain(0x3f4a34, 0.7, 0.2), 0, h / 2, 0));
+  // The laptop on the lid, its screen facing out over the crate's long side.
+  const holder = new THREE.Group();
+  holder.position.set(-0.08, h - 0.01, 0.3);
+  holder.rotation.y = Math.PI / 2;
+  g.add(holder);
+  const laptop = model('laptop');
+  if (laptop) holder.add(shared(new THREE.Mesh(laptop.geometry, laptop.material)));
+  else {
+    holder.add(mesh(new THREE.BoxGeometry(0.38, 0.04, 0.28), plain(0x2a2b2c, 0.6, 0.3), 0, 0.02, 0.02));
+    const lid = mesh(new THREE.BoxGeometry(0.38, 0.27, 0.03), plain(0x2a2b2c, 0.6, 0.3), 0, 0.17, -0.13);
+    lid.rotation.x = -0.3;
+    holder.add(lid);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 192;
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  // Laid over the scan's blank screen, tilted back with the lid (measured off the model).
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.235, 0.165), new THREE.MeshBasicMaterial({ map, toneMapped: false }));
+  screen.position.set(0.015, 0.172, -0.104);
+  screen.rotation.x = -0.5;
+  screen.userData.noAO = true;
+  holder.add(screen);
+  // A cable from the laptop into the lock.
+  const cable = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-0.22, h + 0.02, 0.3), new THREE.Vector3(-0.42, h + 0.01, 0.18), new THREE.Vector3(-w / 2 - 0.01, h - 0.12, 0.05)]), 12, 0.008, 5),
+    plain(0x151515, 0.6),
+  );
+  g.add(cable);
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0x2a0a08, emissive: 0xd23a2c, emissiveIntensity: 2.2, roughness: 0.4 });
+  const beacon = mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.12, 14), beaconMat, 0.25, h + 0.06, -0.55);
+  g.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.03, 14), plain(0x26282a, 0.5, 0.6), 0.25, h + 0.005, -0.55));
+  g.add(beacon);
+
+  const ctx = canvas.getContext('2d')!;
+  let state: Deployable | null = null;
+  let clock: () => number = Date.now;
+  let drawn = '';
+  const draw = (title: string, sub: string, fill: number, color: string) => {
+    const key = `${title}|${sub}|${fill.toFixed(2)}`;
+    if (key === drawn) return;
+    drawn = key;
+    ctx.fillStyle = '#04110a';
+    ctx.fillRect(0, 0, 256, 192);
+    // Faint scan lines, like an old LCD.
+    ctx.fillStyle = 'rgba(80,255,140,0.05)';
+    for (let y = 0; y < 192; y += 4) ctx.fillRect(0, y, 256, 1);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = color;
+    ctx.font = "700 40px 'Barlow Condensed', monospace";
+    ctx.fillText(title, 128, 74);
+    ctx.font = "600 28px 'Barlow Condensed', monospace";
+    ctx.fillText(sub, 128, 116);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(28, 140, 200, 20);
+    ctx.fillRect(32, 144, 192 * fill, 12);
+    map.needsUpdate = true;
+  };
+  const show = (time: number) => {
+    const end = state?.hackEnd;
+    if (state?.locked && end) {
+      const left = Math.max(0, end - clock());
+      draw('HACKING', countdown(end, clock()), 1 - left / (HACK_SECONDS * 1000), '#ffb347');
+      beaconMat.emissive.setHex(0xe08a1e);
+      beaconMat.emissiveIntensity = Math.sin(time * 9) > 0 ? 3 : 0.3;
+    } else if (state?.locked) {
+      draw('LOCKED', 'E TO HACK', 0, '#ff5a46');
+      beaconMat.emissive.setHex(0xd23a2c);
+      beaconMat.emissiveIntensity = 2.2;
+    } else {
+      draw('OPEN', 'ACCESS GRANTED', 1, '#5fe08a');
+      beaconMat.emissive.setHex(0x3fd06a);
+      beaconMat.emissiveIntensity = 2.2;
+    }
+  };
+  g.userData.setLock = (d: Deployable, serverNow: () => number) => {
+    state = d;
+    clock = serverNow;
+    show(0);
+  };
+  g.userData.tick = (time: number) => show(time);
 }
 
 /** A model's own geometry, shared with every copy: marked so nobody disposes of it. */

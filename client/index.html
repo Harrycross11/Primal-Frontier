@@ -713,6 +713,15 @@
       .map-key .k-home { width: 11px; height: 11px; border: 0; background: #ebe6da; clip-path: polygon(50% 0, 100% 45%, 85% 45%, 85% 100%, 15% 100%, 15% 45%, 0 45%); }
       .map-key .k-death { border: 0; width: 11px; height: 11px; background: linear-gradient(45deg, transparent 40%, #d23a2c 40% 60%, transparent 60%), linear-gradient(-45deg, transparent 40%, #d23a2c 40% 60%, transparent 60%); }
       #compass { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); pointer-events: none; z-index: 5; }
+      #event-banner { position: fixed; left: 50%; top: 90px; transform: translateX(-50%); min-width: 340px; max-width: 560px; padding: 7px 16px 8px; text-align: center; background: rgba(13,12,10,.78); border: 1px solid rgba(235,230,218,.08); border-top: 2px solid #d23a2c; color: rgba(235,230,218,.86); pointer-events: none; z-index: 5; font-size: 14px; }
+      #event-banner small { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: #e05a46; }
+      #event-banner b { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #ebe6da; margin: 1px 0 2px; }
+      #event-banner.hot { border-top-color: #e08a1e; animation: event-pulse 1s ease-in-out infinite alternate; }
+      #event-banner.hot small { color: #ffb347; }
+      #event-banner.open { border-top-color: #3fd06a; }
+      #event-banner.open small { color: #5fe08a; }
+      @keyframes event-pulse { from { box-shadow: 0 0 0 rgba(224,138,30,0); } to { box-shadow: 0 0 18px rgba(224,138,30,.45); } }
+      .map-key .k-raid { border-radius: 50%; background: transparent; border: 2.5px solid #e08a1e; }
       .map-key .k-team { border-radius: 50%; background: #5fd06a; }
       .map-key .k-pet { border-radius: 50%; background: #c0502e; }
       .map-key .k-car { width: 14px; height: 9px; background: #4c7480; }
@@ -865,7 +874,7 @@
       <div id="target" hidden><div id="target-text"></div><div id="target-health" hidden><div id="target-health-fill"></div></div></div>
       <div id="top-left"><div id="land-name"></div><div id="clock"></div><div id="player-count"></div><div id="player-list"></div></div>
       <div id="land-banner"><div id="banner-name"></div><div id="banner-perk"></div></div>
-      <div id="map" hidden><div class="map-card"><div class="map-head"><h2>Map</h2><span id="map-grid"></span><span class="map-close"><kbd>M</kbd> Close</span></div><canvas id="map-canvas"></canvas><div class="map-key"><span><i class="k-you"></i>You</span><span><i class="k-home"></i>Home</span><span><i class="k-death"></i>Where you died</span><span><i class="k-team"></i>Team</span><span><i class="k-pet"></i>Your animals</span><span><i class="k-car"></i>Vehicles</span><span><i class="k-mark"></i>Landmark</span><span><i class="k-rad"></i>Radiation</span></div></div></div>
+      <div id="map" hidden><div class="map-card"><div class="map-head"><h2>Map</h2><span id="map-grid"></span><span class="map-close"><kbd>M</kbd> Close</span></div><canvas id="map-canvas"></canvas><div class="map-key"><span><i class="k-you"></i>You</span><span><i class="k-home"></i>Home</span><span><i class="k-death"></i>Where you died</span><span><i class="k-team"></i>Team</span><span><i class="k-pet"></i>Your animals</span><span><i class="k-car"></i>Vehicles</span><span><i class="k-mark"></i>Landmark</span><span><i class="k-raid"></i>Raid</span><span><i class="k-rad"></i>Radiation</span></div></div></div>
       <div id="resources"></div>
       <div id="netstats"></div>
       <div id="kill-feed"></div>

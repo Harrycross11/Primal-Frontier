@@ -127,6 +127,8 @@ const FIT: Record<string, Fit> = {
   crate: { width: 1.5 },
   'crate-military': { width: 1.3 },
   'crate-drop': { width: 1.4 },
+  // A rugged laptop wired into the locked crate in a raid.
+  laptop: { width: 0.4 },
   parachute: { height: 5 },
   plane: { width: 55 },
   // Held guns, turned so the barrel points along +z, at their real overall lengths.
@@ -346,7 +348,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 }
 
 /** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
-const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$)/;
+const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$|laptop$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
 const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */

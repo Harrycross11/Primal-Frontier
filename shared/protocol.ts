@@ -5,6 +5,7 @@ import type { Piece, PieceKind, WallEdit } from './building.ts';
 import type { Vec3 } from './combat.ts';
 import type { CreatureState } from './creatures.ts';
 import type { Deployable } from './deployables.ts';
+import type { LiveEvent } from './events.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
 import type { AccountView } from './shop.ts';
@@ -37,6 +38,8 @@ export interface PlayerState {
   riding?: number;
   /** The car they are driving. */
   driving?: number;
+  /** One of the raiders holding a landmark in a live event: hostile to everyone. */
+  raider?: boolean;
 }
 
 /** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
@@ -126,7 +129,9 @@ export type ClientMessage =
   /** Stick the charge in a belt slot at a point on a wall, door, floor or the ground. */
   | { t: 'plant'; slot: number; at: Vec3; key?: string; door?: boolean }
   /** Throw the grenade in a belt slot from your eyes along `d`. */
-  | { t: 'throw'; slot: number; d: Vec3 };
+  | { t: 'throw'; slot: number; d: Vec3 }
+  /** Start hacking the locked crate the raiders guard. */
+  | { t: 'hack'; id: number };
 
 export type ServerMessage =
   | {
@@ -211,4 +216,6 @@ export type ServerMessage =
   | { t: 'plane'; from: [number, number]; to: [number, number]; y: number; start: number; speed: number; drop: [number, number]; over: string }
   /** That door is locked: ask for its code. */
   | { t: 'codeNeeded'; key: string }
+  /** The live event going on now (raiders at a landmark), or none. */
+  | { t: 'event'; event: LiveEvent | null }
   | { t: 'full' };
