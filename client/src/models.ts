@@ -346,7 +346,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 /** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
 const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
-const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$)/.test(name);
+const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$|gear-saddle$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */
 const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 
@@ -366,7 +366,8 @@ export async function loadModels(progress?: (done: number, total: number) => voi
   progress?.(0, jobs.length);
   await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
   // A few at a time, so they never crowd out anything the menu fetches.
-  const late = [...names.filter((n) => LATE_BUILT.test(n)), ...LATE_CHARACTERS, ...names.filter((n) => isLate(n) && !LATE_BUILT.test(n))];
+  // The saddle goes first: tamed animals put it on as soon as they arrive.
+  const late = ['gear-saddle', ...names.filter((n) => LATE_BUILT.test(n)), ...LATE_CHARACTERS, ...names.filter((n) => isLate(n) && !LATE_BUILT.test(n) && n !== 'gear-saddle')];
   const next = async (): Promise<void> => {
     const n = late.shift();
     if (!n) return;

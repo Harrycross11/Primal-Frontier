@@ -63,3 +63,5 @@ if __name__ == '__main__':
     textures()
     # Then cap the texture sizes in man-made models (see shrink-textures.py).
     subprocess.run(['python3', os.path.join(os.path.dirname(__file__), 'shrink-textures.py')], check=True)
+    # And re-save each new image as small as it can be without looking different (see repack-images.py).
+    subprocess.run(['python3', os.path.join(os.path.dirname(__file__), 'repack-images.py')], check=True)
