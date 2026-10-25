@@ -56,7 +56,7 @@ const PACK_SHOTS: Record<string, { kind: VehicleKind; paint: number }> = {
 /** A season pass paint's picture: a car in that paint, a different model for each. */
 function seasonShot(unlock: string): { kind: VehicleKind; paint: number } | undefined {
   const paint = PAINTS.findIndex((p) => p.season && p.pack === unlock);
-  const kinds: VehicleKind[] = ['sedan', 'pickup', 'jeep', 'van'];
+  const kinds: VehicleKind[] = ['sedan', 'pickup', 'van'];
   return paint < 0 ? undefined : { kind: kinds[paint % kinds.length], paint };
 }
 

@@ -280,7 +280,7 @@ export class Lobby {
       ...season.track.map((reward, i) => {
         const n = i + 1;
         const card = document.createElement('div');
-        card.className = `tier ${n <= tier ? 'got' : n === tier + 1 ? 'next' : 'locked'}`;
+        card.className = `tier ${n <= tier ? 'got' : n === tier + 1 ? 'next' : 'locked'}${n === season.track.length ? ' final' : ''}`;
         card.innerHTML = `<div class="num"><span>${String(n).padStart(2, '0')}</span><span></span></div><div class="art"></div><div class="label"><span></span><small></small></div>`;
         card.querySelector('.num span:last-child')!.textContent = n === tier + 1 ? 'Next' : '';
         this.rewardArt(card.querySelector<HTMLElement>('.art')!, reward);
