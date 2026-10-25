@@ -723,9 +723,9 @@ export function nameTag(text: string, color: number, team = false, title?: strin
   ctx.fillStyle = team ? '#bfe8c4' : '#ebe6da';
   ctx.fillText(label, 256, y, 480);
   if (title) {
-    ctx.font = "600 26px 'Barlow Condensed', 'Barlow', system-ui, sans-serif";
-    ctx.letterSpacing = '7px';
-    ctx.fillStyle = '#d6b06a';
+    ctx.font = "700 30px 'Barlow Condensed', 'Barlow', system-ui, sans-serif";
+    ctx.letterSpacing = '6px';
+    ctx.fillStyle = '#e2bd72';
     ctx.fillText(title.toUpperCase(), 256, 20, 480);
   }
   ctx.shadowBlur = 4;

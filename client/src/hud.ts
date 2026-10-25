@@ -102,7 +102,7 @@ export class Hud {
     if (!b) return el.classList.remove('show');
     $('objective-banner-kicker').textContent = b.kicker;
     $('objective-banner-label').textContent = b.label;
-    $('objective-banner-coin').hidden = !b.coins;
+    $('objective-banner-coin').style.display = b.coins ? '' : 'none';
     $('objective-banner-reward').textContent = b.coins ? `+${b.coins}` : 'Unlocked';
     $('objective-banner-xp').textContent = b.xp ? ` · +${b.xp} XP` : '';
     el.classList.add('show');
