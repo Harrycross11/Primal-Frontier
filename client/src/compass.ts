@@ -1,9 +1,9 @@
 // The compass along the top of the screen: which way you face, with marks for home, where you
-// last died, your team, supply drops and the landmarks, so you can always find your way back.
+// last died, your team, supply drops, a live raid and the landmarks, so you can always find your way back.
 
 /** Something worth pointing at. */
 export interface CompassMark {
-  kind: 'home' | 'death' | 'mate' | 'drop' | 'landmark';
+  kind: 'home' | 'death' | 'mate' | 'drop' | 'landmark' | 'raid';
   x: number;
   z: number;
   /** Shown beside the distance when you face it (landmarks) or always (the rest). */
@@ -17,7 +17,7 @@ const H = 74;
 const SPAN = 70;
 const TICKS_Y = 40;
 const CARDINALS: Record<number, string> = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
-const COLOURS: Record<CompassMark['kind'], string> = { home: '#ebe6da', death: '#d23a2c', mate: '#5fd06a', drop: '#d23a2c', landmark: '#c9562a' };
+const COLOURS: Record<CompassMark['kind'], string> = { home: '#ebe6da', death: '#d23a2c', mate: '#5fd06a', drop: '#d23a2c', landmark: '#c9562a', raid: '#e08a1e' };
 const FONT = "'Barlow Condensed', 'Barlow', sans-serif";
 
 /** The way from one point to another, in degrees clockwise from north (north is -z, east is +x). */
@@ -98,7 +98,7 @@ export class Compass {
       // Landmarks only say what they are when you face them; the rest always say how far.
       const facing = Math.abs(((m.at - heading + 540) % 360) - 180) < 6;
       if (m.kind === 'landmark' && !facing) continue;
-      const text = `${m.kind === 'landmark' && m.label ? `${m.label}  ` : m.kind === 'mate' && m.label ? `${m.label}  ` : ''}${Math.round(m.dist)} m`;
+      const text = `${(m.kind === 'landmark' || m.kind === 'mate' || m.kind === 'raid') && m.label ? `${m.label}  ` : ''}${Math.round(m.dist)} m`;
       ctx.font = `600 12px ${FONT}`;
       ctx.fillStyle = COLOURS[m.kind] === '#ebe6da' ? '#ebe6da' : 'rgba(235,230,218,.92)';
       ctx.fillText(text.toUpperCase(), px, 11);
@@ -142,6 +142,16 @@ export class Compass {
     } else if (kind === 'drop') {
       ctx.rect(x - 5, y - 5, 10, 10);
       ctx.fill();
+    } else if (kind === 'raid') {
+      // A warning triangle.
+      ctx.moveTo(x, y - 7);
+      ctx.lineTo(x + 7, y + 5);
+      ctx.lineTo(x - 7, y + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#141210';
+      ctx.fillRect(x - 1, y - 3, 2, 4.5);
+      ctx.fillRect(x - 1, y + 2.5, 2, 1.5);
     } else if (kind === 'mate') {
       ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fill();

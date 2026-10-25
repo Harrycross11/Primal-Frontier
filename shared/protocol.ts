@@ -5,6 +5,7 @@ import type { Piece, PieceKind, WallEdit } from './building.ts';
 import type { Vec3 } from './combat.ts';
 import type { CreatureState } from './creatures.ts';
 import type { Deployable } from './deployables.ts';
+import type { LiveEvent } from './events.ts';
 import type { ItemId, Slots } from './items.ts';
 import type { Look } from './look.ts';
 import type { AccountView } from './shop.ts';
@@ -31,10 +32,14 @@ export interface PlayerState {
   wear: (ItemId | null)[];
   /** Skin, hair, clothing and gear they picked before joining. */
   look: Look;
+  /** A season pass title shown over their name. */
+  title?: string;
   /** The animal they are riding. */
   riding?: number;
   /** The car they are driving. */
   driving?: number;
+  /** One of the raiders holding a landmark in a live event: hostile to everyone. */
+  raider?: boolean;
 }
 
 /** A slot in your own inventory ('me'), your worn armour ('wear'), or a furnace or box (its id). */
@@ -62,6 +67,8 @@ export type ClientMessage =
   | { t: 'buy'; pack: string; token?: string }
   /** Your coins and objectives, for the pause menu. */
   | { t: 'getAccount' }
+  /** From the main menu: wear a season pass title over your name, or (null) none. */
+  | { t: 'wearTitle'; id: string | null; token?: string }
   /** Asks for an answer straight back, to time the round trip. */
   | { t: 'ping'; at: number }
   /** From the menu: give this browser's account a name and password. */
@@ -122,7 +129,9 @@ export type ClientMessage =
   /** Stick the charge in a belt slot at a point on a wall, door, floor or the ground. */
   | { t: 'plant'; slot: number; at: Vec3; key?: string; door?: boolean }
   /** Throw the grenade in a belt slot from your eyes along `d`. */
-  | { t: 'throw'; slot: number; d: Vec3 };
+  | { t: 'throw'; slot: number; d: Vec3 }
+  /** Start hacking the locked crate the raiders guard. */
+  | { t: 'hack'; id: number };
 
 export type ServerMessage =
   | {
@@ -156,8 +165,10 @@ export type ServerMessage =
   | { t: 'signedIn'; name: string; token: string }
   | { t: 'authError'; text: string }
   | { t: 'pong'; at: number }
-  /** You finished one of today's objectives. */
-  | { t: 'objectiveDone'; label: string; reward: number }
+  /** You finished one of today's objectives: its coins, and the season XP it brought. */
+  | { t: 'objectiveDone'; label: string; reward: number; xp: number }
+  /** You reached a tier of the season pass, and what it gave you. */
+  | { t: 'tierUp'; tier: number; reward: string }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }
@@ -184,14 +195,14 @@ export type ServerMessage =
   /** You climbed on an animal (id), or got off one (id null) at this spot. */
   | { t: 'mounted'; id: number | null; x: number; y: number; z: number; yaw: number }
   | { t: 'notice'; text: string }
-  /** Someone died, for the kill feed: who killed them (null if nobody), with what, and if it was a headshot. */
-  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause }
+  /** Someone died, for the kill feed: who killed them (null if nobody), with what, if it was a headshot, and from how far (m). */
+  | { t: 'kill'; killer: string | null; victim: string; item: ItemId | null; head: boolean; cause?: DeathCause; dist?: number }
   /** Your hunger, thirst and radiation poisoning, and the radiation per second where you stand (after protection). */
   | { t: 'vitals'; food: number; water: number; rads: number; level: number }
   /** Someone fired: where from and where each pellet ended, for tracers and sound. */
   | { t: 'shot'; by: number; item: ItemId; from: Vec3; ends: Vec3[] }
-  /** You hit someone (for the hit marker); `armour` when the hit landed on armour. */
-  | { t: 'hitmarker'; head: boolean; kill: boolean; armour?: boolean }
+  /** You hit someone (for the hit marker); `armour` when the hit landed on armour, `dmg` how much it did. */
+  | { t: 'hitmarker'; head: boolean; kill: boolean; armour?: boolean; dmg?: number }
   /** Your health changed; `from` is where the damage came from, if anywhere, and `armour` if your armour took some of it. */
   | { t: 'health'; hp: number; from?: Vec3; armour?: boolean }
   /** You died. */
@@ -205,4 +216,6 @@ export type ServerMessage =
   | { t: 'plane'; from: [number, number]; to: [number, number]; y: number; start: number; speed: number; drop: [number, number]; over: string }
   /** That door is locked: ask for its code. */
   | { t: 'codeNeeded'; key: string }
+  /** The live event going on now (raiders at a landmark), or none. */
+  | { t: 'event'; event: LiveEvent | null }
   | { t: 'full' };

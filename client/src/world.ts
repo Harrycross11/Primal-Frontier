@@ -1141,6 +1141,7 @@ export class World {
     }
     g.userData.setOn?.(d.on);
     g.userData.setGrow?.(d);
+    g.userData.setLock?.(d, () => this.serverNow());
     g.userData.health = d.hp / DEPLOYABLE_INFO[d.kind].hp;
   }
 

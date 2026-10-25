@@ -127,6 +127,8 @@ const FIT: Record<string, Fit> = {
   crate: { width: 1.5 },
   'crate-military': { width: 1.3 },
   'crate-drop': { width: 1.4 },
+  // A rugged laptop wired into the locked crate in a raid.
+  laptop: { width: 0.4 },
   parachute: { height: 5 },
   plane: { width: 55 },
   // Held guns, turned so the barrel points along +z, at their real overall lengths.
@@ -322,6 +324,7 @@ const clips = new Map<string, THREE.AnimationClip[]>();
 
 async function loadCharacter(loader: GLTFLoader, name: string) {
   const gltf = await loader.loadAsync(`/models/${name}.glb`);
+  gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isMesh) return;
@@ -329,12 +332,13 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
     mesh.receiveShadow = true;
     // Skinned bounds come from the bind pose, so give them room for swinging limbs (and lying
     // down) rather than switching culling off: then animals and players behind you or far off in
-    // the fog are not drawn, and only those near you go into the shadow map.
+    // the fog are not drawn, and only those near you go into the shadow map. They are measured
+    // through the bones, since some rigs (the survivor's, in centimetres) scale the body apart
+    // from the mesh: measured from the raw shape, the survivor's bounds were 2 cm across and
+    // other players' bodies vanished unless their feet were on screen.
     if (mesh.isSkinnedMesh) {
-      mesh.geometry.computeBoundingSphere();
-      const sphere = mesh.geometry.boundingSphere!.clone();
-      sphere.radius *= 1.6;
-      mesh.boundingSphere = sphere;
+      mesh.computeBoundingSphere();
+      mesh.boundingSphere!.radius *= 1.6;
     }
     const m = mesh.material as THREE.MeshStandardMaterial;
     if (m.map) m.map.anisotropy = 8;
@@ -344,7 +348,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 }
 
 /** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
-const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$)/;
+const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$|laptop$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
 const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$|gear-saddle$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */

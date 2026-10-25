@@ -8,6 +8,7 @@ const $ = (id: string) => document.getElementById(id)!;
 export class Hud {
   private noticeTimer = 0;
   private hitTimer = 0;
+  private confirmTimer = 0;
 
   onPlay(handler: (name: string) => void) {
     const input = $('name') as HTMLInputElement;
@@ -78,15 +79,39 @@ export class Hud {
   }
 
   private bannerTimer = 0;
+  /** Banners waiting for the one showing to go. */
+  private banners: { kicker: string; label: string; coins: number; xp: number }[] = [];
 
-  /** Slides in "Objective complete" with what was done and the coins it paid. */
-  objectiveDone(label: string, reward: number) {
-    $('objective-banner-label').textContent = label;
-    $('objective-banner-reward').textContent = `+${reward}`;
+  /** Slides in "Challenge complete" with what was done, the coins it paid and the season XP. */
+  objectiveDone(label: string, reward: number, xp: number) {
+    this.banner({ kicker: 'Challenge complete', label, coins: reward, xp });
+  }
+
+  /** Slides in a season pass tier reached and what it unlocked. */
+  tierUp(tier: number, reward: string) {
+    this.banner({ kicker: `Season tier ${tier}`, label: reward, coins: 0, xp: 0 });
+  }
+
+  private banner(b: { kicker: string; label: string; coins: number; xp: number }) {
+    this.banners.push(b);
+    if (this.banners.length === 1) this.nextBanner();
+  }
+
+  private nextBanner() {
+    const b = this.banners[0];
     const el = $('objective-banner');
+    if (!b) return el.classList.remove('show');
+    $('objective-banner-kicker').textContent = b.kicker;
+    $('objective-banner-label').textContent = b.label;
+    $('objective-banner-coin').style.display = b.coins ? '' : 'none';
+    $('objective-banner-reward').textContent = b.coins ? `+${b.coins}` : 'Unlocked';
+    $('objective-banner-xp').textContent = b.xp ? ` · +${b.xp} XP` : '';
     el.classList.add('show');
     clearTimeout(this.bannerTimer);
-    this.bannerTimer = window.setTimeout(() => el.classList.remove('show'), 4500);
+    this.bannerTimer = window.setTimeout(() => {
+      this.banners.shift();
+      this.nextBanner();
+    }, 4500);
   }
 
   toggleHelp() {
@@ -124,30 +149,69 @@ export class Hud {
     requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('show')));
   }
 
-  hitmarker(head: boolean) {
+  /**
+   * Four ticks round the crosshair when a shot lands: white on the body, steel on armour, red on
+   * the head, and bigger and held longer on a kill. With `dmg`, the damage done floats up beside it.
+   */
+  hitmarker(head: boolean, kill = false, armour = false, dmg?: number) {
     const el = $('hitmarker');
     el.classList.toggle('head', head);
-    el.classList.remove('fade');
+    el.classList.toggle('armour', armour && !head);
+    el.classList.toggle('kill', kill);
+    el.classList.remove('fade', 'show');
+    void el.offsetWidth;
     el.classList.add('show');
     clearTimeout(this.hitTimer);
     this.hitTimer = window.setTimeout(() => {
       el.classList.remove('show');
       el.classList.add('fade');
-    }, 90);
+    }, kill ? 380 : 110);
+    if (dmg === undefined) return;
+    const n = document.createElement('div');
+    n.className = `hit-dmg${head ? ' head' : ''}${kill ? ' fatal' : ''}${armour && !head ? ' armour' : ''}`;
+    n.textContent = String(dmg);
+    // Each one starts a little apart, so a burst reads as separate hits.
+    n.style.left = `${16 + Math.random() * 14}px`;
+    n.style.top = `${-30 - Math.random() * 12}px`;
+    const list = $('hit-numbers');
+    list.append(n);
+    while (list.children.length > 8) list.firstElementChild!.remove();
+    setTimeout(() => n.remove(), 900);
   }
 
-  /** A line in the kill feed; `mine` when you were the killer or the one killed. */
-  killFeed(killer: string | null, victim: string, weapon: string | null, head: boolean, mine: boolean, how: string | null = null) {
+  /** Under the crosshair when you kill someone: who, with what, from how far, and how many in a row. */
+  killConfirm(victim: string, weapon: string | null, dist: number | null, head: boolean, streak: number) {
+    const el = $('kill-confirm');
+    const details = [weapon, dist !== null ? `${dist} m` : null].filter(Boolean).join('  ·  ');
+    el.innerHTML =
+      `<div class="kc-label">${head ? 'Headshot kill' : 'Killed'}</div><div class="kc-name">${esc(victim)}</div>` +
+      (details ? `<div class="kc-with">${esc(details)}</div>` : '') +
+      (streak > 1 ? `<div class="kc-streak">${streak} kills in a row</div>` : '');
+    el.classList.toggle('head', head);
+    el.classList.remove('show', 'fade');
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(this.confirmTimer);
+    this.confirmTimer = window.setTimeout(() => el.classList.replace('show', 'fade'), 2600);
+  }
+
+  /**
+   * A line in the kill feed: killer, the weapon's picture, victim, then the weapon's name and
+   * how far. `me` is 'killer' or 'victim' when it was you, which stands out.
+   */
+  killFeed(killer: string | null, victim: string, weapon: { icon: string; name: string } | null, head: boolean, me: 'killer' | 'victim' | null, how: string | null = null, dist: number | null = null) {
     const feed = $('kill-feed');
     const row = document.createElement('div');
-    row.className = `kill${mine ? ' me' : ''}`;
-    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    row.className = `kill${me ? ` me-${me}` : ''}`;
+    const extra = [weapon?.name, dist !== null ? `${dist} m` : null].filter(Boolean).join(' · ');
     row.innerHTML = killer
-      ? `<b>${esc(killer)}</b> killed <b>${esc(victim)}</b>${weapon ? ` <span class="with">· ${esc(weapon)}</span>` : ''}${head ? ' <span class="hs">headshot</span>' : ''}`
-      : `<b>${esc(victim)}</b> ${how ?? 'died'}`;
+      ? `<b class="k">${esc(killer)}</b><span class="w">${weapon?.icon ?? '<span class="x">killed</span>'}</span><b class="v">${esc(victim)}</b>` +
+        (head ? '<span class="hs">Headshot</span>' : '') +
+        (extra ? `<span class="with">${esc(extra)}</span>` : '')
+      : `<b class="v">${esc(victim)}</b><span class="with">${esc(how ?? 'died')}</span>`;
     feed.prepend(row);
-    while (feed.children.length > 5) feed.lastElementChild!.remove();
-    fadeOut(row, 6000);
+    while (feed.children.length > 6) feed.lastElementChild!.remove();
+    fadeOut(row, me ? 10000 : 7000);
   }
 
   /** "+6 Wood" in the corner when items arrive in your inventory (or "-" when they leave a stack). */
@@ -262,6 +326,10 @@ export class Hud {
 }
 
 /** Fades an element out after `ms`, then removes it. Returns the timer. */
+function esc(t: string): string {
+  return t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
 function fadeOut(el: HTMLElement, ms: number): number {
   return window.setTimeout(() => {
     el.classList.add('fade');

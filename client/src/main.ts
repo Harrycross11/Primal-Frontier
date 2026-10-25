@@ -55,6 +55,8 @@ import { World, buildPieceMesh } from './world.ts';
 import { forgetIcons, itemIconUrl } from './itemIcons.ts';
 import { Compass, type CompassMark } from './compass.ts';
 import { Guide } from './guide.ts';
+import { EventBanner } from './eventBanner.ts';
+import { countdown, HACK_SECONDS, type LiveEvent } from '../../shared/events.ts';
 import { ViewModel } from './viewModel.ts';
 import { daylight } from '../../shared/sky.ts';
 
@@ -105,6 +107,8 @@ const SURVIVAL_FEED = {
 } as const;
 /** Seconds before a sleeping bag can be woken up in again (the server holds the real timer). */
 const BAG_COOLDOWN = 60;
+/** The dye raiders wear, so they stand out from survivors at a glance. */
+const RAIDER_RED = 0xa8261c;
 
 interface Remote {
   state: PlayerState;
@@ -169,6 +173,8 @@ const lobbyMessages = (m: ServerMessage) => {
 };
 net.onMessage = lobbyMessages;
 lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
+lobby.onWearTitle = (id) => net.send({ t: 'wearTitle', id, token: survivorToken() });
+lobby.onOwned = (owned) => picker.setOwned(owned);
 lobby.onSignIn = (name, password) => net.send({ t: 'signIn', name, password });
 lobby.onRegister = (name, password) => net.send({ t: 'register', name, password, token: survivorToken() });
 lobby.onSignOut = () => {
@@ -292,6 +298,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let deathSpot: { x: number; z: number; at: number } | null = null;
   const sites = landmarks(welcome.seed).map(({ site, landmark }) => ({ kind: 'landmark' as const, x: site.x, z: site.z, label: landmark.name }));
   const compass = new Compass(document.getElementById('hud')!);
+  /** The live event going on now (raiders holding a landmark), and its banner under the compass. */
+  let liveEvent: LiveEvent | null = null;
+  const eventBanner = new EventBanner(document.getElementById('hud')!);
   const guide = new Guide(document.getElementById('hud')!, (text) => {
     hud.notice(text, 3);
     effects.objective();
@@ -302,6 +311,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (h) out.push({ kind: 'home', x: h.x, z: h.z });
     if (deathSpot) out.push({ kind: 'death', x: deathSpot.x, z: deathSpot.z });
     for (const d of world.deployables.values()) if (d.kind === 'supplyDrop') out.push({ kind: 'drop', x: d.x, z: d.z });
+    if (liveEvent) out.push({ kind: 'raid', x: liveEvent.x, z: liveEvent.z, label: 'Raid' });
     for (const r of mates()) out.push({ kind: 'mate', x: r.avatar.root.position.x, z: r.avatar.root.position.z, label: r.state.name });
     return out;
   };
@@ -315,6 +325,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     drops: [...world.deployables.values()].filter((d) => d.kind === 'supplyDrop'),
     cars: [...vehicles.views.values()].map((v) => v.root.position),
     mates: mates().map((r) => ({ x: r.avatar.root.position.x, z: r.avatar.root.position.z, name: r.state.name })),
+    raid: liveEvent && { x: liveEvent.x, z: liveEvent.z, label: `RAID: ${liveEvent.place.toUpperCase()}` },
   });
   creatures.sync(welcome.creatures);
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
@@ -346,16 +357,19 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const mates = () => [...remotes.values()].filter((r) => teamIds.includes(r.state.id));
   const addRemote = (p: PlayerState) => {
     if (remotes.has(p.id) || p.id === welcome.id) return;
-    const avatar = new Avatar(p.color, p.name, p.look);
+    // Raiders wear a red scarf and armband, and their names carry a red stripe.
+    const avatar = new Avatar(p.raider ? RAIDER_RED : p.color, p.name, p.look);
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
-    if (teamIds.includes(p.id)) avatar.setTag(p.name, p.color, true);
+    if (teamIds.includes(p.id) || p.title) avatar.setTag(p.name, p.color, teamIds.includes(p.id), p.title);
   };
   welcome.players.forEach(addRemote);
   /** Who last asked you onto their team. */
   let invitedBy: string | null = null;
+  /** Kills since you last died, for the kill confirmation. */
+  let streak = 0;
 
   // Health and combat.
   let hp = welcome.hp;
@@ -397,7 +411,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let buildPaint = 0;
   const paintPanel = new PaintPanel();
   paintPanel.onClose = () => canvas.requestPointerLock?.();
-  paintPanel.onLocked = (pack) => hud.notice(`That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu`, 3);
+  paintPanel.onLocked = (pack) =>
+    hud.notice(PACKS.some((p) => p.id === pack) ? `That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu` : 'That is a season pass reward: climb the pass to unlock it', 3);
   // Coins, store packs and today's objectives.
   let account = welcome.account ?? null;
   paintPanel.owned = account?.packs ?? [];
@@ -466,7 +481,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       deployGhostKind = null;
     });
   const refreshPlayers = () =>
-    hud.setPlayers([welcome.you.name, ...[...remotes.values()].map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
+    hud.setPlayers([welcome.you.name, ...[...remotes.values()].filter((r) => !r.state.raider).map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
   refreshPlayers();
 
   const sendMove = () => {
@@ -660,7 +675,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         break;
       }
       case 'hitmarker':
-        hud.hitmarker(m.head);
+        hud.hitmarker(m.head, m.kill, !!m.armour, m.dmg);
         effects.hitSound(m.head, m.kill, m.armour);
         break;
       case 'health':
@@ -720,13 +735,25 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       case 'notice':
         hud.notice(m.text);
         break;
+      case 'event': {
+        const was = liveEvent;
+        liveEvent = m.event;
+        // A siren when raiders take somewhere, and a sharper one when someone starts the hack.
+        if (m.event && !was) effects.alarm();
+        else if (m.event?.hackEnd && !was?.hackEnd) effects.alarm(true);
+        break;
+      }
       case 'account':
         account = m.account;
         paintPanel.owned = account.packs;
         pause.setAccount(account);
         break;
       case 'objectiveDone':
-        hud.objectiveDone(m.label, m.reward);
+        hud.objectiveDone(m.label, m.reward, m.xp);
+        effects.objective();
+        break;
+      case 'tierUp':
+        hud.tierUp(m.tier, m.reward);
         effects.objective();
         break;
       case 'plane': {
@@ -744,7 +771,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const was = teamIds;
         teamIds = m.members.length ? m.members : [welcome.id];
         for (const r of remotes.values()) {
-          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id));
+          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id), r.state.title);
         }
         refreshPlayers();
         break;
@@ -760,8 +787,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         });
         break;
       case 'kill': {
-        const mine = m.killer === welcome.you.name || m.victim === welcome.you.name;
-        hud.killFeed(m.killer, m.victim, m.item ? ITEMS[m.item].name : null, m.head, mine, m.cause ? SURVIVAL_FEED[m.cause] : null);
+        const me = welcome.you.name;
+        const role = m.killer === me && m.victim !== me ? 'killer' : m.victim === me ? 'victim' : null;
+        const weapon = m.item ? { icon: iconSvg(m.item), name: ITEMS[m.item].name } : null;
+        hud.killFeed(m.killer, m.victim, weapon, m.head, role, m.cause ? SURVIVAL_FEED[m.cause] : null, m.dist ?? null);
+        if (role === 'victim') streak = 0;
+        if (role === 'killer') hud.killConfirm(m.victim, weapon?.name ?? null, m.dist ?? null, m.head, ++streak);
         break;
       }
     }
@@ -1339,6 +1370,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the workbench');
       return openScreen(aimDeployable);
     }
+    if (aimDeployable?.kind === 'lockedCrate' && aimDeployable.locked) {
+      if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the crate');
+      if (aimDeployable.hackEnd) return hud.notice(`Opens in ${countdown(aimDeployable.hackEnd, dayNight.now)}: hold the spot`);
+      return net.send({ t: 'hack', id: aimDeployable.id });
+    }
     if (aimDeployable && aimDeployable.slots.length > 0) {
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to open it');
       if (falling(aimDeployable)) return hud.notice("Wait for it to land");
@@ -1527,6 +1563,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const how = info.tool === 'pickup' ? 'E to pick' : 'Left click to gather';
       return { text: resourceInRange(aimResource) ? `${label}  ·  ${how}` : `${label}  ·  Get closer` };
     }
+    if (aimPlayer?.state.raider) return { text: `${aimPlayer.state.name}  ·  Hostile: guarding the locked crate` };
     if (aimPlayer) {
       const s = aimPlayer.state;
       return { text: teamIds.includes(s.id) ? `${s.name} (your team)` : `${s.name}  ·  T to invite to your team` };
@@ -1539,6 +1576,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (aimDeployable) {
       const d = aimDeployable;
       if (d.kind === 'lootBag') return { text: `${d.label ?? 'Someone'}'s loot bag  ·  E to open` };
+      if (d.kind === 'lockedCrate' && d.locked) {
+        const how = d.hackEnd ? `Being hacked: opens in ${countdown(d.hackEnd, dayNight.now)}` : `E to hack it open (takes ${HACK_SECONDS / 60} minutes)`;
+        return { text: `Locked Crate  ·  ${how}` };
+      }
       if (CRATE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  ${falling(d) ? 'Still coming down' : 'E to open'}` };
       if (d.kind === 'supplySignal') return { text: 'Supply Signal  ·  The plane is on its way' };
       if (CHARGE_KINDS.includes(d.kind)) return { text: `${DEPLOYABLE_INFO[d.kind].name}  ·  About to blow: get away!` };
@@ -1797,6 +1838,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     /** What the crosshair is on: a piece key, a door, a deployable, and where. */
     aimInfo: () => ({ key: aim?.piece ? pieceKey(aim.piece) : null, door: aimDoor, deployable: aimDeployable?.id ?? null, point: aim?.point.toArray() ?? null }),
     storey: STOREY,
+    /** The live event going on now, if any. */
+    liveEvent: () => liveEvent,
     iconUrl: (item: ItemId) => itemIconUrl(item),
   };
 
@@ -1945,6 +1988,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     map.update(dt, mapMarks());
     if (deathSpot && !dead && (Math.hypot(deathSpot.x - controller.position.x, deathSpot.z - controller.position.z) < 5 || performance.now() - deathSpot.at > 30 * 60_000)) deathSpot = null;
     compass.update(controller.position.x, controller.position.z, controller.yaw, compassMarks());
+    // Out of the way while a screen is open.
+    eventBanner.update(ui.open ? null : liveEvent, controller.position.x, controller.position.z, dayNight.now);
     gfx.render();
   });
 }

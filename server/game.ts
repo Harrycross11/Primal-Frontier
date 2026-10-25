@@ -16,7 +16,8 @@ import {
 } from '../shared/constants.ts';
 import type { CraftJob, DeathCause, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
-import { cleanLook } from '../shared/look.ts';
+import { cleanLook, ownedLook } from '../shared/look.ts';
+import { CoverMap } from '../shared/cover.ts';
 import {
   DOOR_HP,
   DOOR_KINDS,
@@ -120,6 +121,7 @@ import {
 } from '../shared/vehicles.ts';
 import { PAINTS, cleanPaint, paintOwned } from '../shared/paint.ts';
 import { PACKS, type Stat } from '../shared/shop.ts';
+import { XP_PER_MINUTE, objectiveXp, rewardLabel } from '../shared/season.ts';
 import { Accounts } from './accounts.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, MAX_MOUNTS, MOUNT_RANGE, SPECIES, clearOfRuins, herds, rayCreature, yawTowards, type Species } from '../shared/creatures.ts';
@@ -303,6 +305,8 @@ const INVITE_RANGE = 8;
 export class Game {
   readonly seed: number;
   readonly resources: ResourceNode[];
+  /** Trunks, boulders, wrecks and landmark walls: what stops a bullet besides buildings. */
+  readonly cover: CoverMap;
   readonly pieces = new Map<string, Piece>();
   readonly deployables = new Map<number, Deployable>();
   readonly players = new Map<number, Player>();
@@ -383,6 +387,7 @@ export class Game {
   ) {
     this.seed = seed;
     this.resources = generateResources(seed);
+    this.cover = new CoverMap(seed, this.resources);
     this.rand = mulberry32(seed ^ 0x5bd1e995);
     this.lootRand = mulberry32(seed ^ 0x2545f491);
     this.houndRand = mulberry32(seed ^ 0x3c6ef372);
@@ -396,8 +401,9 @@ export class Game {
    * where they were, what they carried and wore, and how hurt, hungry and thirsty they were.
    * Returns null when the server is full.
    */
-  join(name: string, now: number, look: unknown = null, token: unknown = null): { id: number; out: Outgoing[] } | null {
-    if (this.players.size >= MAX_PLAYERS) return null;
+  join(name: string, now: number, look: unknown = null, token: unknown = null, raider = false): { id: number; out: Outgoing[] } | null {
+    // Raiders in a live event come on top of the server's places.
+    if (!raider && this.headCount >= MAX_PLAYERS) return null;
     // A second tab with the same token plays as somebody new rather than the same survivor twice.
     const key = cleanToken(token) && ![...this.tokens.values()].includes(cleanToken(token)!) ? cleanToken(token) : null;
     const back = key ? this.sleepers.get(key) : undefined;
@@ -416,7 +422,9 @@ export class Game {
       id,
       name: cleanName(name) || `Survivor ${id}`,
       color,
-      look: cleanLook(look),
+      // Season pass outfits only for those who have unlocked them.
+      look: ownedLook(cleanLook(look), key ? this.accounts.get(key, now).packs : []),
+      ...(key && this.accounts.titleOf(key, now) && { title: this.accounts.titleOf(key, now) }),
       x,
       y: terrainHeight(this.seed, x, z),
       z,
@@ -441,6 +449,7 @@ export class Game {
       lastMoveAt: now,
       lastGatherAt: 0,
       safeUntil: now + SAFE_SECONDS * 1000,
+      ...(raider && { raider: true }),
     };
     if (back && !back.dead && back.hp > 0) {
       Object.assign(player, { x: back.x, y: back.y, z: back.z, yaw: back.yaw, hp: back.hp, sentHp: back.hp, slots: back.slots, wear: back.wear, vitals: back.vitals });
@@ -478,6 +487,13 @@ export class Game {
         { to: 'all', msg: { t: 'notice', text: `${player.name} joined the wasteland` } },
       ],
     };
+  }
+
+  /** Survivors taking up the server's places: everyone but a live event's raiders. */
+  get headCount(): number {
+    let n = 0;
+    for (const p of this.players.values()) if (!p.raider) n++;
+    return n;
   }
 
   leave(id: number): Outgoing[] {
@@ -578,7 +594,7 @@ export class Game {
     return [{ to: p.id, msg: { t: 'mounted', id: null, x, y, z, yaw: p.yaw } }];
   }
 
-  /** The store packs a player has unlocked (none without an account). */
+  /** The store packs and season rewards a player has unlocked (none without an account). */
   private packsOf(p: Player): string[] {
     const token = this.tokens.get(p.id);
     return token ? this.accounts.get(token, Math.max(0, this.lastTick)).packs : [];
@@ -587,18 +603,24 @@ export class Game {
   /** Refuses a paint from a pack the player hasn't unlocked. */
   private lockedPaint(p: Player, paint: number): Outgoing | null {
     if (paintOwned(paint, this.packsOf(p))) return null;
+    if (PAINTS[paint].season) return notice(p.id, `${PAINTS[paint].name} is a season pass reward: climb the pass to unlock it`);
     const pack = PACKS.find((k) => k.id === PAINTS[paint].pack);
     return notice(p.id, `${PAINTS[paint].name} comes in the ${pack?.name ?? 'store'}: unlock it in the store`);
   }
 
-  /** Counts towards a player's daily objectives, and tells them about any they finish. */
+  /**
+   * Counts towards a player's daily objectives and season pass (time alive earns season XP too),
+   * and tells them about any objective they finish and season tier they reach.
+   */
   private progress(p: Player, stat: Stat, amount: number, now = Math.max(0, this.lastTick)): Outgoing[] {
     const token = this.tokens.get(p.id);
     if (!token) return [];
     const finished = this.accounts.bump(token, stat, amount, now);
-    if (!finished.length) return [];
+    const ups = [...(stat === 'minutes' ? this.accounts.addXp(token, amount * XP_PER_MINUTE, now) : []), ...this.accounts.objectiveXp(token, finished, now)];
+    if (!finished.length && !ups.length) return [];
     return [
-      ...finished.map((o) => ({ to: p.id, msg: { t: 'objectiveDone' as const, label: o.label, reward: o.reward } })),
+      ...finished.map((o) => ({ to: p.id, msg: { t: 'objectiveDone' as const, label: o.label, reward: o.reward, xp: objectiveXp(o) } })),
+      ...ups.map((u) => ({ to: p.id, msg: { t: 'tierUp' as const, tier: u.tier, reward: rewardLabel(u.reward) } })),
       this.account(p.id, now)!,
     ];
   }
@@ -1763,19 +1785,7 @@ export class Game {
    * the ground. Returns how far it went.
    */
   private trace(shooter: Player, o: Vec3, d: Vec3, range: number): { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } {
-    let t = range;
-    for (const piece of this.pieces.values()) {
-      for (const b of pieceBoxes(piece)) {
-        const hit = rayBox(o, d, b, t);
-        if (hit !== null) t = hit;
-      }
-    }
-    for (const dep of this.deployables.values()) {
-      const hit = rayBox(o, d, deployableBox(dep), t);
-      if (hit !== null) t = hit;
-    }
-    const ground = rayTerrain(this.seed, o, d, t);
-    if (ground !== null) t = ground;
+    const t = this.obstacle(o, d, range);
     let best: { t: number; player?: Player; hound?: Hound; vehicle?: Vehicle; head: boolean; zone: ArmourSlot } = { t, head: false, zone: 'chest' };
     for (const v of this.vehicles.values()) {
       // Never the car you are driving, which is all round you.
@@ -1795,6 +1805,35 @@ export class Game {
       if (hit) best = { t: hit.t, hound: h, head: hit.head, zone: 'chest' };
     }
     return best;
+  }
+
+  /**
+   * How far a ray gets before a building piece, a deployable, cover or the ground stops it
+   * (`max` if nothing does). Bots use it too, to see whether they have a clear shot.
+   */
+  obstacle(o: Vec3, d: Vec3, max: number): number {
+    let t = max;
+    for (const piece of this.pieces.values()) {
+      for (const b of pieceBoxes(piece)) {
+        const hit = rayBox(o, d, b, t);
+        if (hit !== null) t = hit;
+      }
+    }
+    for (const dep of this.deployables.values()) {
+      const hit = rayBox(o, d, deployableBox(dep), t);
+      if (hit !== null) t = hit;
+    }
+    const cover = this.cover.ray(o, d, t);
+    if (cover !== null) t = cover;
+    const ground = rayTerrain(this.seed, o, d, t);
+    if (ground !== null) t = ground;
+    return t;
+  }
+
+  /** The player who last hurt this one, if they did within the last `seconds`. */
+  lastHurtBy(id: number, seconds: number): number | null {
+    const h = this.hurtBy.get(id);
+    return h && h.prey.kind === 'player' && Math.max(0, this.lastTick) - h.at < seconds * 1000 ? h.prey.id : null;
   }
 
   /** Wears down the weapon in a slot by one use; it breaks at zero. */
@@ -1818,7 +1857,7 @@ export class Game {
     const kill = victim.hp <= 0;
     const armour = [...zones].some((z) => victim.wear[ARMOUR_SLOTS.indexOf(z)]);
     const out: Outgoing[] = [
-      { to: by.id, msg: { t: 'hitmarker', head, kill, armour } },
+      { to: by.id, msg: { t: 'hitmarker', head, kill, armour, dmg: Math.max(1, Math.round(amount)) } },
       { to: victim.id, msg: { t: 'health', hp: Math.round(victim.hp), from: [by.x, by.y, by.z], armour } },
     ];
     if (kill) return [...out, ...this.kill(victim, by, item, head)];
@@ -1870,7 +1909,18 @@ export class Game {
       { to: victim.id, msg: { t: 'died', by: by?.name ?? killer ?? null, item, ...(cause && { cause }) } },
       this.inventory(victim),
       this.crafting(victim),
-      { to: 'all', msg: { t: 'kill', killer: by?.name ?? killer ?? null, victim: victim.name, item: by ? item : null, head, ...(cause && { cause }) } },
+      {
+        to: 'all',
+        msg: {
+          t: 'kill',
+          killer: by?.name ?? killer ?? null,
+          victim: victim.name,
+          item: by ? item : null,
+          head,
+          ...(cause && { cause }),
+          ...(by && by !== victim && { dist: Math.round(Math.hypot(by.x - victim.x, by.y - victim.y, by.z - victim.z)) }),
+        },
+      },
     );
     return out;
   }
@@ -1965,7 +2015,8 @@ export class Game {
     game.crateDue = new Map((save.crates ?? []).map(([key, ms]) => [key, now + ms]));
     for (const d of [...game.deployables.values()]) {
       // A charge whose fuse was lost would never go off, and a signal's plane is gone; take them away.
-      if ((CHARGE_KINDS.includes(d.kind) && !game.fuses.has(d.id)) || d.kind === 'supplySignal') game.deployables.delete(d.id);
+      // A live event's crate goes with its raiders, who are not saved.
+      if ((CHARGE_KINDS.includes(d.kind) && !game.fuses.has(d.id)) || d.kind === 'supplySignal' || d.kind === 'lockedCrate') game.deployables.delete(d.id);
       // A drop that was still falling has landed by now.
       delete d.fall;
     }
@@ -2299,7 +2350,7 @@ export class Game {
     const out: Outgoing[] = [];
     if (shooter) {
       this.hurt.set(shooter.id, { prey: { kind: 'hound', id: h.id }, at: now });
-      out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0 } });
+      out.push({ to: shooter.id, msg: { t: 'hitmarker', head, kill: h.hp <= 0, dmg: Math.max(1, Math.round(amount)) } });
     }
     if (h.hp <= 0) return [...out, ...(shooter && h.species === 'ashhound' && h.owner === null ? this.progress(shooter, 'hounds', 1, now) : []), ...this.houndDies(h, now)];
     if (now >= h.animUntil || h.anim !== 'attack') {
@@ -2589,8 +2640,15 @@ export class Game {
     if (!busy) h.anim = moved / dt > 3.5 ? 'run' : moved / dt > 0.2 ? 'walk' : 'idle';
   }
 
+  /** Sets down a crate that belongs to nobody, filled from its loot table, and tells everyone. */
+  spawnCrate(kind: 'lockedCrate', x: number, y: number, z: number, rot: number): { crate: Deployable; out: Outgoing[] } {
+    const crate = this.fillCrate(newDeployable(this.nextDeployableId++, kind, x, y, z, rot, 0), biomeAt(this.seed, x, z));
+    this.deployables.set(crate.id, crate);
+    return { crate, out: [{ to: 'all', msg: { t: 'deployable', id: crate.id, d: crate, by: 0 } }] };
+  }
+
   /** Removes a deployable from the world, telling everyone. */
-  private removeDeployable(id: number, by = 0): Outgoing[] {
+  removeDeployable(id: number, by = 0): Outgoing[] {
     const spot = this.deployables.get(id)?.spot;
     if (spot) this.crateDue.set(spot, Math.max(0, this.lastTick) + CRATE_RESPAWN * 1000);
     this.signals.delete(id);
@@ -2609,8 +2667,8 @@ export class Game {
     if (typeof c !== 'number') return null;
     const d = this.deployables.get(c);
     if (!d || d.slots.length === 0) return null;
-    // A supply drop can't be opened while it is still in the air.
-    if (d.fall && d.fall.land > this.lastTick) return null;
+    // A supply drop can't be opened while it is still in the air, nor a locked crate until it is hacked.
+    if ((d.fall && d.fall.land > this.lastTick) || d.locked) return null;
     const b = deployableBox(d);
     const dx = Math.max(b.min[0] - p.x, 0, p.x - b.max[0]);
     const dz = Math.max(b.min[2] - p.z, 0, p.z - b.max[2]);
@@ -2690,8 +2748,10 @@ function publicState(p: Player): PlayerState {
     dead: p.dead,
     wear: p.wear.map((s) => s?.item ?? null),
     look: p.look,
+    ...(p.title && { title: p.title }),
     ...(p.riding !== undefined && { riding: p.riding }),
     ...(p.driving !== undefined && { driving: p.driving }),
+    ...(p.raider && { raider: true }),
   };
 }
 
