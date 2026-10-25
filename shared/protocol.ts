@@ -159,7 +159,21 @@ export type ServerMessage =
       account?: AccountView;
     }
   /** The main menu's view: your account (if your browser has a token) and the server. */
-  | { t: 'lobby'; account: AccountView | null; online: number; max: number; wipeIn: number; seed: number; now: number }
+  | {
+      t: 'lobby';
+      account: AccountView | null;
+      online: number;
+      max: number;
+      wipeIn: number;
+      seed: number;
+      now: number;
+      /** How saving is going: 'down' or 'temporary' mean accounts made now wouldn't be kept. */
+      saving?: 'ok' | 'down' | 'temporary' | 'off';
+      /** When this world began (as /health says it), to tell a fresh world after a wipe from the same one. */
+      startedAt?: string;
+    }
+  /** The world is about to be wiped: the server restarts on a fresh one. */
+  | { t: 'wipe'; text: string }
   | { t: 'account'; account: AccountView }
   /** Signed in (or the account was named): play on with this token from now on. */
   | { t: 'signedIn'; name: string; token: string }

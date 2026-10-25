@@ -70,8 +70,13 @@ export function renderObjectives(el: HTMLElement, account: AccountView | null) {
 /** The stage's camera for a tab: the season pass shares the store's soft backdrop. */
 const shotOf = (tab: Tab) => (tab === 'season' ? 'store' : tab);
 
+/** How the server's saving is going (see server/saves.ts). */
+type SaveState = 'ok' | 'down' | 'temporary' | 'off';
+
 export class Lobby {
   account: AccountView | null = null;
+  /** How the server's saving is going, as it last said. */
+  private saving: SaveState = 'ok';
   tab: Tab = 'play';
   private style = carStyle();
   private toastTimer = 0;
@@ -190,6 +195,13 @@ export class Lobby {
 
   private renderAccount() {
     const name = this.account?.name;
+    // Said plainly when an account made now wouldn't be kept (the server turns them away too).
+    const warning = $('save-warning');
+    warning.hidden = this.saving !== 'down' && this.saving !== 'temporary';
+    warning.textContent =
+      this.saving === 'down'
+        ? 'Saving is offline on this server right now: new accounts can\'t be made, and progress may not be kept. Signing in still works.'
+        : 'This server isn\'t set up to keep accounts yet, so new accounts are turned away. You can still play as a guest.';
     $('account-state').innerHTML = name ? `Signed in as <b></b>` : 'Guest on this browser';
     if (name) $('account-state').querySelector('b')!.textContent = name;
     $('account-open').textContent = name ? 'Sign out' : 'Sign in';
@@ -218,6 +230,7 @@ export class Lobby {
     stage.show(shotOf(this.tab));
     stage.onReady = () => {
       $('join').classList.add('live');
+      this.onLive();
       // A moment later, so the first frames of the world come first.
       setTimeout(() => {
         const seasonPaints = PAINTS.flatMap((p) => (p.season && p.pack ? [p.pack] : []));
@@ -231,14 +244,23 @@ export class Lobby {
     };
   }
 
+  /** The menu's world has drawn its first frame. */
+  onLive: () => void = () => {};
+
+  /** The menu lost the server for a moment (it reconnects by itself). */
+  offline() {
+    $('server-meta').textContent = 'Reconnecting to the server…';
+  }
+
   /** The car style picked in the garage. */
   get car() {
     return this.style;
   }
 
   /** The server's answer to hello: coins, objectives and how full it is. */
-  update(account: AccountView | null, online?: number, max?: number, wipeIn?: number) {
+  update(account: AccountView | null, online?: number, max?: number, wipeIn?: number, saving?: SaveState) {
     this.account = account;
+    if (saving !== undefined) this.saving = saving;
     $('coin-count').textContent = account ? account.coins.toLocaleString() : '–';
     renderObjectives($('objective-list'), account);
     $('objective-reset').textContent = account ? `Resets in ${timeLeft(account.resetIn)}` : '';

@@ -12,8 +12,9 @@ import type { ClientMessage, ServerMessage } from '../shared/protocol.ts';
 import { Bots } from './bots.ts';
 import { Events } from './events.ts';
 import { EVENT_EVERY, FIRST_EVENT } from '../shared/events.ts';
-import { Game, cleanToken, type Outgoing } from './game.ts';
-import { openStore } from './store.ts';
+import { Game, cleanToken, type Outgoing, type WorldSave } from './game.ts';
+import { Saves, carryOver, type SaveState } from './saves.ts';
+import { PgStore, openStore } from './store.ts';
 import type { RegisterResult } from './accounts.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -75,7 +76,7 @@ const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, players: game.players.size, seed: game.seed, startedAt: new Date(game.startedAt).toISOString() }));
+    res.end(JSON.stringify({ ok: true, players: game.players.size, seed: game.seed, startedAt: new Date(game.startedAt).toISOString(), saving: saves.status() }));
     return;
   }
   let file = normalize(join(CLIENT_DIR, decodeURIComponent(url.pathname)));
@@ -129,44 +130,93 @@ const wipeDue = (startedAt: number, now: number) => now - startedAt >= WIPE_DAYS
 // The world carries on from its last save, unless it is time for a wipe. NO_SAVE=1 starts fresh
 // and saves nothing (for tests and screenshots).
 const store = process.env.NO_SAVE ? null : openStore();
-const saved = await store?.load().catch((e) => {
-  console.error('could not load the saved world, starting a fresh one', e);
-  return null;
-});
-let game: Game;
-// A save from before the map last changed would put bases in the wrong places: wipe instead.
-const sameMap = saved?.version === 2;
-if (saved && sameMap && !wipeDue(saved.startedAt, Date.now())) {
-  game = Game.restore(saved, Date.now(), startKit);
-  console.log(`world restored from ${store!.name}, started ${new Date(saved.startedAt).toISOString()}`);
-} else {
-  game = new Game(SEED, startKit);
-  game.startedAt = Date.now();
-  if (saved) console.log(sameMap ? 'the world was due a wipe: starting a fresh one' : 'the map has changed: starting a fresh world');
+const saves = new Saves(store);
+if (store && !store.durable) {
+  console.error(
+    'SAVE PROBLEM: DATABASE_URL is not set, so the world and accounts are saved to this server\'s own disk, which Render wipes whenever the server sleeps or restarts. ' +
+      'New accounts are turned away until a database is set up: see docs/hosting.md.',
+  );
 }
+// Moving to another database: OLD_DATABASE_URL names the one saves were kept in, and anything
+// it has that the new one doesn't is copied over (the old one is only read).
+if (store && process.env.OLD_DATABASE_URL?.trim()) {
+  const old = new PgStore(process.env.OLD_DATABASE_URL.trim());
+  await carryOver(old, store)
+    .then(({ accounts, world }) => console.log(`moving saves from ${old.name}: ${accounts} accounts${world ? ' and the world' : ''} copied to ${store.name}`))
+    .catch((e) => console.error(`SAVE PROBLEM: could not copy saves from the old database ${old.name} (tried again on the next start): ${e instanceof Error ? e.message : e}`));
+  await old.close().catch(() => {});
+}
+// A database that is asleep (or a free one that is paused) gets half a minute to answer.
+const saved = await saves.open(Number(process.env.SAVE_OPEN_TRIES ?? 5), 2000);
+let game!: Game;
+let bots!: Bots;
+let events!: Events;
+// A save from before the map last changed would put bases in the wrong places: wipe instead.
+const playable = (world: WorldSave | null, now: number): world is WorldSave => !!world && world.version === 2 && !wipeDue(world.startedAt, now);
+
+/** Puts a world in play: the saved one if it can carry on, otherwise a fresh one. Accounts carry over. */
+function startWorld(world: WorldSave | null, now: number) {
+  const accounts = game?.accounts;
+  if (playable(world, now)) {
+    game = Game.restore(world, now, startKit);
+    console.log(`world restored from ${store!.name}, started ${new Date(world.startedAt).toISOString()}`);
+  } else {
+    game = new Game(SEED, startKit);
+    game.startedAt = now;
+    if (world) console.log((world as WorldSave).version === 2 ? 'the world was due a wipe: starting a fresh one' : 'the map has changed: starting a fresh world');
+  }
+  if (accounts) game.accounts = accounts;
+  // START_AT='x,z' spawns everyone at one spot, for screenshots.
+  if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
+  // Computer-controlled survivors keep the world busy: BOTS is how many survivors the server
+  // should feel like it has, and bots make up whatever real players don't. None by default in
+  // screenshot runs (START_AT), where they would wander into shot.
+  bots = new Bots(game, Number(process.env.BOTS ?? (process.env.START_AT ? 0 : 5)));
+  // HOLD_FIRE=1 stops bots and raiders shooting (for screenshots).
+  bots.holdFire = !!process.env.HOLD_FIRE;
+  // Raiders take a landmark every so often (EVENT_FIRST and EVENT_EVERY, in minutes, change when;
+  // EVENT_AT names the landmark or land to always use).
+  // None in screenshot runs unless asked for.
+  events = new Events(game, bots, {
+    first: Number(process.env.EVENT_FIRST ?? (process.env.START_AT ? Infinity : FIRST_EVENT)),
+    every: Number(process.env.EVENT_EVERY ?? EVENT_EVERY),
+    at: process.env.EVENT_AT,
+  });
+}
+
+startWorld(saved?.world ?? null, Date.now());
 // Coins, packs and objectives outlive wipes: they are kept apart from the world.
-game.accounts.load(
-  (await store?.loadAccounts().catch((e) => {
-    console.error('could not load accounts', e);
-    return [];
-  })) ?? [],
-);
-// START_AT='x,z' spawns everyone at one spot, for screenshots.
-if (process.env.START_AT) game.spawnAt = process.env.START_AT.split(',').map(Number) as [number, number];
-// Computer-controlled survivors keep the world busy: BOTS is how many survivors the server
-// should feel like it has, and bots make up whatever real players don't. None by default in
-// screenshot runs (START_AT), where they would wander into shot.
-const bots = new Bots(game, Number(process.env.BOTS ?? (process.env.START_AT ? 0 : 5)));
-// HOLD_FIRE=1 stops bots and raiders shooting (for screenshots).
-bots.holdFire = !!process.env.HOLD_FIRE;
-// Raiders take a landmark every so often (EVENT_FIRST and EVENT_EVERY, in minutes, change when;
-// EVENT_AT names the landmark or land to always use).
-// None in screenshot runs unless asked for.
-const events = new Events(game, bots, {
-  first: Number(process.env.EVENT_FIRST ?? (process.env.START_AT ? Infinity : FIRST_EVENT)),
-  every: Number(process.env.EVENT_EVERY ?? EVENT_EVERY),
-  at: process.env.EVENT_AT,
-});
+game.accounts.load(saved?.accounts ?? []);
+if (saved) saves.worldSaving = true;
+else {
+  // Playing on is better than turning everyone away, but this world isn't the saved one: it is
+  // never saved over it. The save is tried again until it answers.
+  console.error(`SAVE PROBLEM: playing on a fresh world that WILL NOT BE SAVED, and turning away new accounts, until ${store!.name} answers. The saved world and accounts are left untouched.`);
+  setTimeout(reopen, 30_000);
+}
+
+/** Tries the save again after it couldn't be read at start-up, and brings it back once it can. */
+async function reopen() {
+  const back = await saves.open();
+  if (!back) {
+    setTimeout(reopen, 30_000);
+    return;
+  }
+  game.accounts.load(back.accounts);
+  console.log(`${store!.name} answers again: ${back.accounts.length} accounts loaded`);
+  if (!playable(back.world, Date.now())) {
+    saves.worldSaving = true;
+    return;
+  }
+  // The saved world takes over once nobody is playing in this one.
+  const swap = () => {
+    if (sockets.size) return void setTimeout(swap, 10_000);
+    startWorld(back.world, Date.now());
+    saves.worldSaving = true;
+    if (!process.env.BOTS_WAIT) bots.balance(0, Date.now());
+  };
+  swap();
+}
 const sockets = new Map<number, WebSocket>();
 const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 4096 });
 
@@ -203,6 +253,12 @@ const REGISTER_ERRORS: Record<Exclude<RegisterResult, 'ok'>, string> = {
   taken: 'That name is taken. Try another.',
 };
 
+/** Why a new account is turned away when it couldn't be kept. */
+const SAVE_TROUBLE: Partial<Record<SaveState, string>> = {
+  down: 'Accounts can\'t be saved right now (the server can\'t reach its save). Nothing was made: try again in a few minutes.',
+  temporary: 'This server isn\'t set up to keep accounts yet, so one made now would be lost. You can still play as a guest.',
+};
+
 wss.on('connection', (ws) => {
   let id: number | null = null;
   /** When this connection last tried to sign in or make an account. */
@@ -229,7 +285,7 @@ wss.on('connection', (ws) => {
           send(ws, { t: 'notice', text: 'Reach that tier of the season pass to wear its title' });
         }
         const wipeIn = Math.max(0, game.startedAt + WIPE_DAYS * 86_400_000 - now);
-        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.headCount, max: MAX_PLAYERS, wipeIn, seed: game.seed, now });
+        send(ws, { t: 'lobby', account: token ? game.accounts.view(token, now) : null, online: game.headCount, max: MAX_PLAYERS, wipeIn, seed: game.seed, now, saving: saves.state, startedAt: new Date(game.startedAt).toISOString() });
         return;
       }
       if (msg.t === 'register' || msg.t === 'signIn') {
@@ -244,16 +300,34 @@ wss.on('connection', (ws) => {
         const password = String(msg.password ?? '');
         if (msg.t === 'signIn') {
           game.accounts.signIn(name, password).then((found) => {
-            if (!found) send(ws, { t: 'authError', text: 'That name and password don\'t match an account.' });
+            // With the save out of reach the account may just not be loaded: say so, rather than that it doesn't exist.
+            if (!found) send(ws, { t: 'authError', text: saves.state === 'down' ? 'Accounts can\'t be checked right now (the server can\'t reach its save). Try again in a few minutes.' : 'That name and password don\'t match an account.' });
             else send(ws, { t: 'signedIn', ...found });
           });
           return;
         }
         const token = cleanToken(msg.token);
-        if (!token) return;
-        game.accounts.register(token, name, password, now).then((result) => {
-          if (result === 'ok') send(ws, { t: 'signedIn', name, token });
-          else send(ws, { t: 'authError', text: REGISTER_ERRORS[result] });
+        if (!token) {
+          send(ws, { t: 'authError', text: 'This browser isn\'t keeping site data (private mode or blocked storage), so it can\'t hold an account.' });
+          return;
+        }
+        const trouble = saves.canKeepAccounts ? null : SAVE_TROUBLE[saves.state];
+        if (trouble) {
+          send(ws, { t: 'authError', text: trouble });
+          return;
+        }
+        const accounts = game.accounts;
+        accounts.register(token, name, password, now).then(async (result) => {
+          if (result !== 'ok') return send(ws, { t: 'authError', text: REGISTER_ERRORS[result] });
+          // Saved before anyone is told it exists, so a restart a moment later can't lose it.
+          try {
+            await saves.saveAccounts(accounts);
+          } catch {
+            accounts.unregister(token);
+            return send(ws, { t: 'authError', text: 'Your account couldn\'t be saved just now, so it wasn\'t made. Try again in a minute.' });
+          }
+          console.log(`account "${name}" made and saved`);
+          send(ws, { t: 'signedIn', name, token });
         });
         return;
       }
@@ -416,43 +490,33 @@ setInterval(() => {
   deliver(game.tick(now));
 }, 1000 / TICK_RATE);
 
-let saving: Promise<void> = Promise.resolve();
-/** Saves the world; one save at a time, and a failure is logged rather than fatal. */
-function save(): Promise<void> {
-  if (!store) return Promise.resolve();
-  const world = game.save(Date.now());
-  const accounts = game.accounts.dirty ? game.accounts.dump() : null;
-  game.accounts.dirty = false;
-  saving = saving
-    .then(() => store.save(world))
-    .catch((e) => console.error('could not save the world', e))
-    .then(() => (accounts ? store.saveAccounts(accounts) : undefined))
-    .catch((e) => {
-      game.accounts.dirty = true;
-      console.error('could not save accounts', e);
-    });
-  return saving;
-}
+/** Saves the world and changed accounts; a failure is logged and shown in /health, not fatal. */
+const save = () => saves.save(() => game.save(Date.now()), game.accounts);
 setInterval(save, SAVE_EVERY * 1000);
 
 // When the month is up, everyone is warned, the save is forgotten and the server stops; the host
-// starts it again on a fresh world.
+// starts it again on a fresh world. Players' screens wait for it and bring them into the new one.
+let wiping = false;
 setInterval(async () => {
-  if (!wipeDue(game.startedAt, Date.now())) return;
-  deliver([{ to: 'all', msg: { t: 'notice', text: 'The world is wiping now. Rejoin in a minute for a fresh start.' } }]);
-  await saving;
-  await store?.clear();
+  if (wiping || !wipeDue(game.startedAt, Date.now())) return;
+  wiping = true;
+  deliver([{ to: 'all', msg: { t: 'wipe', text: 'The world is wiping now. A fresh one is on its way.' } }]);
+  // Accounts are saved one last time; the world is not, so nothing writes it back after the clear.
+  saves.worldSaving = false;
+  await save();
+  await saves.clear().catch(() => {});
   setTimeout(() => process.exit(0), 5000);
-}, 60 * 60 * 1000);
+}, 60 * 1000);
 
 // The host stops the server for a deploy or when it goes idle: save first.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, async () => {
     await save();
+    await saves.settled();
     process.exit(0);
   });
 }
 
 http.listen(PORT, () => {
-  console.log(`PRIME server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'})`);
+  console.log(`PRIME server on http://localhost:${PORT} (world seed ${game.seed}, saving to ${store?.name ?? 'nowhere'}: ${saves.state})`);
 });

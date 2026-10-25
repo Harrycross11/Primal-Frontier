@@ -320,9 +320,6 @@ export class Hud {
     $('code-cancel').onclick = () => finish(null);
   }
 
-  disconnected() {
-    $('disconnected').hidden = false;
-  }
 }
 
 /** Fades an element out after `ms`, then removes it. Returns the timer. */

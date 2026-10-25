@@ -102,6 +102,8 @@ For development with live reload, run `npm run dev` and open http://localhost:51
 
 The repo includes a `render.yaml`. On [Render](https://render.com), choose **New > Blueprint**, pick this repository, and it builds and runs the server. Share the URL it gives you. The free plan sleeps when nobody is playing, so the first visit can take a minute to load.
 
+The free plan's disk is wiped whenever the server sleeps, so accounts and the world are saved in a Postgres database: set `DATABASE_URL` as described in [docs/hosting.md](docs/hosting.md). Check it at `/health`, whose `saving.state` should be `ok`.
+
 ## How it is built
 
 | Folder | What it holds |
