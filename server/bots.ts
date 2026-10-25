@@ -2,12 +2,13 @@
 // the same Game calls a connected player's messages make: it walks, chops wood, builds and locks
 // a small hut with a box of loot inside, fights whoever comes too close and now and then raids
 // someone's door with satchel charges. Bots fill the server up to a target head count and leave
-// one by one as real players join.
+// one by one as real players join. Raiders are bots too: a live event (server/events.ts) posts
+// them round a landmark, where they shoot anyone who comes near and never wander off.
 
 import { PLAYER_HEIGHT, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
 import { EYE_HEIGHT } from '../shared/combat.ts';
 import { DOORWAY, STOREY, TILE, boxesTouch, buildBaseY, pieceBoxes, pieceKey, type Piece } from '../shared/building.ts';
-import { BELT_SIZE, ITEMS, addItem, countItem, type ItemId, type Slots } from '../shared/items.ts';
+import { ARMOUR_SLOTS, BELT_SIZE, ITEMS, addItem, countItem, newStack, type ItemId, type Slots } from '../shared/items.ts';
 import type { Deployable, DeployableKind } from '../shared/deployables.ts';
 import { randomLook } from '../shared/look.ts';
 import { atLandmark } from '../shared/landmarks.ts';
@@ -43,6 +44,19 @@ const LOOT_FOR = 60;
 /** What a raider empties. */
 const LOOTED: DeployableKind[] = ['storageBox', 'furnace', 'campfire', 'lootBag'];
 
+const RAIDER_NAMES = ['Grinder', 'Scab', 'Nails', 'Ripper', 'Krait', 'Rust', 'Viper', 'Hook', 'Boone', 'Mako', 'Slade', 'Tusk'];
+/** Raiders come better armed than drifters, and in road-sign armour. */
+const RAIDER_LOADOUTS: [ItemId, ItemId, number][] = [
+  ['semiRifle', 'rifleAmmo', 96],
+  ['pumpShotgun', 'shotgunShell', 36],
+  ['customSmg', 'pistolAmmo', 120],
+  ['thompson', 'pistolAmmo', 120],
+];
+const RAIDER_ARMOUR: ItemId[] = ['coffeeCanHelmet', 'roadsignJacket', 'roadsignKilt'];
+/** How close someone gets to a raider's post before it opens fire, and how far it chases them past it. */
+const RAIDER_ENGAGE = 40;
+const RAIDER_CHASE = 25;
+
 type Phase = 'gather' | 'build' | 'roam' | 'raid' | 'fight';
 
 interface Bot {
@@ -66,6 +80,8 @@ interface Bot {
   strafeUntil: number;
   /** For noticing when it is stuck against something. */
   lastPos: { x: number; z: number; at: number };
+  /** A raider's post: it keeps watch within `r` metres of here, and is gone for good when it dies. */
+  post?: { x: number; z: number; r: number };
 }
 
 interface Raid {
@@ -86,6 +102,8 @@ export class Bots {
   private bots = new Map<number, Bot>();
   private names = [...NAMES];
   private lastTick = -1;
+  /** Nobody shoots: for screenshots. */
+  holdFire = false;
 
   constructor(
     private game: Game,
@@ -98,16 +116,19 @@ export class Bots {
     return this.bots.has(id);
   }
 
+  /** Bots filling the server, not counting raiders. */
   get count(): number {
-    return this.bots.size;
+    let n = 0;
+    for (const b of this.bots.values()) if (!b.post) n++;
+    return n;
   }
 
   /** Adds or removes bots so humans plus bots come to `fill` (never more than the server holds). */
   balance(humans: number, now: number): Outgoing[] {
     const out: Outgoing[] = [];
     const want = Math.max(0, this.fill - humans);
-    while (this.bots.size > want) out.push(...this.removeOne());
-    while (this.bots.size < want) {
+    while (this.count > want) out.push(...this.removeOne());
+    while (this.count < want) {
       const joined = this.add(now);
       if (!joined) break;
       out.push(...joined);
@@ -117,7 +138,7 @@ export class Bots {
 
   /** Takes one bot out of the world to make room for a real player. */
   removeOne(): Outgoing[] {
-    const id = [...this.bots.keys()].pop();
+    const id = [...this.bots.values()].filter((b) => !b.post).pop()?.id;
     if (id === undefined) return [];
     this.bots.delete(id);
     const p = this.game.players.get(id);
@@ -152,6 +173,59 @@ export class Bots {
     });
     // Others still hear that someone joined; the bot itself has nobody to send to.
     return joined.out.filter((o) => o.to !== joined.id);
+  }
+
+  /**
+   * A raider standing at (x, z), keeping watch round a post. Raiders take no place on the server,
+   * and come and go without the joined and left notices.
+   */
+  addRaider(x: number, z: number, post: NonNullable<Bot['post']>, now: number): { id: number; out: Outgoing[] } | null {
+    const taken = new Set([...this.game.players.values()].map((p) => p.name));
+    const free = RAIDER_NAMES.filter((n) => !taken.has(`Raider ${n}`));
+    const name = (free.length ? free : RAIDER_NAMES)[Math.floor(this.rand() * (free.length || RAIDER_NAMES.length))];
+    const joined = this.game.join(`Raider ${name}`, now, randomLook(this.rand), null, true);
+    if (!joined) return null;
+    const p = this.game.players.get(joined.id)!;
+    p.x = x;
+    p.z = z;
+    p.y = terrainHeight(this.game.seed, x, z);
+    p.yaw = Math.atan2(-(post.x - x), -(post.z - z));
+    // No grace for raiders: they came for a fight.
+    p.safeUntil = 0;
+    const [weapon, ammo, rounds] = RAIDER_LOADOUTS[Math.floor(this.rand() * RAIDER_LOADOUTS.length)];
+    addItem(p.slots, weapon, 1);
+    addItem(p.slots, ammo, rounds);
+    const gun = p.slots.find((s) => s?.item === weapon);
+    if (gun) gun.ammo = ITEMS[weapon].weapon?.mag ?? 1;
+    p.active = this.beltSlot(p, (s) => s.item === weapon);
+    for (const item of RAIDER_ARMOUR) p.wear[ARMOUR_SLOTS.indexOf(ITEMS[item].armour!.slot)] = newStack(item, 1);
+    this.bots.set(joined.id, {
+      id: joined.id,
+      crew: -1,
+      phase: 'roam',
+      goal: null,
+      node: null,
+      enemy: null,
+      home: null,
+      buildStep: 0,
+      spotTries: 0,
+      raidAt: Infinity,
+      raid: null,
+      deadAt: 0,
+      nextShotAt: 0,
+      strafe: 1,
+      strafeUntil: 0,
+      lastPos: { x, z, at: now },
+      post,
+    });
+    return { id: joined.id, out: joined.out.filter((o) => o.to !== joined.id && o.msg.t !== 'notice') };
+  }
+
+  /** Takes a raider out of the world: the raid is over, or it fell. */
+  dismiss(id: number): Outgoing[] {
+    if (!this.bots.get(id)?.post) return [];
+    this.bots.delete(id);
+    return this.game.leave(id).filter((o) => o.msg.t !== 'notice');
   }
 
   /** Moves a fresh spawn a few metres from the spawn point, so bots arriving together spread out. */
@@ -212,6 +286,8 @@ export class Bots {
     if (p.dead) {
       if (!bot.deadAt) bot.deadAt = now;
       if (now - bot.deadAt < RESPAWN_AFTER * 1000) return [];
+      // A fallen raider stays down.
+      if (bot.post) return this.dismiss(bot.id);
       bot.deadAt = 0;
       bot.phase = bot.home ? 'roam' : 'gather';
       bot.raid = null;
@@ -234,6 +310,7 @@ export class Bots {
       return this.fight(bot, p, now, dt);
     }
     bot.enemy = null;
+    if (bot.post) return this.keepWatch(bot, p, now, dt);
     if (bot.phase === 'fight') bot.phase = bot.raid ? 'raid' : bot.home ? 'roam' : 'gather';
     if (bot.phase !== 'raid' && bot.home && now > bot.raidAt && this.pickRaid(bot, p)) bot.phase = 'raid';
     switch (bot.phase) {
@@ -251,9 +328,13 @@ export class Bots {
   // Fighting.
 
   private findEnemy(bot: Bot, p: Survivor, now: number): Bot['enemy'] {
+    if (this.holdFire) return null;
+    // A raider fights round its post, and lets go of anyone who runs well clear of it.
+    const post = bot.post;
+    const reach = post ? post.r + RAIDER_ENGAGE : ENGAGE;
     if (bot.enemy) {
       const at = this.enemyAt(bot.enemy);
-      if (at && Math.hypot(at.x - p.x, at.z - p.z) < GIVE_UP) return bot.enemy;
+      if (at && Math.hypot(at.x - p.x, at.z - p.z) < GIVE_UP && (!post || Math.hypot(at.x - post.x, at.z - post.z) < post.r + RAIDER_CHASE + RAIDER_ENGAGE)) return bot.enemy;
     }
     let best: Bot['enemy'] = null;
     let bestD = Infinity;
@@ -261,10 +342,13 @@ export class Bots {
       if (other.id === p.id || other.dead) continue;
       const mate = this.bots.get(other.id);
       if (mate && mate.crew === bot.crew) continue;
+      // Raiders and the drifters leave each other be: the raiders are there for the players.
+      if (mate && !!mate.post !== !!post) continue;
       // Fresh spawns get a minute's grace, so nobody is shot before they've found their feet.
       if (!mate && now < other.safeUntil + GRACE * 1000) continue;
       const d = Math.hypot(other.x - p.x, other.z - p.z);
-      if (d < (mate ? ENGAGE_BOT : ENGAGE) && d < bestD) {
+      if (post && Math.hypot(other.x - post.x, other.z - post.z) > reach) continue;
+      if (d < (mate ? ENGAGE_BOT : reach) && d < bestD) {
         best = { kind: 'player', id: other.id };
         bestD = d;
       }
@@ -336,6 +420,27 @@ export class Bots {
       return [...out, ...this.game.melee(bot.id, 0, aim(), now)];
     }
     return out;
+  }
+
+  // Keeping watch.
+
+  /** A raider with nobody to shoot: back to its post, then a slow walk round it. */
+  private keepWatch(bot: Bot, p: Survivor, now: number, dt: number): Outgoing[] {
+    const post = bot.post!;
+    bot.phase = 'roam';
+    if (bot.goal && Math.hypot(bot.goal.x - p.x, bot.goal.z - p.z) <= bot.goal.near) {
+      // Stand a while at each spot before the next.
+      bot.goal = null;
+      bot.strafeUntil = now + 3000 + this.rand() * 5000;
+    }
+    if (!bot.goal) {
+      if (now < bot.strafeUntil) return this.step(bot, p, 0, 0, 0, p.yaw, now, dt, p.active);
+      const a = this.rand() * Math.PI * 2;
+      const r = 3 + this.rand() * (post.r * 0.7);
+      bot.goal = { x: post.x + Math.cos(a) * r, z: post.z + Math.sin(a) * r, near: 1.2 };
+    }
+    const far = Math.hypot(post.x - p.x, post.z - p.z) > post.r;
+    return this.walkTo(bot, p, bot.goal.x, bot.goal.z, bot.goal.near, now, dt, far ? 0.9 : 0.35);
   }
 
   // Wood, and a hut.

@@ -1183,6 +1183,34 @@ export class Effects {
   }
 
   /** A car slamming into something. */
+  /**
+   * A distant two-tone siren, for a raid starting somewhere on the map (louder and with a sharper
+   * edge when `urgent`: the hack has begun).
+   */
+  alarm(urgent = false) {
+    if (!this.audio) return;
+    const { ctx, out } = this.audio;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = urgent ? 'sawtooth' : 'square';
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = urgent ? 2200 : 1400;
+    const gain = ctx.createGain();
+    const length = 2.4;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(urgent ? 0.06 : 0.04, t + 0.08);
+    gain.gain.setValueAtTime(urgent ? 0.06 : 0.04, t + length - 0.3);
+    gain.gain.linearRampToValueAtTime(0, t + length);
+    for (let n = 0; n < 4; n++) {
+      osc.frequency.setValueAtTime(660, t + n * 0.6);
+      osc.frequency.setValueAtTime(880, t + n * 0.6 + 0.3);
+    }
+    osc.connect(filter).connect(gain).connect(out);
+    osc.start(t);
+    osc.stop(t + length);
+  }
+
   /** A bright rising chime for a finished objective. */
   objective() {
     if (!this.audio) return;

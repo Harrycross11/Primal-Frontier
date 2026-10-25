@@ -35,6 +35,8 @@ export interface Landmark {
   crates: CrateSpot[];
   /** Where its recycler stands, clear of the props and crates. */
   recycler: { x: number; z: number };
+  /** An open spot for the locked crate when raiders take the place over (see shared/events.ts). */
+  stash: { x: number; z: number };
 }
 
 // Solid parts of each model at the size the game draws it (see FIT in client/src/models.ts).
@@ -70,6 +72,7 @@ export const LANDMARKS: Record<BiomeId, Landmark> = {
       { model: 'barrel', x: 6.3, z: -8.2, turn: 1 },
     ],
     recycler: { x: -14, z: 3 },
+    stash: { x: -4, z: 10 },
     crates: [
       { kind: 'crate', x: 7, z: -5, turn: 0 },
       { kind: 'crate', x: -11, z: 3.5, turn: 1 },
@@ -90,6 +93,7 @@ export const LANDMARKS: Record<BiomeId, Landmark> = {
       { model: 'log', x: -12, z: -4.2, turn: 0, y: 0.6 },
     ],
     recycler: { x: -9, z: 3.5 },
+    stash: { x: 1, z: 6 },
     crates: [
       { kind: 'crate', x: 6, z: 1, turn: 0 },
       { kind: 'crate', x: -6, z: 4, turn: 1 },
@@ -109,6 +113,7 @@ export const LANDMARKS: Record<BiomeId, Landmark> = {
       { model: 'lm-waterTower', x: -12, z: -11, turn: 1, solid: WATER_TOWER },
     ],
     recycler: { x: -18, z: -0.5 },
+    stash: { x: 0.5, z: 11 },
     crates: [
       { kind: 'crate', x: 5, z: 8.5, turn: 1 },
       { kind: 'crate', x: -4, z: 8.5, turn: 0 },
@@ -128,6 +133,7 @@ export const LANDMARKS: Record<BiomeId, Landmark> = {
       { model: 'lm-waterTower', x: -15, z: -15, turn: 0, solid: WATER_TOWER },
     ],
     recycler: { x: -17, z: 1.5 },
+    stash: { x: -2, z: -10 },
     crates: [
       { kind: 'crate', x: 0, z: -3, turn: 0 },
       { kind: 'crate', x: 12, z: -4, turn: 1 },
@@ -146,6 +152,7 @@ export const LANDMARKS: Record<BiomeId, Landmark> = {
       { model: 'lm-container', x: 11, z: 8, turn: 0, solid: CONTAINER },
     ],
     recycler: { x: -19, z: 0 },
+    stash: { x: 2, z: 10 },
     crates: [
       { kind: 'militaryCrate', x: 4.5, z: -4, turn: 0 },
       { kind: 'militaryCrate', x: -4.5, z: 4, turn: 1 },
@@ -184,6 +191,14 @@ export function recyclerSpots(seed: number): { key: string; land: BiomeId; x: nu
   return landmarks(seed).map(({ site, land, landmark }) => {
     const [x, z] = toWorld(site, landmark.recycler.x, landmark.recycler.z);
     return { key: `${land}:recycler`, land, x, y: site.y, z, rot: (site.turn * Math.PI) / 2 };
+  });
+}
+
+/** Every landmark's stash spot for a live event's locked crate, in world space. */
+export function stashSpots(seed: number): { land: BiomeId; name: string; x: number; y: number; z: number; rot: number }[] {
+  return landmarks(seed).map(({ site, land, landmark }) => {
+    const [x, z] = toWorld(site, landmark.stash.x, landmark.stash.z);
+    return { land, name: landmark.name, x, y: site.y, z, rot: (site.turn * Math.PI) / 2 };
   });
 }
 
