@@ -322,6 +322,7 @@ const clips = new Map<string, THREE.AnimationClip[]>();
 
 async function loadCharacter(loader: GLTFLoader, name: string) {
   const gltf = await loader.loadAsync(`/models/${name}.glb`);
+  gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isMesh) return;
@@ -329,12 +330,13 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
     mesh.receiveShadow = true;
     // Skinned bounds come from the bind pose, so give them room for swinging limbs (and lying
     // down) rather than switching culling off: then animals and players behind you or far off in
-    // the fog are not drawn, and only those near you go into the shadow map.
+    // the fog are not drawn, and only those near you go into the shadow map. They are measured
+    // through the bones, since some rigs (the survivor's, in centimetres) scale the body apart
+    // from the mesh: measured from the raw shape, the survivor's bounds were 2 cm across and
+    // other players' bodies vanished unless their feet were on screen.
     if (mesh.isSkinnedMesh) {
-      mesh.geometry.computeBoundingSphere();
-      const sphere = mesh.geometry.boundingSphere!.clone();
-      sphere.radius *= 1.6;
-      mesh.boundingSphere = sphere;
+      mesh.computeBoundingSphere();
+      mesh.boundingSphere!.radius *= 1.6;
     }
     const m = mesh.material as THREE.MeshStandardMaterial;
     if (m.map) m.map.anisotropy = 8;
