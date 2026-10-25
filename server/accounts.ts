@@ -1,14 +1,16 @@
-// Players' accounts: coins, store packs and today's objectives, by the private token their browser
-// keeps. Saved apart from the world, so a wipe never takes away what someone earned or bought.
+// Players' accounts: coins, store packs, today's objectives and the season pass, by the private
+// token their browser keeps. Saved apart from the world, so a wipe never takes away what someone earned or bought.
 // Giving an account a name and password lets any browser sign in to it and play as the same
 // survivor, with the same coins and packs.
 
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { OWNED_COINS, REWARD_IDS, TITLES, objectiveXp, seasonAt, tierOf, type Reward } from '../shared/season.ts';
 import { PACKS, START_COINS, dailyObjectives, dayOf, untilTomorrow, type AccountView, type Objective, type Stat } from '../shared/shop.ts';
 
 export interface Account {
   coins: number;
+  /** Store packs bought and season pass rewards unlocked, kept for good. */
   packs: string[];
   /** The day the progress below counts for. */
   day: string;
@@ -17,6 +19,20 @@ export interface Account {
   done: string[];
   /** The name and password it signs in with, once it has them. Only a hash of the password is kept. */
   login?: Login;
+  /** The season the XP below counts for. */
+  season: number;
+  /** Season XP; the tiers it reaches pay out as it climbs. */
+  xp: number;
+  /** Tiers of this season already paid. */
+  paid: number;
+  /** The title worn over their name, by its unlock. */
+  title?: string;
+}
+
+/** A season tier reached, and what it gave (coins in place of a reward already owned). */
+export interface TierUp {
+  tier: number;
+  reward: Reward;
 }
 
 interface Login {
@@ -48,12 +64,13 @@ export class Accounts {
   get(token: string, now: number): Account {
     let a = this.all.get(token);
     if (!a) {
-      a = { coins: START_COINS, packs: [], day: dayOf(now), progress: {}, done: [] };
+      a = { coins: START_COINS, packs: [], day: dayOf(now), progress: {}, done: [], season: seasonAt(now).n, xp: 0, paid: 0 };
       this.all.set(token, a);
       this.dirty = true;
     }
-    // A new day brings new objectives.
+    // A new day brings new objectives, and a new season a fresh pass.
     if (a.day !== dayOf(now)) Object.assign(a, { day: dayOf(now), progress: {}, done: [] });
+    if (a.season !== seasonAt(now).n) Object.assign(a, { season: seasonAt(now).n, xp: 0, paid: 0 });
     return a;
   }
 
@@ -65,7 +82,45 @@ export class Accounts {
       objectives: dailyObjectives(a.day).map((o) => ({ ...o, progress: Math.min(o.goal, Math.floor(a.progress[o.stat] ?? 0)), done: a.done.includes(o.id) })),
       resetIn: untilTomorrow(now),
       name: a.login?.name ?? null,
+      season: (() => {
+        const season = seasonAt(now);
+        return { n: season.n, name: season.name, endsIn: season.end - now, xp: Math.floor(a.xp), tier: tierOf(a.xp, season.track), title: a.title ?? null };
+      })(),
     };
+  }
+
+  /** Adds season XP, paying out every tier it reaches. */
+  addXp(token: string, xp: number, now: number): TierUp[] {
+    if (!(xp > 0)) return [];
+    const a = this.get(token, now);
+    const { track } = seasonAt(now);
+    a.xp += xp;
+    this.dirty = true;
+    const ups: TierUp[] = [];
+    for (; a.paid < tierOf(a.xp, track); a.paid++) {
+      let reward = track[a.paid];
+      if (reward.kind !== 'coins' && a.packs.includes(reward.id)) reward = { kind: 'coins', coins: OWNED_COINS };
+      if (reward.kind === 'coins') a.coins += reward.coins;
+      else a.packs.push(reward.id);
+      ups.push({ tier: a.paid + 1, reward });
+    }
+    return ups;
+  }
+
+  /** Wears a title the account has unlocked over the survivor's name, or (null) none. */
+  wearTitle(token: string, id: string | null, now: number): boolean {
+    const a = this.get(token, now);
+    if (id !== null && (!TITLES.has(id) || !a.packs.includes(id))) return false;
+    if (id === null) delete a.title;
+    else a.title = id;
+    this.dirty = true;
+    return true;
+  }
+
+  /** The title text worn over the name, if any. */
+  titleOf(token: string, now: number): string | undefined {
+    const id = this.get(token, now).title;
+    return id ? TITLES.get(id) : undefined;
   }
 
   /** Gives the account behind `token` a name and password, so it can be signed in to anywhere. */
@@ -95,7 +150,7 @@ export class Accounts {
     return { token, name: login.name };
   }
 
-  /** Counts towards today's objectives; pays out and returns any it finishes. */
+  /** Counts towards today's objectives; pays out (coins and season XP) and returns any it finishes. */
   bump(token: string, stat: Stat, amount: number, now: number): Objective[] {
     if (!(amount > 0)) return [];
     const a = this.get(token, now);
@@ -109,6 +164,11 @@ export class Accounts {
       a.coins += o.reward;
     }
     return finished;
+  }
+
+  /** Season XP an objective finished with `bump` brings, with the tiers it reaches. */
+  objectiveXp(token: string, finished: Objective[], now: number): TierUp[] {
+    return this.addXp(token, finished.reduce((sum, o) => sum + objectiveXp(o), 0), now);
   }
 
   buy(token: string, pack: string, now: number): BuyResult {
@@ -133,11 +193,16 @@ export class Accounts {
       if (typeof token !== 'string' || !a || typeof a.coins !== 'number') continue;
       this.all.set(token, {
         coins: Math.max(0, Math.floor(a.coins)),
-        packs: Array.isArray(a.packs) ? a.packs.filter((p) => PACKS.some((k) => k.id === p)) : [],
+        packs: Array.isArray(a.packs) ? a.packs.filter((p) => PACKS.some((k) => k.id === p) || REWARD_IDS.has(p)) : [],
         day: typeof a.day === 'string' ? a.day : '',
         progress: a.progress && typeof a.progress === 'object' ? a.progress : {},
         done: Array.isArray(a.done) ? a.done : [],
         login: a.login && typeof a.login.name === 'string' && typeof a.login.salt === 'string' && typeof a.login.hash === 'string' ? a.login : undefined,
+        // Saved before the season pass: their pass starts now.
+        season: Number.isInteger(a.season) ? a.season : 0,
+        xp: typeof a.xp === 'number' && a.xp >= 0 ? a.xp : 0,
+        paid: Number.isInteger(a.paid) && a.paid >= 0 ? a.paid : 0,
+        title: typeof a.title === 'string' && TITLES.has(a.title) ? a.title : undefined,
       });
       if (a.login?.name) this.names.set(a.login.name.toLowerCase(), token);
     }

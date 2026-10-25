@@ -97,9 +97,11 @@ export class PaintPanel {
         return b;
       }),
     );
-    // The free colours, then each store pack's finishes (locked until bought).
+    // The free colours, then each store pack's finishes (locked until bought), then the season
+    // pass's (locked until reached).
     const groups: { title: string; pack?: string; paints: number[] }[] = [{ title: 'Colours', paints: PAINTS.flatMap((p, n) => (p.pack ? [] : [n])) }];
     for (const pack of PACKS) groups.push({ title: pack.name, pack: pack.id, paints: PAINTS.flatMap((p, n) => (p.pack === pack.id ? [n] : [])) });
+    groups.push({ title: 'Season pass', paints: PAINTS.flatMap((p, n) => (p.season ? [n] : [])) });
     $('paint-swatches').replaceChildren(
       ...groups.flatMap((g) => {
         const head = document.createElement('div');
@@ -107,6 +109,7 @@ export class PaintPanel {
         const locked = !!g.pack && !this.owned.includes(g.pack);
         head.textContent = g.title;
         if (locked) head.insertAdjacentHTML('beforeend', '<em>Store</em>');
+        else if (!g.pack && g.paints.some((n) => !paintOwned(n, this.owned))) head.insertAdjacentHTML('beforeend', '<em>Season</em>');
         return [
           head,
           ...g.paints.map((n) => {

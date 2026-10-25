@@ -316,14 +316,14 @@ export class Avatar {
     if (name) this.setTag(name, color, false);
   }
 
-  /** Their name above their head, in green when they are on your team. */
-  setTag(name: string, color: number, team: boolean) {
+  /** Their name above their head, in green when they are on your team, with any season title over it. */
+  setTag(name: string, color: number, team: boolean, title?: string) {
     if (this.tag) {
       this.root.remove(this.tag);
       this.tag.material.map?.dispose();
       this.tag.material.dispose();
     }
-    const tag = nameTag(team ? `${name} (team)` : name, color, team);
+    const tag = nameTag(team ? `${name} (team)` : name, color, team, title);
     tag.position.y = 2.1;
     this.root.add(tag);
     this.tag = tag;
@@ -703,7 +703,7 @@ function packMaterial(base: THREE.MeshStandardMaterial, colour: number): THREE.M
   return m;
 }
 
-export function nameTag(text: string, color: number, team = false): THREE.Sprite {
+export function nameTag(text: string, color: number, team = false, title?: string): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 128;
@@ -718,11 +718,19 @@ export function nameTag(text: string, color: number, team = false): THREE.Sprite
   const w = Math.min(ctx.measureText(label).width, 480);
   ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
   ctx.shadowBlur = 10;
+  // A season title sits small over the name, in the coins' gold.
+  const y = title ? 66 : 56;
   ctx.fillStyle = team ? '#bfe8c4' : '#ebe6da';
-  ctx.fillText(label, 256, 56, 480);
+  ctx.fillText(label, 256, y, 480);
+  if (title) {
+    ctx.font = "600 26px 'Barlow Condensed', 'Barlow', system-ui, sans-serif";
+    ctx.letterSpacing = '7px';
+    ctx.fillStyle = '#d6b06a';
+    ctx.fillText(title.toUpperCase(), 256, 20, 480);
+  }
   ctx.shadowBlur = 4;
   ctx.fillStyle = team ? '#5fd06a' : `#${color.toString(16).padStart(6, '0')}`;
-  ctx.fillRect(256 - Math.min(w, 120) / 2, 94, Math.min(w, 120), 5);
+  ctx.fillRect(256 - Math.min(w, 120) / 2, title ? 100 : 94, Math.min(w, 120), 5);
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthWrite: false }));

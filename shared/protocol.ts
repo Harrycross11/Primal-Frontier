@@ -31,6 +31,8 @@ export interface PlayerState {
   wear: (ItemId | null)[];
   /** Skin, hair, clothing and gear they picked before joining. */
   look: Look;
+  /** A season pass title shown over their name. */
+  title?: string;
   /** The animal they are riding. */
   riding?: number;
   /** The car they are driving. */
@@ -62,6 +64,8 @@ export type ClientMessage =
   | { t: 'buy'; pack: string; token?: string }
   /** Your coins and objectives, for the pause menu. */
   | { t: 'getAccount' }
+  /** From the main menu: wear a season pass title over your name, or (null) none. */
+  | { t: 'wearTitle'; id: string | null; token?: string }
   /** Asks for an answer straight back, to time the round trip. */
   | { t: 'ping'; at: number }
   /** From the menu: give this browser's account a name and password. */
@@ -156,8 +160,10 @@ export type ServerMessage =
   | { t: 'signedIn'; name: string; token: string }
   | { t: 'authError'; text: string }
   | { t: 'pong'; at: number }
-  /** You finished one of today's objectives. */
-  | { t: 'objectiveDone'; label: string; reward: number }
+  /** You finished one of today's objectives: its coins, and the season XP it brought. */
+  | { t: 'objectiveDone'; label: string; reward: number; xp: number }
+  /** You reached a tier of the season pass, and what it gave you. */
+  | { t: 'tierUp'; tier: number; reward: string }
   | { t: 'state'; players: PlayerState[]; creatures: CreatureState[]; vehicles: VehicleState[] }
   | { t: 'joined'; player: PlayerState }
   | { t: 'left'; id: number }

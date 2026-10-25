@@ -78,15 +78,39 @@ export class Hud {
   }
 
   private bannerTimer = 0;
+  /** Banners waiting for the one showing to go. */
+  private banners: { kicker: string; label: string; coins: number; xp: number }[] = [];
 
-  /** Slides in "Objective complete" with what was done and the coins it paid. */
-  objectiveDone(label: string, reward: number) {
-    $('objective-banner-label').textContent = label;
-    $('objective-banner-reward').textContent = `+${reward}`;
+  /** Slides in "Challenge complete" with what was done, the coins it paid and the season XP. */
+  objectiveDone(label: string, reward: number, xp: number) {
+    this.banner({ kicker: 'Challenge complete', label, coins: reward, xp });
+  }
+
+  /** Slides in a season pass tier reached and what it unlocked. */
+  tierUp(tier: number, reward: string) {
+    this.banner({ kicker: `Season tier ${tier}`, label: reward, coins: 0, xp: 0 });
+  }
+
+  private banner(b: { kicker: string; label: string; coins: number; xp: number }) {
+    this.banners.push(b);
+    if (this.banners.length === 1) this.nextBanner();
+  }
+
+  private nextBanner() {
+    const b = this.banners[0];
     const el = $('objective-banner');
+    if (!b) return el.classList.remove('show');
+    $('objective-banner-kicker').textContent = b.kicker;
+    $('objective-banner-label').textContent = b.label;
+    $('objective-banner-coin').hidden = !b.coins;
+    $('objective-banner-reward').textContent = b.coins ? `+${b.coins}` : 'Unlocked';
+    $('objective-banner-xp').textContent = b.xp ? ` · +${b.xp} XP` : '';
     el.classList.add('show');
     clearTimeout(this.bannerTimer);
-    this.bannerTimer = window.setTimeout(() => el.classList.remove('show'), 4500);
+    this.bannerTimer = window.setTimeout(() => {
+      this.banners.shift();
+      this.nextBanner();
+    }, 4500);
   }
 
   toggleHelp() {

@@ -37,6 +37,8 @@ export const LOOK_PARTS = {
       ['Rust', 0x74452f],
       ['Forest', 0x3e5640],
       ['Oxblood', 0x5e2c2a],
+      ['Ashfall grey', 0x4b4844],
+      ['Ember', 0x7c2c1a],
     ],
   },
   trousers: {
@@ -49,6 +51,7 @@ export const LOOK_PARTS = {
       ['Khaki', 0x7c6e50],
       ['Olive', 0x4e533a],
       ['Camo grey', 0x5c5c56],
+      ['Ash', 0x46443f],
     ],
   },
   boots: {
@@ -58,6 +61,7 @@ export const LOOK_PARTS = {
       ['Black', 0x222120],
       ['Brown', 0x5a3e2a],
       ['Tan', 0x9a7a54],
+      ['Ember red', 0x5e2216],
     ],
   },
   head: {
@@ -89,6 +93,7 @@ export const LOOK_PARTS = {
       ['Black', 0x2c2c2c],
       ['Tan', 0x8a7652],
       ['None', null],
+      ['Ember', 0x7a3a22],
     ],
   },
 } as const satisfies Record<string, { label: string; options: readonly (readonly [string, number | null])[] }>;
@@ -97,6 +102,25 @@ export type LookPart = keyof typeof LOOK_PARTS;
 export type Look = Record<LookPart, number>;
 
 export const LOOK_KEYS = Object.keys(LOOK_PARTS) as LookPart[];
+
+/** Options that are season pass rewards, by part and option, with the unlock that gives them. */
+export const LOOK_REWARDS: Partial<Record<LookPart, Record<number, string>>> = {
+  jacket: { 9: 'ashfall-jacket-ash', 10: 'ashfall-jacket-ember' },
+  trousers: { 7: 'ashfall-trousers' },
+  boots: { 4: 'ashfall-boots' },
+  pack: { 5: 'ashfall-pack' },
+};
+
+/** True when an option is free or its unlock is among `owned`. */
+export function lookOwned(part: LookPart, option: number, owned: readonly string[]): boolean {
+  const id = LOOK_REWARDS[part]?.[option];
+  return !id || owned.includes(id);
+}
+
+/** The look with anything not unlocked put back to how it was scanned. */
+export function ownedLook(look: Look, owned: readonly string[]): Look {
+  return Object.fromEntries(LOOK_KEYS.map((k) => [k, lookOwned(k, look[k], owned) ? look[k] : 0])) as Look;
+}
 
 /** The survivor as scanned, with nothing added. */
 export function defaultLook(): Look {
@@ -119,7 +143,12 @@ export function lookColor(look: Look, part: LookPart): number | null {
   return LOOK_PARTS[part].options[look[part]][1];
 }
 
-/** A random look, from `random` in [0, 1). */
-export function randomLook(random: () => number = Math.random): Look {
-  return Object.fromEntries(LOOK_KEYS.map((k) => [k, Math.floor(random() * LOOK_PARTS[k].options.length)])) as Look;
+/** A random look from what `owned` unlocks, from `random` in [0, 1). */
+export function randomLook(random: () => number = Math.random, owned: readonly string[] = []): Look {
+  return Object.fromEntries(
+    LOOK_KEYS.map((k) => {
+      const free = LOOK_PARTS[k].options.flatMap((_, n) => (lookOwned(k, n, owned) ? [n] : []));
+      return [k, free[Math.floor(random() * free.length)]];
+    }),
+  ) as Look;
 }

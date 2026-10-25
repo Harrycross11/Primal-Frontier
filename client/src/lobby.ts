@@ -1,7 +1,10 @@
-// The main menu around the stage: tabs for PLAY, STORE, CHARACTER and CAR, today's objectives,
-// the store's packs, the garage where you pick your car style, and your coins.
+// The main menu around the stage: tabs for PLAY, SEASON, STORE, CHARACTER and CAR, today's
+// objectives, the season pass, the store's packs, the garage where you pick your car style, and
+// your coins.
 
+import { LOOK_PARTS } from '../../shared/look.ts';
 import { PAINTS, paintOwned } from '../../shared/paint.ts';
+import { TIER_XP, TITLES, XP_PER_MINUTE, lookReward, objectiveXp, rewardLabel, seasonNumber, type Reward } from '../../shared/season.ts';
 import { COIN_BUNDLES, PACKS, type AccountView } from '../../shared/shop.ts';
 import { VEHICLES, VEHICLE_KINDS, type VehicleKind } from '../../shared/vehicles.ts';
 import type { Quality } from './graphics.ts';
@@ -11,7 +14,7 @@ import { swatch } from './paint.ts';
 const $ = (id: string) => document.getElementById(id)!;
 const STYLE = 'pf-car';
 
-export type Tab = 'play' | 'store' | 'character' | 'car';
+export type Tab = 'play' | 'season' | 'store' | 'character' | 'car';
 
 /** Your car style from the garage, kept in this browser. */
 export function carStyle(): { kind: VehicleKind; paint: number } {
@@ -31,6 +34,21 @@ export function timeLeft(ms: number): string {
   return `${h}h ${Math.floor((ms % 3_600_000) / 60_000)}m`;
 }
 
+/** "Tier 4", the bar towards the next tier and "320 / 1,000 XP", for the menus' season lines. */
+export function seasonLine(account: AccountView | null): { name: string; tier: string; fill: number; xp: string } {
+  if (!account) return { name: 'Season pass', tier: '–', fill: 0, xp: '' };
+  const s = account.season;
+  const tiers = seasonNumber(s.n).track.length;
+  const top = s.tier >= tiers;
+  const into = top ? TIER_XP : s.xp - s.tier * TIER_XP;
+  return {
+    name: `Season ${s.n} · ${s.name}`,
+    tier: top ? `Tier ${tiers} · complete` : `Tier ${s.tier}`,
+    fill: into / TIER_XP,
+    xp: top ? 'Every reward unlocked' : `${into.toLocaleString()} / ${TIER_XP.toLocaleString()} XP to tier ${s.tier + 1}`,
+  };
+}
+
 /** The objectives list, shared by the main menu and the pause menu. */
 export function renderObjectives(el: HTMLElement, account: AccountView | null) {
   if (!account) {
@@ -42,12 +60,15 @@ export function renderObjectives(el: HTMLElement, account: AccountView | null) {
       const row = document.createElement('div');
       row.className = `objective${o.done ? ' done' : ''}`;
       const shown = o.stat === 'drive' ? `${(o.progress / 1000).toFixed(1)} / ${o.goal / 1000} km` : `${o.progress} / ${o.goal}`;
-      row.innerHTML = `<div class="row"><span></span><span class="reward">${o.done ? 'Done' : `<span class="coin"></span>${o.reward}`}</span></div><div class="track"><i style="width:${Math.round((o.progress / o.goal) * 100)}%"></i></div><div class="count">${o.done ? 'Reward collected' : shown}</div>`;
+      row.innerHTML = `<div class="row"><span></span><span class="reward">${o.done ? 'Done' : `<span class="coin"></span>${o.reward}`}</span></div><div class="track"><i style="width:${Math.round((o.progress / o.goal) * 100)}%"></i></div><div class="count">${o.done ? 'Reward collected' : `${shown} · <span class="xp">+${objectiveXp(o)} XP</span>`}</div>`;
       row.querySelector('.row span')!.textContent = o.label;
       return row;
     }),
   );
 }
+
+/** The stage's camera for a tab: the season pass shares the store's soft backdrop. */
+const shotOf = (tab: Tab) => (tab === 'season' ? 'store' : tab);
 
 export class Lobby {
   account: AccountView | null = null;
@@ -62,6 +83,8 @@ export class Lobby {
   onRegister: (name: string, password: string) => void = () => {};
   /** Goes back to being a fresh guest on this browser. */
   onSignOut: () => void = () => {};
+  /** Asks the server to wear a season title over your name (null: none). */
+  onWearTitle: (id: string | null) => void = () => {};
 
   private stage: MenuStage | null = null;
   /** The store's pictures of each pack, rendered from the menu's stage. */
@@ -77,6 +100,8 @@ export class Lobby {
     this.renderBundles();
     this.renderStore();
     this.renderGarage();
+    $('season-mini').addEventListener('click', () => this.show('season'));
+    $('news-card').addEventListener('click', () => this.show('season'));
     // Settings: graphics quality (used by the menu's world and the game) and full screen.
     const settings = $('lobby-settings');
     const quality = () => {
@@ -174,8 +199,14 @@ export class Lobby {
     this.tab = tab;
     for (const b of document.querySelectorAll<HTMLButtonElement>('#lobby-tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
     for (const p of document.querySelectorAll<HTMLElement>('#join .page')) p.classList.toggle('on', p.dataset.page === tab);
-    $('join').classList.toggle('store', tab === 'store');
-    this.stage?.show(tab);
+    $('join').classList.toggle('store', tab === 'store' || tab === 'season');
+    this.stage?.show(shotOf(tab));
+    // The season track opens at the tier you're working towards.
+    if (tab === 'season') {
+      const track = $('season-track');
+      const at = track.children[Math.max(0, (this.account?.season.tier ?? 0) - 1)] as HTMLElement | undefined;
+      if (at) track.scrollLeft = at.offsetLeft - (track.firstElementChild as HTMLElement).offsetLeft;
+    }
   }
 
   /** The live world behind the menus has loaded: show it, and picture the packs in it. */
@@ -184,14 +215,18 @@ export class Lobby {
     $('land-title').textContent = stage.place.landmark;
     $('land-sub').textContent = stage.place.land;
     stage.setCar(this.style);
-    stage.show(this.tab);
+    stage.show(shotOf(this.tab));
     stage.onReady = () => {
       $('join').classList.add('live');
       // A moment later, so the first frames of the world come first.
       setTimeout(() => {
-        this.art = stage.packArt([...PACKS.map((p) => p.id), 'news']);
-        if (this.art.news) $('news-art').style.backgroundImage = `url(${this.art.news})`;
+        const seasonPaints = PAINTS.flatMap((p) => (p.season && p.pack ? [p.pack] : []));
+        this.art = stage.packArt([...PACKS.map((p) => p.id), ...seasonPaints]);
+        // The news is the season pass: its last reward on a car.
+        const news = this.art[seasonPaints[seasonPaints.length - 1]];
+        if (news) $('news-art').style.backgroundImage = `url(${news})`;
         this.renderStore();
+        this.renderSeason();
       }, 400);
     };
   }
@@ -213,6 +248,91 @@ export class Lobby {
     this.renderStore();
     this.renderGarage();
     this.renderAccount();
+    this.renderSeason();
+    this.onOwned(account?.packs ?? []);
+  }
+
+  /** Told what the account has unlocked, for the locker's season outfits. */
+  onOwned: (owned: string[]) => void = () => {};
+
+  /** The season pass page: the tier you're on, every tier's reward, ways to earn XP, and titles. */
+  private renderSeason() {
+    const account = this.account;
+    const view = account?.season;
+    const season = seasonNumber(view?.n ?? 1);
+    const owned = account?.packs ?? [];
+    const tier = view?.tier ?? 0;
+    const line = seasonLine(account);
+    $('season-kicker').textContent = `Season ${season.n} · free pass · ends in ${timeLeft(view?.endsIn ?? season.end - Date.now())}`;
+    $('season-name').textContent = season.name;
+    $('season-tier').textContent = String(tier);
+    $('season-of').textContent = `/ ${season.track.length}`;
+    $('season-fill').style.width = `${Math.round(line.fill * 100)}%`;
+    $('season-xp').textContent = account ? line.xp : 'The season pass needs this browser to allow storage';
+    $('season-mini-name').textContent = line.name;
+    $('season-mini-tier').textContent = line.tier;
+    $('season-mini-fill').style.width = `${Math.round(line.fill * 100)}%`;
+    $('earn-minute').textContent = `${XP_PER_MINUTE} XP a minute`;
+    const left = account?.objectives.filter((o) => !o.done) ?? [];
+    $('earn-today').textContent = account ? `${left.length} · up to ${left.reduce((n, o) => n + objectiveXp(o), 0).toLocaleString()} XP` : '–';
+
+    $('season-track').replaceChildren(
+      ...season.track.map((reward, i) => {
+        const n = i + 1;
+        const card = document.createElement('div');
+        card.className = `tier ${n <= tier ? 'got' : n === tier + 1 ? 'next' : 'locked'}`;
+        card.innerHTML = `<div class="num"><span>${String(n).padStart(2, '0')}</span><span></span></div><div class="art"></div><div class="label"><span></span><small></small></div>`;
+        card.querySelector('.num span:last-child')!.textContent = n === tier + 1 ? 'Next' : '';
+        this.rewardArt(card.querySelector<HTMLElement>('.art')!, reward);
+        card.querySelector('.label span')!.textContent = rewardLabel(reward).replace(/ (paint|title)$/, '');
+        const kind = { coins: 'Coins', paint: 'Paint finish', look: 'Outfit', title: 'Title' }[reward.kind];
+        const had = reward.kind !== 'coins' && owned.includes(reward.id);
+        card.querySelector('.label small')!.textContent = n <= tier ? `${kind} · unlocked` : had ? `${kind} · owned` : kind;
+        return card;
+      }),
+    );
+
+    const titles = [...TITLES];
+    const worn = view?.title ?? null;
+    const none = document.createElement('button');
+    none.type = 'button';
+    none.textContent = 'None';
+    none.className = worn ? '' : 'on';
+    none.onclick = () => account && this.onWearTitle(null);
+    $('season-titles').replaceChildren(
+      none,
+      ...titles.map(([id, text]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        const has = owned.includes(id);
+        b.className = id === worn ? 'on' : has ? '' : 'locked';
+        const at = season.track.findIndex((r) => r.kind === 'title' && r.id === id) + 1;
+        b.title = has ? `Wear ${text} over your name` : at ? `Unlocks at tier ${at}` : 'From an earlier season';
+        b.onclick = () => (has ? this.onWearTitle(id) : this.toast(at ? `${text} unlocks at tier ${at} of the season pass` : `${text} came with an earlier season`));
+        return b;
+      }),
+    );
+  }
+
+  /** A tier's picture: the painted car, a cloth swatch, a title plate or a pile of coins. */
+  private rewardArt(el: HTMLElement, reward: Reward) {
+    if (reward.kind === 'coins') {
+      el.innerHTML = `<div class="big-coin"><span class="coin"></span><span></span></div>`;
+      el.querySelector('.big-coin span:last-child')!.textContent = reward.coins.toLocaleString();
+    } else if (reward.kind === 'title') {
+      el.innerHTML = '<div class="plate"></div>';
+      el.querySelector('.plate')!.textContent = reward.title;
+    } else if (reward.kind === 'paint') {
+      const n = PAINTS.findIndex((p) => p.pack === reward.id);
+      if (this.art[reward.id]) el.style.backgroundImage = `url(${this.art[reward.id]})`;
+      else el.innerHTML = `<div class="swatch" style="background:${swatch(n)}"></div>`;
+    } else {
+      const found = lookReward(reward.id);
+      const colour = found ? LOOK_PARTS[found.part].options[found.option][1] : null;
+      el.innerHTML = `<div class="swatch" style="background:#${(colour ?? 0x555555).toString(16).padStart(6, '0')}"></div><div class="part"></div>`;
+      el.querySelector('.part')!.textContent = found ? LOOK_PARTS[found.part].label : '';
+    }
   }
 
   toast(text: string) {
@@ -307,12 +427,14 @@ export class Lobby {
     $('garage-stats').innerHTML = stats.map(([label, f]) => `<span>${label}</span><div class="meter"><i style="width:${Math.round(f * 100)}%"></i></div>`).join('');
     const groups: { title: string; pack?: string; paints: number[] }[] = [{ title: 'Colours', paints: PAINTS.flatMap((p, n) => (p.pack ? [] : [n])) }];
     for (const pack of PACKS) groups.push({ title: pack.name, pack: pack.id, paints: PAINTS.flatMap((p, n) => (p.pack === pack.id ? [n] : [])) });
+    groups.push({ title: 'Season pass', paints: PAINTS.flatMap((p, n) => (p.season ? [n] : [])) });
     $('garage-swatches').replaceChildren(
       ...groups.flatMap((g) => {
         const head = document.createElement('div');
         head.className = 'paint-group';
         head.textContent = g.title;
         if (g.pack && !owned.includes(g.pack)) head.insertAdjacentHTML('beforeend', '<em>Store</em>');
+        if (!g.pack && g.paints.some((n) => !paintOwned(n, owned))) head.insertAdjacentHTML('beforeend', '<em>Season</em>');
         return [
           head,
           ...g.paints.map((n) => {
@@ -323,7 +445,7 @@ export class Lobby {
             if (n === 0) b.textContent = 'Bare';
             b.onclick = () => {
               if (!paintOwned(n, owned)) {
-                this.toast(`${PAINTS[n].name} comes in the ${PACKS.find((p) => p.id === PAINTS[n].pack)?.name}: get it in the store`);
+                this.toast(PAINTS[n].season ? `${PAINTS[n].name} is a season pass reward: climb the pass to unlock it` : `${PAINTS[n].name} comes in the ${PACKS.find((p) => p.id === PAINTS[n].pack)?.name}: get it in the store`);
                 return;
               }
               pick({ ...this.style, paint: n });
