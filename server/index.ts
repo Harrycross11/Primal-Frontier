@@ -38,10 +38,13 @@ const TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
 };
 
-/** Files worth gzipping: text, the sky's HDR image and the Draco decoder. Images, sounds and
- * compressed models are already as small as gzip would make them. */
+/** Files worth gzipping: text, the sky's HDR image and the Draco decoder. Images and sounds
+ * are already as small as gzip would make them. */
 const GZIP = new Set(['.html', '.js', '.css', '.svg', '.json', '.hdr', '.wasm']);
-const gzipped = new Map<string, { mtime: number; data: Buffer }>();
+/** Models are gzipped only where it pays: animals' animations shrink by about half, while the
+ * rest (compressed meshes and pictures) barely change and are sent as they are. */
+const GZIP_IF_SMALLER = new Set(['.glb']);
+const gzipped = new Map<string, { mtime: number; data: Buffer | null }>();
 
 /**
  * How long browsers may keep a file without asking again. Built scripts have their content's
@@ -103,12 +106,17 @@ const http = createServer((req, res) => {
     res.writeHead(304, headers).end();
     return;
   }
-  if (GZIP.has(ext) && /\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) {
+  if ((GZIP.has(ext) || GZIP_IF_SMALLER.has(ext)) && /\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) {
     let hit = gzipped.get(file);
-    if (!hit || hit.mtime !== stat.mtimeMs) gzipped.set(file, (hit = { mtime: stat.mtimeMs, data: gzipSync(readFileSync(file)) }));
-    res.writeHead(200, { ...headers, 'content-encoding': 'gzip', 'content-length': String(hit.data.length) });
-    res.end(hit.data);
-    return;
+    if (!hit || hit.mtime !== stat.mtimeMs) {
+      const data = gzipSync(readFileSync(file));
+      gzipped.set(file, (hit = { mtime: stat.mtimeMs, data: GZIP.has(ext) || data.length < stat.size * 0.9 ? data : null }));
+    }
+    if (hit.data) {
+      res.writeHead(200, { ...headers, 'content-encoding': 'gzip', 'content-length': String(hit.data.length) });
+      res.end(hit.data);
+      return;
+    }
   }
   res.writeHead(200, { ...headers, 'content-length': String(stat.size) });
   createReadStream(file).pipe(res);
