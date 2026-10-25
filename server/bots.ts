@@ -3,8 +3,8 @@
 // a small hut with a box of loot inside, fights whoever comes too close and now and then raids
 // someone's door with satchel charges. In a gunfight it runs for cover, ducks out to shoot,
 // reloads and patches itself up out of sight, and crewmates spread out to come at you from
-// the sides. Bots fill the server up to a target head count and leave
-// one by one as real players join.
+// the sides. Bots fill the server up to a target head count and leave one by one as real
+// players join.
 
 import { PLAYER_HEIGHT, PLAYER_RADIUS, PLAYER_SPEED, HALF_WORLD } from '../shared/constants.ts';
 import { EYE_HEIGHT, type Vec3 } from '../shared/combat.ts';
@@ -345,6 +345,7 @@ export class Bots {
     bot.cover = null;
     bot.flank = null;
     bot.sawAt = bot.sightAt = 0;
+    bot.blind.clear();
   }
 
   private enemyAt(e: NonNullable<Bot['enemy']>): { x: number; y: number; z: number; height: number } | null {
