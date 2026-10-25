@@ -173,6 +173,8 @@ const lobbyMessages = (m: ServerMessage) => {
 };
 net.onMessage = lobbyMessages;
 lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
+lobby.onWearTitle = (id) => net.send({ t: 'wearTitle', id, token: survivorToken() });
+lobby.onOwned = (owned) => picker.setOwned(owned);
 lobby.onSignIn = (name, password) => net.send({ t: 'signIn', name, password });
 lobby.onRegister = (name, password) => net.send({ t: 'register', name, password, token: survivorToken() });
 lobby.onSignOut = () => {
@@ -361,7 +363,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
     remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
-    if (teamIds.includes(p.id)) avatar.setTag(p.name, p.color, true);
+    if (teamIds.includes(p.id) || p.title) avatar.setTag(p.name, p.color, teamIds.includes(p.id), p.title);
   };
   welcome.players.forEach(addRemote);
   /** Who last asked you onto their team. */
@@ -409,7 +411,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   let buildPaint = 0;
   const paintPanel = new PaintPanel();
   paintPanel.onClose = () => canvas.requestPointerLock?.();
-  paintPanel.onLocked = (pack) => hud.notice(`That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu`, 3);
+  paintPanel.onLocked = (pack) =>
+    hud.notice(PACKS.some((p) => p.id === pack) ? `That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu` : 'That is a season pass reward: climb the pass to unlock it', 3);
   // Coins, store packs and today's objectives.
   let account = welcome.account ?? null;
   paintPanel.owned = account?.packs ?? [];
@@ -746,7 +749,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         pause.setAccount(account);
         break;
       case 'objectiveDone':
-        hud.objectiveDone(m.label, m.reward);
+        hud.objectiveDone(m.label, m.reward, m.xp);
+        effects.objective();
+        break;
+      case 'tierUp':
+        hud.tierUp(m.tier, m.reward);
         effects.objective();
         break;
       case 'plane': {
@@ -764,7 +771,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         const was = teamIds;
         teamIds = m.members.length ? m.members : [welcome.id];
         for (const r of remotes.values()) {
-          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id));
+          if (was.includes(r.state.id) !== teamIds.includes(r.state.id)) r.avatar.setTag(r.state.name, r.state.color, teamIds.includes(r.state.id), r.state.title);
         }
         refreshPlayers();
         break;

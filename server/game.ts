@@ -16,7 +16,7 @@ import {
 } from '../shared/constants.ts';
 import type { CraftJob, DeathCause, PlayerState, ServerMessage, SlotRef } from '../shared/protocol.ts';
 import { mulberry32, terrainHeight } from '../shared/terrain.ts';
-import { cleanLook } from '../shared/look.ts';
+import { cleanLook, ownedLook } from '../shared/look.ts';
 import { CoverMap } from '../shared/cover.ts';
 import {
   DOOR_HP,
@@ -121,6 +121,7 @@ import {
 } from '../shared/vehicles.ts';
 import { PAINTS, cleanPaint, paintOwned } from '../shared/paint.ts';
 import { PACKS, type Stat } from '../shared/shop.ts';
+import { XP_PER_MINUTE, objectiveXp, rewardLabel } from '../shared/season.ts';
 import { Accounts } from './accounts.ts';
 import { daylight, stormClimate, weatherAt } from '../shared/sky.ts';
 import { ASHHOUND, MAX_MOUNTS, MOUNT_RANGE, SPECIES, clearOfRuins, herds, rayCreature, yawTowards, type Species } from '../shared/creatures.ts';
@@ -421,7 +422,9 @@ export class Game {
       id,
       name: cleanName(name) || `Survivor ${id}`,
       color,
-      look: cleanLook(look),
+      // Season pass outfits only for those who have unlocked them.
+      look: ownedLook(cleanLook(look), key ? this.accounts.get(key, now).packs : []),
+      ...(key && this.accounts.titleOf(key, now) && { title: this.accounts.titleOf(key, now) }),
       x,
       y: terrainHeight(this.seed, x, z),
       z,
@@ -591,7 +594,7 @@ export class Game {
     return [{ to: p.id, msg: { t: 'mounted', id: null, x, y, z, yaw: p.yaw } }];
   }
 
-  /** The store packs a player has unlocked (none without an account). */
+  /** The store packs and season rewards a player has unlocked (none without an account). */
   private packsOf(p: Player): string[] {
     const token = this.tokens.get(p.id);
     return token ? this.accounts.get(token, Math.max(0, this.lastTick)).packs : [];
@@ -600,18 +603,24 @@ export class Game {
   /** Refuses a paint from a pack the player hasn't unlocked. */
   private lockedPaint(p: Player, paint: number): Outgoing | null {
     if (paintOwned(paint, this.packsOf(p))) return null;
+    if (PAINTS[paint].season) return notice(p.id, `${PAINTS[paint].name} is a season pass reward: climb the pass to unlock it`);
     const pack = PACKS.find((k) => k.id === PAINTS[paint].pack);
     return notice(p.id, `${PAINTS[paint].name} comes in the ${pack?.name ?? 'store'}: unlock it in the store`);
   }
 
-  /** Counts towards a player's daily objectives, and tells them about any they finish. */
+  /**
+   * Counts towards a player's daily objectives and season pass (time alive earns season XP too),
+   * and tells them about any objective they finish and season tier they reach.
+   */
   private progress(p: Player, stat: Stat, amount: number, now = Math.max(0, this.lastTick)): Outgoing[] {
     const token = this.tokens.get(p.id);
     if (!token) return [];
     const finished = this.accounts.bump(token, stat, amount, now);
-    if (!finished.length) return [];
+    const ups = [...(stat === 'minutes' ? this.accounts.addXp(token, amount * XP_PER_MINUTE, now) : []), ...this.accounts.objectiveXp(token, finished, now)];
+    if (!finished.length && !ups.length) return [];
     return [
-      ...finished.map((o) => ({ to: p.id, msg: { t: 'objectiveDone' as const, label: o.label, reward: o.reward } })),
+      ...finished.map((o) => ({ to: p.id, msg: { t: 'objectiveDone' as const, label: o.label, reward: o.reward, xp: objectiveXp(o) } })),
+      ...ups.map((u) => ({ to: p.id, msg: { t: 'tierUp' as const, tier: u.tier, reward: rewardLabel(u.reward) } })),
       this.account(p.id, now)!,
     ];
   }
@@ -2739,6 +2748,7 @@ function publicState(p: Player): PlayerState {
     dead: p.dead,
     wear: p.wear.map((s) => s?.item ?? null),
     look: p.look,
+    ...(p.title && { title: p.title }),
     ...(p.riding !== undefined && { riding: p.riding }),
     ...(p.driving !== undefined && { driving: p.driving }),
     ...(p.raider && { raider: true }),

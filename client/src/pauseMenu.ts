@@ -1,9 +1,9 @@
-// The in-game menu when you let go of the mouse (Esc): resume, today's objectives, settings,
-// controls, and leaving for the main menu.
+// The in-game menu when you let go of the mouse (Esc): resume, today's objectives and season
+// pass, settings, controls, and leaving for the main menu.
 
 import type { AccountView } from '../../shared/shop.ts';
 import type { Quality } from './graphics.ts';
-import { renderObjectives, timeLeft } from './lobby.ts';
+import { renderObjectives, seasonLine, timeLeft } from './lobby.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -61,6 +61,11 @@ export class PauseMenu {
     renderObjectives($('pause-objectives'), this.account);
     $('pause-coins').textContent = this.account ? this.account.coins.toLocaleString() : '–';
     $('pause-reset').textContent = this.account ? `Resets in ${timeLeft(this.account.resetIn)}` : '';
+    const season = seasonLine(this.account);
+    $('pause-season-name').textContent = season.name;
+    $('pause-season-tier').textContent = season.tier;
+    $('pause-season-fill').style.width = `${Math.round(season.fill * 100)}%`;
+    $('pause-season-xp').textContent = season.xp;
     for (const b of document.querySelectorAll<HTMLButtonElement>('#pause-quality button')) b.classList.toggle('on', b.dataset.q === this.quality);
   }
 }

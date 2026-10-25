@@ -1,6 +1,8 @@
 // The store and objectives: packs of extra paint finishes bought with coins, and the daily
 // objectives that pay those coins. Kept on the player's account, which outlives world wipes.
 
+import type { SeasonView } from './season.ts';
+
 /** Things that count towards objectives. */
 export type Stat = 'wood' | 'stone' | 'metalOre' | 'sulfurOre' | 'pieces' | 'hounds' | 'drive' | 'craft' | 'crates' | 'tame' | 'minutes';
 
@@ -88,10 +90,13 @@ export interface ObjectiveState extends Objective {
 /** What the menus show of a player's account. */
 export interface AccountView {
   coins: number;
+  /** Store packs bought and season pass rewards unlocked. */
   packs: string[];
   objectives: ObjectiveState[];
   /** Milliseconds until tomorrow's objectives. */
   resetIn: number;
   /** The name it signs in with, or null for a guest playing on this browser only. */
   name: string | null;
+  /** This season's pass. */
+  season: SeasonView;
 }
