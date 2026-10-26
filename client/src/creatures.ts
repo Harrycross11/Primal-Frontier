@@ -10,6 +10,9 @@ import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
 import { character, characterClips, hasCharacter, model, soleMaterial } from './models.ts';
 import { clothSurface } from './textures.ts';
+import { Track } from './track.ts';
+
+const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** Past this far the fog has all but hidden an animal, so it isn't drawn or animated. */
 const HIDE_BEYOND = 170;
@@ -110,6 +113,8 @@ const LOOKS: Record<Species, { model: string; clips: Clips; height?: number }> =
   },
 };
 const ONCE = new Set<CreatureAnim>(['attack', 'hit', 'dead']);
+/** Standing about or getting somewhere: the client picks which of these from how fast it really goes. */
+const GAITS = new Set<CreatureAnim>(['idle', 'walk', 'trot', 'run']);
 /** Sounds each animal makes: when it attacks, is hurt, dies, starts running, and now and then. */
 const VOICES: Record<Species, { attack: string[]; hurt: string; dead: string; run?: string; idle: string[]; pitch?: number }> = {
   ashhound: { attack: ['hound-snarl', 'hound-growl'], hurt: 'hound-hurt', dead: 'hound-whine', run: 'hound-bark', idle: ['hound-growl2', 'hound-grumble'] },
@@ -155,7 +160,10 @@ class HoundView {
   private mixer: THREE.AnimationMixer | null = null;
   private actions = new Map<CreatureAnim, THREE.AnimationAction>();
   private playing: CreatureAnim | null = null;
-  private target = new THREE.Vector3();
+  /** The server's snapshots, drawn smoothly a moment behind. */
+  private track = new Track();
+  /** When its rider (you) last put it under themselves: it follows you, not the server, till a moment after. */
+  private carriedAt = -Infinity;
   private neck: THREE.Object3D | null = null;
   private head: THREE.Object3D | null = null;
   private collar: THREE.Mesh | null = null;
@@ -178,7 +186,7 @@ class HoundView {
     this.info = SPECIES[this.species];
     this.root.position.set(state.x, state.y, state.z);
     this.root.rotation.y = state.yaw;
-    this.target.copy(this.root.position);
+    this.track.push(performance.now(), state.x, state.y, state.z, state.yaw);
     this.lastAt.copy(this.root.position);
     const look = LOOKS[this.species];
     const body = character(look.model);
@@ -240,7 +248,7 @@ class HoundView {
 
   /** Puts it right under its rider (you), rather than where the server last had it. */
   carry(x: number, y: number, z: number, yaw: number) {
-    this.target.set(x, y, z);
+    this.carriedAt = performance.now();
     this.root.position.set(x, y, z);
     this.state = { ...this.state, yaw };
   }
@@ -249,26 +257,34 @@ class HoundView {
   sync(state: CreatureState): CreatureAnim | null {
     const was = this.state.anim;
     this.state = state;
-    this.target.set(state.x, state.y, state.z);
+    this.track.push(performance.now(), state.x, state.y, state.z, state.yaw);
     this.setOwner(state.owner !== undefined ? (state.name ?? this.info.name) : null);
     if (state.anim === was && !(state.anim === 'attack' && this.finished())) return null;
-    this.play(state.anim, 0.15);
+    // Getting about is left to stride(), which matches the gait to how fast it really goes.
+    if (!(GAITS.has(state.anim) && this.playing && GAITS.has(this.playing))) this.play(state.anim, 0.15);
     return was;
   }
 
   private finished(): boolean {
-    const a = this.playing && this.actions.get(this.playing);
+    const a = this.actionFor(this.playing);
     return !!a && !a.isRunning();
+  }
+
+  /** The clip an animation plays: a trot is a slower run for animals with no trot of their own. */
+  private actionFor(anim: CreatureAnim | null) {
+    return anim ? (this.actions.get(anim) ?? (anim === 'trot' ? this.actions.get('run') : undefined)) : undefined;
   }
 
   private play(anim: CreatureAnim, fade: number) {
     // A clip it has none of (a flinch, say) leaves it doing what it was.
-    const next = this.actions.get(anim) ?? (anim === 'trot' ? this.actions.get('run') : undefined);
+    const next = this.actionFor(anim);
     if (!next) return;
-    const prev = this.playing ? this.actions.get(this.playing) : undefined;
+    const prev = this.actionFor(this.playing);
+    this.playing = anim;
+    // A trot played as a slower run carries straight on, rather than starting the clip again.
+    if (prev === next && GAITS.has(anim) && next.isRunning()) return;
     next.reset().play();
     if (prev && prev !== next) next.crossFadeFrom(prev, fade, false);
-    this.playing = anim;
   }
 
   /** A tame hound gets a collar of red rag, an animal to ride a saddle, and its name above it. */
@@ -294,32 +310,62 @@ class HoundView {
     }
   }
 
+  /**
+   * Stands, walks, trots or runs to match how fast it really goes, with its legs played at that
+   * speed, so its feet keep to the ground (the server only says roughly). Bites, flinches, eating
+   * and dying play as the server sends them.
+   */
+  private stride() {
+    if (!GAITS.has(this.state.anim) || !this.playing || !GAITS.has(this.playing)) return;
+    const ride = this.info.ride;
+    const natural: [CreatureAnim, number][] = [
+      ['walk', this.info.walk * 1.1],
+      ['trot', ride?.walk ?? this.info.run * 0.6],
+      ['run', ride?.sprint ?? this.info.run],
+    ];
+    // Starts moving a little later than it stops, so it doesn't flicker at a standstill.
+    const moving = this.pace > (this.playing === 'idle' ? 0.45 : 0.2);
+    let want: CreatureAnim = 'idle';
+    if (moving) {
+      // The gait whose own speed is nearest, as a ratio; the one playing is kept unless
+      // another fits clearly better.
+      const off = ([anim, speed]: [CreatureAnim, number]) => Math.abs(Math.log(this.pace / speed)) - (anim === this.playing ? 0.15 : 0);
+      want = natural.reduce((a, b) => (off(b) < off(a) ? b : a))[0];
+    }
+    if (want !== this.playing) this.play(want, 0.3);
+    const action = this.actionFor(want);
+    const look = LOOKS[this.species].clips;
+    const base = look[want] ?? (want === 'trot' ? look.run : undefined);
+    if (!action || !base || want === 'idle') return;
+    const speed = natural.find(([anim]) => anim === want)![1];
+    action.timeScale = base[1] * THREE.MathUtils.clamp(this.pace / speed, 0.5, 2);
+  }
+
   /** Animation time saved up while it is far enough off to be stepped less often. */
   private owed = 0;
   private frame = Math.floor(Math.random() * 4);
 
   /** `away` is how far it is from the camera. */
   update(dt: number, away = 0) {
-    this.root.position.lerp(this.target, Math.min(1, dt * 10));
+    const now = performance.now();
+    if (now - this.carriedAt < 250) {
+      // Under its rider: where they put it, turning towards their heading.
+      let d = this.state.yaw - this.root.rotation.y;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      this.root.rotation.y += d * Math.min(1, dt * 10);
+    } else {
+      const at = this.track.sample(now, drawn);
+      this.root.position.set(at.x, at.y, at.z);
+      this.root.rotation.y = at.yaw;
+    }
     // Lost in the fog: not drawn or animated at all. A way off: animated every fourth frame.
     this.root.visible = away < HIDE_BEYOND;
-    // Legs keep pace with how fast it is really going, so a ridden animal never skates.
     if (dt > 0) {
       const v = Math.hypot(this.root.position.x - this.lastAt.x, this.root.position.z - this.lastAt.z) / dt;
       this.pace += (v - this.pace) * Math.min(1, dt * 6);
       this.lastAt.copy(this.root.position);
-      const anim = this.playing;
-      const look = LOOKS[this.species].clips;
-      const action = anim && this.actions.get(anim);
-      const base = anim && (look[anim] ?? (anim === 'trot' ? look.run : undefined));
-      if (action && base && (anim === 'walk' || anim === 'trot' || anim === 'run')) {
-        const natural = anim === 'walk' ? this.info.walk * 1.1 : anim === 'trot' ? (this.info.ride?.walk ?? this.info.run * 0.6) : this.info.ride?.sprint ?? this.info.run;
-        action.timeScale = base[1] * THREE.MathUtils.clamp(this.pace / natural, 0.6, 1.6);
-      }
+      this.stride();
     }
-    let d = this.state.yaw - this.root.rotation.y;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    this.root.rotation.y += d * Math.min(1, dt * 10);
     this.owed += dt;
     if (!this.root.visible || (away > STEP_SLOWLY_BEYOND && ++this.frame % 4 !== 0)) return;
     this.mixer?.update(this.owed);

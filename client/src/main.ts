@@ -62,6 +62,7 @@ import { auditItems, auditScene } from './audit.ts';
 import { Gate, clock, downloadedMb, health } from './gate.ts';
 import { pad } from './gamepad.ts';
 import { daylight } from '../../shared/sky.ts';
+import { Track } from './track.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -116,7 +117,8 @@ const RAIDER_RED = 0xa8261c;
 interface Remote {
   state: PlayerState;
   avatar: Avatar;
-  target: THREE.Vector3;
+  /** Their snapshots from the server, drawn smoothly a moment behind. */
+  track: Track;
 }
 
 const hud = new Hud();
@@ -618,7 +620,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
-    remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
+    const track = new Track();
+    track.push(performance.now(), p.x, p.y, p.z, p.yaw);
+    remotes.set(p.id, { state: p, avatar, track });
     if (teamIds.includes(p.id) || p.title) avatar.setTag(p.name, p.color, teamIds.includes(p.id), p.title);
   };
   welcome.players.forEach(addRemote);
@@ -793,7 +797,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
           const r = remotes.get(p.id);
           if (!r) continue;
           r.state = p;
-          r.target.set(p.x, p.y, p.z);
+          r.track.push(performance.now(), p.x, p.y, p.z, p.yaw);
         }
         creatures.sync(m.creatures);
         vehicles.sync(m.vehicles);
@@ -2243,9 +2247,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       for (const d of world.deployables.values()) if (CHARGE_KINDS.includes(d.kind)) effects.chargeSound(d.kind as ExplosiveId, new THREE.Vector3(d.x, d.y, d.z));
     }
 
+    const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
     for (const r of remotes.values()) {
-      r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
-      r.avatar.root.rotation.y = r.state.yaw + Math.PI;
+      const at = r.track.sample(now, drawn);
+      r.avatar.root.position.set(at.x, at.y, at.z);
+      r.avatar.root.rotation.y = at.yaw + Math.PI;
       r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
