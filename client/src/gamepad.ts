@@ -68,6 +68,8 @@ export class Gamepads {
 
   constructor() {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+    // Edge on Xbox drives a mouse pointer with the pad unless a page asks for the pad itself.
+    if ('gamepadInputEmulation' in navigator) (navigator as Navigator & { gamepadInputEmulation: string }).gamepadInputEmulation = 'gamepad';
     addEventListener('gamepadconnected', (e) => {
       // Sony's vendor id is 054c; Chrome calls a DualShock 4 just "Wireless Controller".
       this.family = !/xbox|xinput|045e/i.test(e.gamepad.id) && /054c|dualsense|dualshock|playstation|wireless controller/i.test(e.gamepad.id) ? 'playstation' : 'xbox';
@@ -204,7 +206,10 @@ export class Gamepads {
   private menu(pressed: boolean[], lx: number, ly: number, ry: number, now: number, dt: number) {
     const hit = (name: ButtonName) => pressed[BUTTON[name]] && !this.prev[BUTTON[name]];
     const dir = pressed[BUTTON.UP] || ly < -0.5 ? 'up' : pressed[BUTTON.DOWN] || ly > 0.5 ? 'down' : pressed[BUTTON.LEFT] || lx < -0.5 ? 'left' : pressed[BUTTON.RIGHT] || lx > 0.5 ? 'right' : '';
-    if (this.focus && !this.usable(this.focus)) this.blur();
+    if (this.focus && !this.usable(this.focus)) {
+      this.blur();
+      this.picked = false;
+    }
     if (!this.focus && (dir || hit('A'))) {
       this.setFocus(this.firstChoice());
       this.navDir = dir;
@@ -316,7 +321,7 @@ export class Gamepads {
 
   /** Where the highlight starts: the main button on screen, or the first thing it can land on. */
   private firstChoice(): HTMLElement | null {
-    for (const sel of ['#gate button', '#play', '#respawn button', '#pause .resume', '#pause button']) {
+    for (const sel of ['#gate button', '#code-input', '#respawn', '#play', '#pause-resume']) {
       const el = [...document.querySelectorAll<HTMLElement>(sel)].find((e) => this.usable(e));
       if (el) return el;
     }
