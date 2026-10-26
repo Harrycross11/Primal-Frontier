@@ -140,6 +140,14 @@ export class Accounts {
     return 'ok';
   }
 
+  /** Takes back a name given by `register` (when it couldn't be saved), freeing it for anyone. */
+  unregister(token: string) {
+    const login = this.all.get(token)?.login;
+    if (!login) return;
+    delete this.all.get(token)!.login;
+    if (this.names.get(login.name.toLowerCase()) === token) this.names.delete(login.name.toLowerCase());
+  }
+
   /** The token of the account with this name and password, or null. */
   async signIn(name: string, password: string): Promise<{ token: string; name: string } | null> {
     const token = typeof name === 'string' ? this.names.get(name.toLowerCase()) : undefined;

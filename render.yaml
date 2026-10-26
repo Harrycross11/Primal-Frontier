@@ -1,4 +1,7 @@
 # One-click hosting on Render (render.com): New > Blueprint > pick this repo.
+# The free web service's own disk is wiped whenever it sleeps or restarts, so accounts and the
+# world are kept in a Postgres database named by DATABASE_URL. See docs/hosting.md for setting
+# one up; without it the server still runs, but turns new accounts away rather than lose them.
 services:
   - type: web
     name: primal-frontier
@@ -7,3 +10,8 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
+    envVars:
+      # A Postgres connection string from a database that doesn't expire (docs/hosting.md).
+      # Entered in the Render dashboard, never in this file.
+      - key: DATABASE_URL
+        sync: false

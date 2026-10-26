@@ -655,9 +655,6 @@
       #map-canvas { display: block; width: min(78vh, 86vw); height: min(78vh, 86vw); border-radius: 6px; image-rendering: auto; }
       .map-key { margin-top: 8px; font-size: 12px; text-align: center; }
       .map-key .pet { color: #c0502e; }
-      #disconnected { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7);
-        font-size: 20px; font-weight: 700; }
-      #disconnected[hidden] { display: none; }
       /* ---------- In-game theme: the main menu's flat, dark panels and rust accent ---------- */
       :root { --panel: rgba(13, 12, 10, 0.8); --accent: #c9562a; --ink: #ebe6da; }
       html, body { font-family: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif; }
@@ -740,7 +737,6 @@
       #code button { background: transparent; border: 1px solid rgba(235,230,218,.25); color: var(--bone); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
       .pickup { font-weight: 600; }
       .pickup .n { color: #9fca6a; }
-      #disconnected { background: rgba(8,7,6,.86); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; }
       .map-key { display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; margin-top: 10px; font-size: 12px; color: var(--muted); font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
       .map-key span { display: inline-flex; align-items: center; gap: 7px; }
       .map-key i { display: inline-block; width: 10px; height: 10px; border: 1.5px solid #141210; }
@@ -763,9 +759,74 @@
       .map-key .k-mark { background: #ebe6da; box-shadow: inset 0 0 0 2px #ebe6da, inset 0 0 0 5px #c9562a; }
       .map-key .k-ruin { background: #1c1a18; border-color: #1c1a18; }
       .map-key .k-rad { border-radius: 50%; border: 1.5px dashed #e8be46; background: rgba(214,176,60,.15); }
+
+      /* ---------- Loading and restart screen (the gate): first load, a wipe, a lost connection ---------- */
+      #gate { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px;
+        background: #0d0c0b; color: var(--bone); font-family: 'Barlow', system-ui, sans-serif; font-weight: 500; overflow-y: auto; transition: opacity .7s ease; }
+      #gate[hidden] { display: none; }
+      #gate.closing { opacity: 0; pointer-events: none; }
+      #gate.over { background: rgba(8,7,6,.9); backdrop-filter: blur(6px); }
+      .gate-bg { position: fixed; inset: 0; pointer-events: none; overflow: hidden;
+        background: radial-gradient(120% 80% at 50% 115%, rgba(201,86,42,.20), transparent 60%), radial-gradient(90% 60% at 50% -20%, rgba(214,176,106,.07), transparent 60%); }
+      .gate-bg svg { position: absolute; left: 50%; top: 50%; width: min(130vh, 150vw); height: min(130vh, 150vw); transform: translate(-50%, -50%); color: rgba(235,230,218,.025); }
+      .gate-card { position: relative; width: min(460px, 100%); }
+      .gate-brand { display: flex; align-items: center; gap: 14px; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: clamp(30px, 7vw, 44px); letter-spacing: .34em; }
+      .gate-brand svg { width: 1.05em; height: 1.05em; flex: none; color: var(--rust); }
+      .gate-kicker { margin-top: 26px; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 13px; letter-spacing: .26em; text-transform: uppercase; color: var(--rust-hi); }
+      #gate h1 { margin: 6px 0 0; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: clamp(26px, 6vw, 34px); letter-spacing: .08em; text-transform: uppercase; line-height: 1.05; }
+      #gate-text { margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+      #gate-text:empty { display: none; }
+      .gate-steps { list-style: none; margin: 22px 0 0; padding: 0; border-top: 1px solid var(--line); }
+      .gate-steps li { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; color: var(--muted); }
+      .gate-steps li i { width: 10px; height: 10px; justify-self: center; border: 1.5px solid rgba(235,230,218,.3); transform: rotate(45deg); }
+      .gate-steps li small { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+      .gate-steps li.run { color: var(--bone); }
+      .gate-steps li.run i { border-color: var(--rust-hi); animation: gate-spin 1.4s linear infinite; }
+      .gate-steps li.done { color: var(--bone); }
+      .gate-steps li.done i { background: var(--bone); border-color: var(--bone); }
+      .gate-steps li.fail { color: #e48a6e; }
+      .gate-steps li.fail i { background: #e48a6e; border-color: #e48a6e; }
+      .gate-steps li.warn small { color: var(--gold); }
+      @keyframes gate-spin { to { transform: rotate(405deg); } }
+      .gate-bar { position: relative; height: 3px; margin-top: 22px; background: rgba(235,230,218,.12); overflow: hidden; }
+      #gate-fill { display: block; height: 100%; width: 0; background: var(--rust); transition: width .3s ease; }
+      .gate-bar.busy #gate-fill { width: 34% !important; animation: gate-sweep 1.5s ease-in-out infinite; }
+      @keyframes gate-sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+      .gate-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 13px; letter-spacing: .16em;
+        text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; }
+      #gate-pct { color: var(--bone); }
+      .gate-actions { display: flex; gap: 10px; margin-top: 20px; }
+      .gate-actions[hidden] { display: none; }
+      .gate-actions button { flex: 1; height: 48px; border: 0; background: var(--rust); color: #fff; cursor: pointer; font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600;
+        letter-spacing: .24em; text-transform: uppercase; }
+      .gate-actions button:hover { background: var(--rust-hi); }
+      .gate-actions button.ghost { background: none; border: 1px solid rgba(235,230,218,.25); color: var(--bone); font-size: 15px; letter-spacing: .2em; }
+      .gate-actions button.ghost:hover { border-color: var(--bone); background: none; }
+      .gate-actions button[hidden] { display: none; }
+      #gate-tip { position: relative; width: min(460px, 100%); margin-top: 34px; padding-left: 14px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.5; min-height: 2.6em; transition: opacity .4s; }
+      #gate-tip b { display: block; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--bone); }
+      #gate-tip:empty { visibility: hidden; }
+      @media (max-height: 560px) { .gate-kicker { margin-top: 12px; } .gate-steps { margin-top: 12px; } .gate-steps li { padding: 6px 0; } #gate-tip { display: none; } }
+      #save-warning { margin-top: 10px; padding: 8px 10px; border-left: 2px solid var(--gold); background: rgba(214,176,106,.08); color: var(--bone); font-size: 12px; line-height: 1.45; }
+      #save-warning[hidden] { display: none; }
     </style>
   </head>
   <body>
+    <!-- Shown from the first paint, before the game's script has even arrived (see gate.ts). -->
+    <div id="gate" role="status" aria-live="polite">
+      <div class="gate-bg"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg></div>
+      <div class="gate-card">
+        <div class="gate-brand"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2.5 35.5 11.2v17.6L20 37.5 4.5 28.8V11.2Z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M20 8.5 27.6 21.4h-5.3v10.8h-4.6V21.4h-5.3Z" fill="currentColor"/></svg>PRIME</div>
+        <div class="gate-kicker" id="gate-kicker">Early access</div>
+        <h1 id="gate-title">Loading the wasteland</h1>
+        <p id="gate-text"></p>
+        <ol class="gate-steps" id="gate-steps"><li class="run"><i></i><span>Reach the server</span><small></small></li><li><i></i><span>Download the world</span><small></small></li><li><i></i><span>Build the wasteland</span><small></small></li></ol>
+        <div class="gate-bar"><span id="gate-fill"></span></div>
+        <div class="gate-meta"><span id="gate-status">Starting</span><span id="gate-pct"></span></div>
+        <div class="gate-actions" id="gate-actions" hidden><button type="button" id="gate-retry">Try again</button><button type="button" class="ghost" id="gate-back">Back to menu</button></div>
+      </div>
+      <div id="gate-tip"></div>
+    </div>
     <div id="game"></div>
 
     <div id="join">
@@ -809,6 +870,7 @@
                 <div id="loading"><div>Loading the wasteland</div><div class="bar"><div id="loading-fill"></div></div></div>
                 <div id="join-error"></div>
                 <div id="account-line"><span id="account-state">Guest on this browser</span><button type="button" class="link" id="account-open">Sign in</button></div>
+                <div id="save-warning" hidden></div>
               </div>
             </div>
           </div>
@@ -1023,7 +1085,6 @@
       </div>
       <div id="tooltip" hidden></div>
       <div id="drag" hidden></div>
-      <div id="disconnected" hidden>Lost connection to the server. Refresh to rejoin.</div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

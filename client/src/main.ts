@@ -58,6 +58,7 @@ import { Guide } from './guide.ts';
 import { EventBanner } from './eventBanner.ts';
 import { countdown, HACK_SECONDS, type LiveEvent } from '../../shared/events.ts';
 import { ViewModel } from './viewModel.ts';
+import { Gate, clock, downloadedMb, health } from './gate.ts';
 import { daylight } from '../../shared/sky.ts';
 
 const RESOURCE_NAMES = {
@@ -129,35 +130,115 @@ function survivorToken(): string | undefined {
   }
 }
 
+// The loading screen is up from the first paint. A reload after a wipe or a lost connection
+// goes straight back into the game once everything is ready.
+const gate = new Gate();
+const rejoin = (() => {
+  try {
+    const why = sessionStorage.getItem('pf-rejoin');
+    sessionStorage.removeItem('pf-rejoin');
+    return why === 'wipe' || why === 'lost' || why === 'fresh' ? why : null;
+  } catch {
+    return null;
+  }
+})();
+const BOOT_STEPS = ['Reach the server', 'Download the world', 'Build the wasteland'];
+gate.show(
+  rejoin === 'wipe'
+    ? { kicker: 'Fresh wipe', title: 'Entering the new world', text: 'A new month, a new wasteland. Your coins, packs and season pass came with you.', steps: [...BOOT_STEPS, 'Join the new world'] }
+    : rejoin === 'lost'
+      ? { kicker: 'Back online', title: 'Rejoining the wasteland', text: 'Your survivor is where you left them.', steps: [...BOOT_STEPS, 'Rejoin'] }
+      : rejoin === 'fresh'
+        ? { kicker: 'Fresh wipe', title: 'Loading the new world', text: 'A new month, a new wasteland. Your coins, packs and season pass came with you.', steps: BOOT_STEPS }
+        : { kicker: 'Early access', title: 'Loading the wasteland', steps: BOOT_STEPS },
+);
+/** How far each part of getting ready has come, 0 to 1. */
+const boot = { server: 0, models: 0, world: 0, done: false };
+const bootProgress = () => !boot.done && gate.progress(boot.server * 0.1 + boot.models * 0.75 + boot.world * 0.15);
+gate.step(0, 'run');
+gate.step(1, 'run');
+gate.status('Connecting');
+
 // Start loading the scanned models straight away; joining waits for them.
-const modelsReady = loadModels((done, total) => hud.setLoading(done, total));
+const modelsReady = loadModels((done, total, failed) => {
+  hud.setLoading(done, total);
+  boot.models = total ? done / total : 1;
+  const finished = done >= total;
+  gate.step(1, finished ? (failed ? 'warn' : 'done') : 'run', failed ? `${failed} missing: stand-ins used` : finished ? `${downloadedMb().toFixed(1)} MB` : `${done} / ${total} · ${downloadedMb().toFixed(1)} MB`);
+  if (finished && boot.server) gate.step(2, 'run');
+  if (!finished && boot.server) gate.status('Downloading');
+  bootProgress();
+});
+// A world that is slow to draw its first frame (a weak graphics chip) doesn't hold the menu back for ever.
+modelsReady.then(() => setTimeout(finishBoot, 45_000));
 const picker = new LookPicker();
 const lobby = new Lobby();
 /** The live world behind the main menu, built once the server says which world it is. */
 let stage: MenuStage | null = null;
 let staging = false;
 picker.onChange = (look) => stage?.setLook(look);
+/** When the world being played began, to tell a fresh world (after a wipe) from the same one. */
+let worldStartedAt: string | null = null;
+/** In the game rather than the menu. */
+let playing = false;
+
+/** The menu's world has drawn its first frame (or can't be drawn): the loading screen gives way. */
+function finishBoot() {
+  if (boot.done || !boot.server) return;
+  boot.world = 1;
+  bootProgress();
+  boot.done = true;
+  gate.step(2, stage ? 'done' : 'warn', stage ? '' : 'plain background');
+  gate.status('Ready');
+  if (rejoin !== 'wipe' && rejoin !== 'lost') {
+    gate.close();
+    return;
+  }
+  // Straight back in, under the same name and look; the gate goes once the world is joined.
+  gate.step(3, 'run');
+  gate.status('Joining');
+  (document.getElementById('play') as HTMLButtonElement).click();
+}
+lobby.onLive = finishBoot;
 
 // The main menu talks to the server before you play: your coins, objectives and the store.
 let net = new Net();
 const lobbyMessages = (m: ServerMessage) => {
   if (m.t === 'lobby') {
-    lobby.update(m.account, m.online, m.max, m.wipeIn);
+    lobby.update(m.account, m.online, m.max, m.wipeIn, m.saving);
+    if (m.startedAt) worldStartedAt = m.startedAt;
+    if (!boot.server) {
+      boot.server = 1;
+      gate.step(0, 'done', `${m.online} / ${m.max} online`);
+      gate.status(boot.models < 1 ? 'Downloading' : 'Building');
+      if (boot.models >= 1) gate.step(2, 'run');
+      bootProgress();
+    }
     if (!staging) {
       staging = true;
       const { seed, now } = m;
       modelsReady.then(() => {
+        gate.step(2, 'run');
+        gate.status('Building');
         try {
           stage = new MenuStage(seed, now, picker.look, lobby.car);
           lobby.attach(stage);
           (window as unknown as { __menu: MenuStage }).__menu = stage;
         } catch (e) {
-          // No WebGL, say: the menu still works over a plain background.
+          // No WebGL, say: the game can't be played, but the menu still works over a plain background.
           console.warn('menu stage failed', e);
+          gate.step(2, 'fail', '3D graphics unavailable');
+          gate.fail(
+            'Graphics couldn\'t start',
+            'PRIME needs 3D graphics (WebGL). Turn on hardware acceleration in your browser (Chrome: Settings > System > "Use graphics acceleration when available"), restart the browser and try again.',
+            () => location.reload(),
+            { label: 'Open the menu', go: () => gate.close() },
+          );
         }
       });
     }
   }
+  if (m.t === 'wipe') serverGone('wipe');
   if (m.t === 'notice') lobby.toast(m.text);
   if (m.t === 'authError') lobby.authError(m.text);
   if (m.t === 'signedIn') {
@@ -171,7 +252,6 @@ const lobbyMessages = (m: ServerMessage) => {
     net.send({ t: 'hello', token: survivorToken() });
   }
 };
-net.onMessage = lobbyMessages;
 lobby.onBuy = (pack) => net.send({ t: 'buy', pack, token: survivorToken() });
 lobby.onWearTitle = (id) => net.send({ t: 'wearTitle', id, token: survivorToken() });
 lobby.onOwned = (owned) => picker.setOwned(owned);
@@ -186,24 +266,80 @@ lobby.onSignOut = () => {
   lobby.toast('Signed out. Sign in again to get your survivor back.');
   net.send({ t: 'hello', token: survivorToken() });
 };
-net
-  .opened()
-  .then(() => net.send({ t: 'hello', token: survivorToken() }))
-  .catch(() => lobby.update(null));
+
+/** A fresh connection for the menu. */
+function lobbyNet() {
+  net = new Net();
+  net.onMessage = lobbyMessages;
+  // Dropped while in the menu (the server restarting, say): quietly connect again.
+  net.onClose = () => {
+    if (playing || gone || !boot.server) return;
+    lobby.offline();
+    setTimeout(() => !playing && connectLobby(lobbyNet()), 3000);
+  };
+  return net;
+}
+
+/** Says hello on the menu's connection, trying a few times before putting up an error with a retry. */
+function connectLobby(conn: Net, attempt = 0) {
+  let failed = false;
+  // No connection, a connection dropped before the server answered, or no answer at all.
+  const fail = () => {
+    if (failed || boot.server) return;
+    failed = true;
+    lobby.update(null);
+    if (attempt < 3) {
+      const wait = [2, 4, 8][attempt];
+      gate.step(0, 'run', `try ${attempt + 2} of 4`);
+      gate.status(`Not answering · again in ${wait}s`);
+      setTimeout(() => connectLobby(lobbyNet(), attempt + 1), wait * 1000);
+      return;
+    }
+    gate.step(0, 'fail', 'no answer');
+    gate.status('No answer after 4 tries');
+    gate.fail(
+      'Can\'t reach the server',
+      navigator.onLine === false
+        ? 'Your device seems to be offline. Check your internet connection and try again.'
+        : 'It may be restarting, or asleep (a free server takes up to a minute to wake up). Your survivor and account are safe.',
+      () => {
+        gate.step(0, 'run', '');
+        gate.status('Connecting');
+        connectLobby(lobbyNet());
+      },
+    );
+  };
+  const closed = conn.onClose;
+  conn.onClose = () => {
+    closed();
+    fail();
+  };
+  setTimeout(fail, 20_000);
+  conn
+    .opened()
+    .then(() => conn.send({ t: 'hello', token: survivorToken() }))
+    .catch(fail);
+}
+connectLobby(lobbyNet());
 // Keep the server count and objectives fresh while the menu is open.
 const lobbyTimer = setInterval(() => net.send({ t: 'hello', token: survivorToken() }), 20000);
+
+/** Couldn't join: back to the menu, saying why. */
+function joinFailed(text: string) {
+  hud.showJoinError(text);
+  gate.close();
+}
 
 hud.onPlay(async (name) => {
   try {
     await net.opened();
   } catch {
     // The menu's connection dropped: try a fresh one.
-    net = new Net();
-    net.onMessage = lobbyMessages;
+    lobbyNet();
     try {
       await net.opened();
     } catch (e) {
-      hud.showJoinError((e as Error).message);
+      joinFailed((e as Error).message);
       return;
     }
   }
@@ -211,19 +347,21 @@ hud.onPlay(async (name) => {
   // until they do (see `lateModels` in startGame).
   await modelsReady;
   net.send({ t: 'join', name, look: picker.look, token: survivorToken() });
-  const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }>>((resolve) => {
+  const welcome = await new Promise<Extract<ServerMessage, { t: 'welcome' } | { t: 'full' }> | null>((resolve) => {
     net.onMessage = (m) => {
       if (m.t === 'welcome' || m.t === 'full') resolve(m);
       else lobbyMessages(m);
     };
+    // The connection may drop before the answer comes.
+    net.onClose = () => resolve(null);
   });
-  if (welcome.t === 'full') {
-    hud.showJoinError('This server is full (8 players). Try again later.');
+  if (!welcome || welcome.t === 'full') {
+    joinFailed(welcome ? 'This server is full (8 players). Try again later.' : 'Lost the server while joining. Try again in a moment.');
     // The server closes a full connection; the menu needs a new one.
-    net = new Net();
-    net.onMessage = lobbyMessages;
+    connectLobby(lobbyNet());
     return;
   }
+  playing = true;
   clearInterval(lobbyTimer);
   await modelsReady;
   hud.hideJoin();
@@ -232,7 +370,77 @@ hud.onPlay(async (name) => {
   if (!ready) stage?.dispose();
   stage = null;
   startGame(net, welcome, ready);
+  if (rejoin === 'wipe' || rejoin === 'lost') gate.step(3, 'done');
+  gate.close();
 });
+
+/** How long to wait for a server that went away before saying it may be down. */
+const GIVE_UP = 3 * 60_000;
+let gone = false;
+
+/**
+ * The server is wiping the world, or the connection dropped: a screen over everything waits for
+ * the server to come back, then reloads into the new world (or back to the same survivor).
+ */
+function serverGone(why: 'wipe' | 'lost') {
+  if (gone) return;
+  gone = true;
+  document.exitPointerLock?.();
+  gate.show(
+    why === 'wipe'
+      ? {
+          kicker: 'Monthly wipe',
+          title: 'The world is restarting',
+          text: 'This world\'s month is up and the server is making a fresh one. Everyone starts again with nothing; your coins, packs and season pass carry over.',
+          steps: ['Close the old world', 'Wait for the server to restart', 'Load the new world'],
+        }
+      : { kicker: 'Connection lost', title: 'Reconnecting', text: 'Your survivor stays in the world, asleep, until you are back.', steps: ['Lost the server', 'Reach the server again', 'Rejoin'] },
+    playing,
+  );
+  gate.step(0, 'done');
+  gate.step(1, 'run');
+  gate.progress(null);
+  const since = performance.now();
+  let tries = 0;
+  const poll = async () => {
+    tries++;
+    gate.status(`${navigator.onLine === false ? 'You are offline' : 'Waiting'} · try ${tries} · ${clock(performance.now() - since)}`);
+    const up = await health();
+    // After a wipe the old server answers for a few seconds more: wait for the new world.
+    if (up && (why === 'lost' || up.startedAt !== worldStartedAt)) {
+      const fresh = !!worldStartedAt && up.startedAt !== worldStartedAt;
+      gate.step(1, 'done', clock(performance.now() - since));
+      gate.step(2, 'run');
+      gate.progress(1);
+      gate.say(fresh ? 'New world ready' : 'Server is back', fresh ? 'Loading the fresh wasteland.' : 'Loading your survivor.');
+      gate.status('Loading');
+      try {
+        // Players go straight back in; someone who was in the menu lands on it again.
+        sessionStorage.setItem('pf-rejoin', !playing ? (fresh ? 'fresh' : '') : fresh ? 'wipe' : 'lost');
+      } catch {
+        /* storage unavailable: the reload lands on the menu instead */
+      }
+      setTimeout(() => location.reload(), 700);
+      return;
+    }
+    if (performance.now() - since > GIVE_UP) {
+      gate.step(1, 'fail', 'no answer');
+      gate.status(`No answer for ${clock(GIVE_UP)}`);
+      gate.fail(
+        'The server hasn\'t come back',
+        'It is taking longer than it should, so it may be down for a while. Your survivor, coins and account are safe.',
+        () => {
+          gone = false;
+          serverGone(why);
+        },
+        { label: 'Back to menu', go: () => location.reload() },
+      );
+      return;
+    }
+    setTimeout(poll, 3000);
+  };
+  setTimeout(poll, why === 'wipe' ? 4000 : 1000);
+}
 
 function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, ready: ReturnType<MenuStage['handOver']> | null) {
   const world = ready?.world ?? new World(welcome.seed);
@@ -735,6 +943,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       case 'notice':
         hud.notice(m.text);
         break;
+      case 'wipe':
+        serverGone('wipe');
+        break;
       case 'event': {
         const was = liveEvent;
         liveEvent = m.event;
@@ -797,7 +1008,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       }
     }
   };
-  net.onClose = () => hud.disconnected();
+  net.onClose = () => serverGone('lost');
 
   /** Sounds, dust and chips for a building piece going up, taking a hit or breaking. */
   function pieceEffects(old: Piece | null, piece: Piece | null) {

@@ -21,6 +21,8 @@ try {
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.addInitScript(() => localStorage.setItem('pf-quality', 'low'));
   await page.goto(`http://localhost:${PORT}`);
+  // The loading screen covers the menu until the world is ready.
+  await page.waitForFunction(() => document.getElementById('gate')?.hidden, null, { timeout: 300000, polling: 500 });
   await page.fill('#name', 'Ash');
   await page.click('#play');
   await page.waitForFunction(() => (window as any).__pf !== undefined, null, { timeout: 120000 });

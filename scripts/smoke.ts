@@ -30,6 +30,8 @@ async function joinAs(name: string): Promise<Page> {
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && errors.push(`${name}: ${m.text()}`));
   await page.goto(URL);
+  // The loading screen covers the menu until the world is ready.
+  await page.waitForFunction(() => document.getElementById('gate')?.hidden, null, { timeout: 300000, polling: 500 });
   await page.fill('#name', name);
   await page.click('#play');
   await page.waitForFunction(() => (window as any).__pf !== undefined, null, { timeout: 120000 });

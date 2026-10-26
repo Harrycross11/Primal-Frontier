@@ -356,19 +356,23 @@ const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 
 /**
  * Loads the models the menu and the world need; resolves even if some fail, so a missing file
- * never stops the game. `progress` hears how many of them have finished. The guns and tools
+ * never stops the game. `progress` hears how many of them have finished, and how many failed. The guns and tools
  * then load in the background while the menu is open: `lateModels` resolves once they have.
  */
-export async function loadModels(progress?: (done: number, total: number) => void): Promise<void> {
+export async function loadModels(progress?: (done: number, total: number, failed: number) => void): Promise<void> {
   // The files are Draco-compressed (see scripts/compress-assets.py); the decoder is served
   // from /draco.
   const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
-  const warn = (n: string) => (e: unknown) => console.warn(`model ${n} failed to load`, e);
+  let failed = 0;
+  const warn = (n: string) => (e: unknown) => {
+    failed++;
+    console.warn(`model ${n} failed to load`, e);
+  };
   const names = Object.keys(FIT);
   const jobs = [lodReady, ...names.filter((n) => !isLate(n)).map((n) => load(loader, n).catch(warn(n))), ...CHARACTERS.filter((n) => !LATE_CHARACTERS.includes(n)).map((n) => loadCharacter(loader, n).catch(warn(n)))];
   let done = 0;
-  progress?.(0, jobs.length);
-  await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length))));
+  progress?.(0, jobs.length, 0);
+  await Promise.all(jobs.map((j) => j.then(() => progress?.(++done, jobs.length, failed))));
   // A few at a time, so they never crowd out anything the menu fetches.
   // The saddle goes first: tamed animals put it on as soon as they arrive.
   const late = ['gear-saddle', ...names.filter((n) => LATE_BUILT.test(n)), ...LATE_CHARACTERS, ...names.filter((n) => isLate(n) && !LATE_BUILT.test(n) && n !== 'gear-saddle')];
