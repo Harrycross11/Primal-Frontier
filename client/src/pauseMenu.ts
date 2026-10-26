@@ -17,6 +17,9 @@ export class PauseMenu {
   /** Wants fresh objectives from the server. */
   onOpen: () => void = () => {};
   quality: Quality = 'high';
+  onLook: (speed: number) => void = () => {};
+  /** Look speed: a multiplier on how fast the mouse or right stick turns the view. */
+  look = 1;
 
   constructor() {
     $('pause-resume').onclick = () => this.onResume();
@@ -26,6 +29,13 @@ export class PauseMenu {
       b.onclick = () => {
         this.quality = b.dataset.q as Quality;
         this.onQuality(this.quality);
+        this.render();
+      };
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#pause-look button')) {
+      b.onclick = () => {
+        this.look = Number(b.dataset.look);
+        this.onLook(this.look);
         this.render();
       };
     }
@@ -67,5 +77,6 @@ export class PauseMenu {
     $('pause-season-fill').style.width = `${Math.round(season.fill * 100)}%`;
     $('pause-season-xp').textContent = season.xp;
     for (const b of document.querySelectorAll<HTMLButtonElement>('#pause-quality button')) b.classList.toggle('on', b.dataset.q === this.quality);
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#pause-look button')) b.classList.toggle('on', Number(b.dataset.look) === this.look);
   }
 }

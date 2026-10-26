@@ -3,6 +3,7 @@
 // how far you got in this browser, and J hides it for good.
 
 import { countItem, type Slots } from '../../shared/items.ts';
+import { pad } from './gamepad.ts';
 
 /** Things you did that a step may be waiting for. */
 export type GuideEvent = 'built' | 'bagPlaced' | 'crateLooted';
@@ -79,6 +80,11 @@ export class Guide {
     this.render();
   }
 
+  /** Redraws the hint, e.g. when a controller is picked up and the buttons it names change. */
+  refresh() {
+    this.render();
+  }
+
   inventory(slots: Slots) {
     this.slots = slots;
     this.advance();
@@ -117,7 +123,7 @@ export class Guide {
     const at = this.step;
     const s = STEPS[at];
     const progress = s.count && s.goal ? `${Math.min(s.goal, s.count(this.slots))} / ${s.goal}` : '';
-    const key = `${at}|${progress}`;
+    const key = `${at}|${progress}|${pad.active}`;
     if (key === this.shown) return;
     this.shown = key;
     this.el.hidden = false;
@@ -136,7 +142,7 @@ export class Guide {
     }
     const how = document.createElement('div');
     how.className = 'guide-how';
-    how.textContent = s.how;
+    how.textContent = pad.words(s.how);
     const hide = document.createElement('div');
     hide.className = 'guide-hide';
     hide.innerHTML = '<kbd>J</kbd> Hide guide';

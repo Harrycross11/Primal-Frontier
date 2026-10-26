@@ -17,6 +17,7 @@ import { terrainHeight } from '../../shared/terrain.ts';
 import { axes, touchesVehicle, type VehicleInfo, type VehicleState } from '../../shared/vehicles.ts';
 import { RESOURCE_INFO, type ResourceNode } from '../../shared/world.ts';
 import type { World } from './world.ts';
+import { pad } from './gamepad.ts';
 
 /** Ledges up to this height are stepped onto automatically. */
 const STEP = 0.55;
@@ -57,11 +58,24 @@ export class Controller {
     addEventListener('blur', () => this.keys.clear());
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
-      if (this.car) this.camYaw = THREE.MathUtils.clamp(this.camYaw - e.movementX * 0.0025 * this.sensitivity, -2.6, 2.6);
-      else this.yaw -= e.movementX * 0.0025 * this.sensitivity;
-      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0025 * this.sensitivity, -1.3, 1.1);
+      const k = 0.0025 * this.sensitivity * this.lookSpeed;
+      if (this.car) this.camYaw = THREE.MathUtils.clamp(this.camYaw - e.movementX * k, -2.6, 2.6);
+      else this.yaw -= e.movementX * k;
+      this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * k, -1.3, 1.1);
     });
   }
+
+  /** The right stick turns the view at up to this many radians a second. */
+  private padLook(dt: number) {
+    if (!pad.look.x && !pad.look.y) return;
+    const turn = 3.2 * this.sensitivity * this.lookSpeed * dt;
+    if (this.car) this.camYaw = THREE.MathUtils.clamp(this.camYaw - pad.look.x * turn, -2.6, 2.6);
+    else this.yaw -= pad.look.x * turn;
+    this.pitch = THREE.MathUtils.clamp(this.pitch - pad.look.y * turn * 0.7, -1.3, 1.1);
+  }
+
+  /** The player's look speed setting (pause menu), for the mouse and the right stick. */
+  lookSpeed = 1;
 
   /** Mouse look speed multiplier, lowered while aiming down sights. */
   sensitivity = 1;
@@ -76,6 +90,7 @@ export class Controller {
   }
 
   update(dt: number) {
+    this.padLook(dt);
     if (this.car?.flies) return this.fly(dt, this.car, this.car.flies);
     if (this.car) return this.drive(dt, this.car);
     this.camYaw = 0;
@@ -85,6 +100,10 @@ export class Controller {
     if (this.keys.has('KeyS')) fz -= 1;
     if (this.keys.has('KeyA')) fx -= 1;
     if (this.keys.has('KeyD')) fx += 1;
+    if (pad.move.x || pad.move.y) {
+      fx = pad.move.x;
+      fz = pad.move.y;
+    }
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(-forward.z, 0, forward.x);
@@ -105,7 +124,9 @@ export class Controller {
     if (this.moving) {
       const m = this.mount;
       const speed = this.keys.has('ShiftLeft') ? (m?.sprint ?? PLAYER_SPRINT) : (m?.walk ?? PLAYER_SPEED);
-      dir.normalize().multiplyScalar(speed * dt);
+      // A half-pushed stick walks slower; keys are always full speed.
+      const push = pad.move.x || pad.move.y ? Math.min(1, Math.hypot(fx, fz) * 1.25) : 1;
+      dir.normalize().multiplyScalar(speed * dt * push);
       // Sub-steps stop fast movement from tunnelling through thin walls.
       const steps = Math.ceil(dir.length() / 0.1);
       // Anything you are already inside (woken up in a wall, a car wreck or a hut) lets you
@@ -185,8 +206,8 @@ export class Controller {
    * go). The car stops dead against walls, trees, rocks and other cars.
    */
   private drive(dt: number, car: VehicleInfo & { fuel: () => number }) {
-    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
-    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0) || pad.move.y;
+    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0) || -pad.move.x;
     const fuel = car.fuel() > 0;
     let v = this.carSpeed;
     if (throttle > 0 && fuel) v = v < 0 ? v + car.accel * 2 * dt : Math.min(car.top, v + car.accel * dt);
@@ -232,8 +253,8 @@ export class Controller {
    * It stops against walls, rocks and trees, and a hard landing is reported as a crash.
    */
   private fly(dt: number, car: VehicleInfo & { fuel: () => number }, flies: NonNullable<VehicleInfo['flies']>) {
-    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
-    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const throttle = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0) || pad.move.y;
+    const steer = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0) || -pad.move.x;
     const lift = (this.keys.has('Space') ? 1 : 0) - (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyC') ? 1 : 0);
     const fuel = car.fuel() > 0;
     const { fx: sx, fz: sz, rx: srx, rz: srz } = axes(this.yaw);

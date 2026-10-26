@@ -116,8 +116,8 @@
       .pack .chips { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 5px; z-index: 1; }
       .pack .chips i { width: 14px; height: 14px; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
       .pack .info { padding: 14px 16px 16px; display: flex; flex-direction: column; flex: 1; }
-      .pack .tier { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); }
-      .pack.legend .tier { color: var(--gold); }
+      .pack .pack-tier { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); }
+      .pack.legend .pack-tier { color: var(--gold); }
       .pack .name { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; line-height: 1.1; margin-top: 2px; }
       .pack .blurb { font-size: 13px; color: var(--muted); margin-top: 4px; min-height: 34px; }
       .pack .buy { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -459,6 +459,7 @@
       .seg button:hover { color: var(--bone); }
       .seg button.on { background: var(--bone); color: #141210; }
       .pause-note { font-size: 13px; color: var(--muted); margin-top: 14px; }
+      #pause .pause-sub { margin-top: 26px; }
       .keys { width: 100%; border-collapse: collapse; font-size: 14px; }
       .keys td { padding: 8px 0; border-top: 1px solid var(--line); }
       .keys tr:first-child td { border-top: 0; }
@@ -809,6 +810,71 @@
       @media (max-height: 560px) { .gate-kicker { margin-top: 12px; } .gate-steps { margin-top: 12px; } .gate-steps li { padding: 6px 0; } #gate-tip { display: none; } }
       #save-warning { margin-top: 10px; padding: 8px 10px; border-left: 2px solid var(--gold); background: rgba(214,176,106,.08); color: var(--bone); font-size: 12px; line-height: 1.45; }
       #save-warning[hidden] { display: none; }
+
+      /* ---------- Short screens and stacking ---------- */
+      /* On 720p laptops the challenges list shrinks and scrolls, so Play and Sign in stay in view. */
+      @media (min-width: 761px) {
+        .page.play .side { overflow: hidden; }
+        .page.play .side .objectives { flex: 0 1 auto; min-height: 120px; overflow-y: auto; }
+        .page.play .side .play-box { flex: none; }
+      }
+      @media (min-width: 761px) and (max-height: 800px) {
+        .page { padding-top: 16px; padding-bottom: 18px; }
+        .objective { padding: 6px 0; }
+        .objective .track { margin-top: 5px; }
+        .objective .count { margin-top: 2px; }
+        .mode-card { padding: 12px 20px 10px; }
+        .mode-card .mode { font-size: 23px; }
+        .play-fields { padding: 8px 20px 14px; }
+        #play { height: 50px; margin-top: 10px; }
+      }
+      /* The inventory sits over the guide, compass and event banner instead of under them. */
+      #screen { z-index: 8; }
+
+      /* ---------- Controller ---------- */
+      /* The highlight: four corner marks, like the corners of a sight picture, that glide to the
+         chosen button. */
+      #pad-ring { position: fixed; z-index: 1000; pointer-events: none; display: none; --c: #e8773f; --l: 11px; --w: 2px;
+        background:
+          linear-gradient(var(--c), var(--c)) left top / var(--l) var(--w) no-repeat,
+          linear-gradient(var(--c), var(--c)) left top / var(--w) var(--l) no-repeat,
+          linear-gradient(var(--c), var(--c)) right top / var(--l) var(--w) no-repeat,
+          linear-gradient(var(--c), var(--c)) right top / var(--w) var(--l) no-repeat,
+          linear-gradient(var(--c), var(--c)) left bottom / var(--l) var(--w) no-repeat,
+          linear-gradient(var(--c), var(--c)) left bottom / var(--w) var(--l) no-repeat,
+          linear-gradient(var(--c), var(--c)) right bottom / var(--l) var(--w) no-repeat,
+          linear-gradient(var(--c), var(--c)) right bottom / var(--w) var(--l) no-repeat;
+        box-shadow: inset 0 0 0 1px rgba(235,230,218,.22), 0 0 18px rgba(232,119,63,.18);
+        transition: left .09s ease-out, top .09s ease-out, width .09s ease-out, height .09s ease-out; }
+      body.pad #pad-ring.on { display: block; }
+      /* Keyboard users get a plain rust outline. */
+      button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #e8773f; outline-offset: 2px; }
+      body.pad button:focus-visible { outline: none; }
+      /* What the buttons do, along the bottom of a menu. */
+      #pad-legend { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 1000; display: none; gap: 22px; padding: 7px 16px;
+        background: rgba(13,12,10,.82); border: 1px solid rgba(235,230,218,.1); pointer-events: none; white-space: nowrap;
+        font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .08em; color: rgba(235,230,218,.86); }
+      body.pad #pad-legend.on { display: flex; }
+      #pad-legend span { display: flex; align-items: center; gap: 6px; }
+      #pad-legend .glyph + .glyph { margin-left: -2px; }
+      /* A pad button: face buttons are round in their usual colours, the rest are small keys. */
+      .glyph { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border: 1px solid rgba(235,230,218,.4);
+        background: rgba(235,230,218,.08); color: #ebe6da; font: 700 11px/1 'Barlow', sans-serif; letter-spacing: .02em; vertical-align: -4px; }
+      .glyph.g-a, .glyph.g-b, .glyph.g-x, .glyph.g-y { width: 20px; padding: 0; border-radius: 50%; border-width: 1.5px; background: rgba(13,12,10,.6); }
+      .glyph.g-a { border-color: #7fae5a; color: #9fd07a; }
+      .glyph.g-b { border-color: #c9562a; color: #ec7b4f; }
+      .glyph.g-x { border-color: #5b8fc9; color: #86b4e8; }
+      .glyph.g-y { border-color: #d6b06a; color: #ecc987; }
+      #help .glyph { margin-right: 2px; }
+      #pad-toast { position: fixed; left: 50%; top: 96px; transform: translateX(-50%); z-index: 1001; padding: 10px 18px; background: rgba(13,12,10,.94);
+        border: 1px solid rgba(235,230,218,.12); border-left: 3px solid #c9562a; color: #ebe6da; font: 500 14px 'Barlow', sans-serif;
+        opacity: 0; transition: opacity .3s; pointer-events: none; max-width: calc(100vw - 32px); }
+      #pad-toast.show { opacity: 1; }
+      /* The map card hugs the map; its key wraps under it instead of stretching the card. */
+      .map-card { width: min-content; }
+      #help .pad-help, body.pad #help .mouse-help, body.pad #guide .guide-hide { display: none; }
+      body.pad #help .pad-help { display: block; }
+      @media (prefers-reduced-motion: reduce) { #pad-ring { transition: none; } }
     </style>
   </head>
   <body>
@@ -1015,10 +1081,13 @@
             <h3>Graphics</h3>
             <div id="pause-quality" class="seg"><button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button></div>
             <p class="pause-note">Lower settings run faster on older computers. <kbd>O</kbd> also switches in game.</p>
+            <h3 class="pause-sub">Look speed</h3>
+            <div id="pause-look" class="seg"><button data-look="0.6">Slow</button><button data-look="1">Normal</button><button data-look="1.5">Fast</button><button data-look="2.2">Fastest</button></div>
+            <p class="pause-note">How fast the mouse or the right stick turns your view.</p>
           </div>
           <div class="panel-dark pause-page" data-page="controls" hidden>
             <h3>Controls</h3>
-            <table class="keys">
+            <table class="keys" id="keys-table">
               <tr><td>Move · sprint · jump</td><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>Shift</kbd> · <kbd>Space</kbd></td></tr>
               <tr><td>Hit, gather, build, shoot</td><td>Left click</td></tr>
               <tr><td>Aim · next building piece</td><td>Right click</td></tr>
@@ -1038,7 +1107,7 @@
       </div>
       <div id="notice"></div>
       <div id="help-mini"><kbd>H</kbd> Controls</div>
-      <div id="help" hidden>
+      <div id="help" hidden><div class="mouse-help">
         <kbd>H</kbd> hide · <kbd>J</kbd> hide guide · <kbd>O</kbd> graphics: <b id="quality">High</b><br />
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br />
         <kbd>1</kbd>–<kbd>6</kbd> belt · <kbd>Tab</kbd> inventory and crafting · <kbd>M</kbd> map · <kbd>V</kbd> first or third person<br />
@@ -1049,6 +1118,7 @@
         <kbd>E</kbd> on a workbench: tech tree, learn new things for scrap<br />
         Team: <kbd>T</kbd> invite who you look at · <kbd>Y</kbd> join · <kbd>L</kbd> leave<br />
         <kbd>P</kbd> paint a car, wall or gun, or swap a car's model
+        </div><div class="pad-help"></div>
       </div>
       <div id="screen" hidden>
         <div class="panel" id="inventory-panel">

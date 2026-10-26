@@ -59,6 +59,7 @@ import { EventBanner } from './eventBanner.ts';
 import { countdown, HACK_SECONDS, type LiveEvent } from '../../shared/events.ts';
 import { ViewModel } from './viewModel.ts';
 import { Gate, clock, downloadedMb, health } from './gate.ts';
+import { pad } from './gamepad.ts';
 import { daylight } from '../../shared/sky.ts';
 
 const RESOURCE_NAMES = {
@@ -118,6 +119,42 @@ interface Remote {
 }
 
 const hud = new Hud();
+// With a controller in hand, the controls panel and hints name its buttons instead.
+{
+  const g = (n: Parameters<typeof pad.glyph>[0]) => pad.glyph(n);
+  pad.swap(document.querySelector<HTMLElement>('#help .pad-help'), () =>
+    [
+      `${g('DOWN')} hide · ${g('LS')} click to sprint · ${g('A')} jump · ${g('RS')} first or third person`,
+      `${g('RT')} hit, gather, build, shoot · ${g('LT')} aim, or pick a building piece`,
+      `${g('LB')}${g('RB')} belt · ${g('VIEW')} inventory and crafting · ${g('UP')} map`,
+      `${g('Y')} open, pick, drive, ride · ${g('X')} reload, or building material · ${g('B')} edit a wall`,
+      `${g('LEFT')} paint · ${g('RIGHT')} invite who you look at to your team · ${g('MENU')} menu`,
+    ].join('<br />'),
+  );
+  const row = (what: string, ...b: Parameters<typeof pad.glyph>[0][]) => `<tr><td>${what}</td><td>${b.map(g).join(' · ')}</td></tr>`;
+  pad.swap(document.getElementById('keys-table'), () =>
+    [
+      row('Move · look', 'LS', 'RS'),
+      row('Sprint (click the stick) · jump', 'LS', 'A'),
+      row('Hit, gather, build, shoot', 'RT'),
+      row('Aim · next building piece', 'LT'),
+      row('Reload · building material', 'X'),
+      row('Belt', 'LB', 'RB'),
+      row('Inventory and crafting', 'VIEW'),
+      row('Use, open, ride, drive', 'Y'),
+      row('Edit a wall', 'B'),
+      row('Paint · swap car model', 'LEFT'),
+      row('Map', 'UP'),
+      row('First or third person', 'RS'),
+      row('Team: invite who you look at', 'RIGHT'),
+      row('Help', 'DOWN'),
+      row('In menus: move · select · back', 'LS', 'A', 'B'),
+    ].join(''),
+  );
+  pad.swap(document.querySelector<HTMLElement>('.map-close'), () => `${g('B')} Close`);
+  pad.swap(document.getElementById('help-mini'), () => `${g('DOWN')} Controls`);
+  pad.swap(document.querySelector<HTMLElement>('#container-panel .move-hint'), () => `${g('A')} moves an item across · ${g('X')} picks it up to put somewhere else`);
+}
 
 /** A private random id kept in this browser, so the server gives back your survivor next time. */
 function survivorToken(): string | undefined {
@@ -513,6 +550,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     hud.notice(text, 3);
     effects.objective();
   });
+  pad.onChange = () => guide.refresh();
   const compassMarks = (): CompassMark[] => {
     const out: CompassMark[] = [...sites];
     const h = home();
@@ -539,6 +577,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const me = new Avatar(welcome.you.color, undefined, welcome.you.look);
   world.scene.add(me.root);
   const canvas = gfx.renderer.domElement;
+  /** Captures the mouse for play, unless a controller is in use (it needs no capture). */
+  const lockMouse = () => {
+    if (pad.active) return;
+    try {
+      (canvas.requestPointerLock?.() as unknown as Promise<void> | undefined)?.catch?.(() => {});
+    } catch {
+      // Not allowed right now (no click yet): the next click on the game captures it.
+    }
+  };
   const controller = new Controller(world, () => resources, canvas);
   controller.teleport(welcome.you.x, welcome.you.y, welcome.you.z);
   me.onStep = (sprint) => effects.footstep(surfaceUnder(controller.position), null, sprint, landUnder(controller.position));
@@ -618,7 +665,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   /** The paint new building pieces go up in. */
   let buildPaint = 0;
   const paintPanel = new PaintPanel();
-  paintPanel.onClose = () => canvas.requestPointerLock?.();
+  paintPanel.onClose = () => lockMouse();
   paintPanel.onLocked = (pack) =>
     hud.notice(PACKS.some((p) => p.id === pack) ? `That comes in the ${PACKS.find((p) => p.id === pack)?.name}: get it in the store on the main menu` : 'That is a season pass reward: climb the pass to unlock it', 3);
   // Coins, store packs and today's objectives.
@@ -629,9 +676,22 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   pause.quality = gfx.quality;
   pause.onResume = () => {
     pause.hide();
-    canvas.requestPointerLock?.();
+    lockMouse();
   };
   pause.onOpen = () => net.send({ t: 'getAccount' });
+  try {
+    pause.look = controller.lookSpeed = Number(localStorage.getItem('pf-look')) || 1;
+  } catch {
+    // Storage unavailable: normal speed.
+  }
+  pause.onLook = (speed) => {
+    controller.lookSpeed = speed;
+    try {
+      localStorage.setItem('pf-look', String(speed));
+    } catch {
+      // Not remembered; it still applies now.
+    }
+  };
   pause.onQuality = (q) => {
     gfx.setQuality(q);
     hud.setQuality(gfx.quality);
@@ -929,12 +989,12 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
           m.by ? `${m.by} killed you${how}.` : m.cause ? SURVIVAL_DEATHS[m.cause] : 'You died.',
           () => {
             net.send({ t: 'respawn' });
-            canvas.requestPointerLock?.();
+            lockMouse();
           },
           bags,
           (bag) => {
             net.send({ t: 'respawn', bag });
-            canvas.requestPointerLock?.();
+            lockMouse();
             bagReadyAt.set(bag, performance.now() + BAG_COOLDOWN * 1000);
           },
         );
@@ -994,7 +1054,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       case 'codeNeeded':
         hud.askCode('This door is locked. Enter its code', (code) => {
           if (code) net.send({ t: 'code', key: m.key, code });
-          canvas.requestPointerLock?.();
+          lockMouse();
         });
         break;
       case 'kill': {
@@ -1074,7 +1134,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   // with tools, place with the building plan or a deployable. Tab opens the inventory.
   canvas.addEventListener('click', () => {
     effects.startAmbience();
-    if (document.pointerLockElement !== canvas && !ui.open) canvas.requestPointerLock?.();
+    if (document.pointerLockElement !== canvas && !ui.open) lockMouse();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('mousedown', (e) => {
@@ -1158,6 +1218,24 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       hud.notice(`Graphics: ${gfx.quality[0].toUpperCase()}${gfx.quality.slice(1)}`);
     }
   });
+  // A controller: the triggers fire and aim (or pick a building piece), the bumpers step along
+  // the belt and Menu pauses. Everything else presses a key (see gamepad.ts).
+  pad.game = {
+    playing: () => !ui.open && !pause.open && !paintPanel.isOpen && !map.open && !hud.codeOpen && !dead,
+    button: (name, down) => {
+      if (name === 'RT') {
+        triggerHeld = down;
+        if (down) primary();
+      }
+      if (name === 'LT') {
+        aiming = down && !!heldGun();
+        if (down && held() === 'buildingPlan') pieceKind = PIECE_KINDS[(PIECE_KINDS.indexOf(pieceKind) + 1) % PIECE_KINDS.length];
+      }
+      if (down && (name === 'LB' || name === 'RB')) selectSlot((ui.active + (name === 'RB' ? 1 : 5)) % 6);
+      if (down && name === 'MENU') pause.showMenu();
+    },
+  };
+  const padWords = (t: { text: string; health?: number }) => (pad.active ? { ...t, text: pad.words(t.text) } : t);
   function selectSlot(n: number) {
     if (n !== ui.active) {
       aiming = false;
@@ -1174,7 +1252,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   }
   function closeScreen() {
     ui.hide();
-    canvas.requestPointerLock?.();
+    lockMouse();
   }
   function workbenchLevel() {
     const p = controller.position;
@@ -1472,7 +1550,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const slot = ui.active;
       return hud.askCode('Pick a 4-digit code for this door', (code) => {
         if (code) net.send({ t: 'lock', key: pieceKey(p), slot, code });
-        canvas.requestPointerLock?.();
+        lockMouse();
       });
     }
     if ((aimPlayer || aimHound || aimVehicle) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
@@ -1843,7 +1921,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (!show) return;
     const paint = buildPaint ? ` · ${PAINTS[buildPaint].name} paint` : '';
     const html = `<b>${PIECE_NAMES[pieceKind]}</b> · ${ITEMS[material].name} (${countItem(slots, material)}, ${PIECE_COST} each)${paint}<br/><small>Right click: foundation, wall, floor, stairs, ramp, roof · R: wood, stone, scrap · P: paint</small>`;
-    if (buildInfo.innerHTML !== html) buildInfo.innerHTML = html;
+    // Compared with what was last written: the page rewrites <br/> as <br>, so innerHTML never matches.
+    const shown = pad.words(html);
+    if (buildInfo.dataset.shown !== shown) buildInfo.innerHTML = buildInfo.dataset.shown = shown;
   }
 
   // Test hooks for the automated smoke test (scripts/smoke.ts).
@@ -2164,7 +2244,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     ui.tick();
     effects.update(dt);
     effects.geiger(dead ? 0 : vitals.level, dt);
-    hud.setTarget(dead ? { text: '' } : describeTarget());
+    hud.setTarget(dead ? { text: '' } : padWords(describeTarget()));
     const stack = slots[ui.active];
     hud.setAmmo(
       gun?.ammo && stack

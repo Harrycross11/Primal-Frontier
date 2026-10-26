@@ -137,6 +137,13 @@ export class Lobby {
         quality();
       });
     }
+    // Esc (or B on a controller) closes the settings or sign-in box, or goes back to Play.
+    addEventListener('keydown', (e) => {
+      if (e.code !== 'Escape' || $('join').hidden) return;
+      if (!$('lobby-account').hidden) $('lobby-account').hidden = true;
+      else if (!settings.hidden) settings.hidden = true;
+      else if (!document.querySelector('#lobby-tabs [data-tab="play"]')?.classList.contains('on')) this.show('play');
+    });
     $('lobby-fullscreen').addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen?.().catch(() => {});
@@ -376,7 +383,7 @@ export class Lobby {
         const has = owned.includes(pack.id);
         const chips = PAINTS.flatMap((p, n) => (p.pack === pack.id ? [`<i style="background:${swatch(n)}"></i>`] : [])).join('');
         card.innerHTML = `<div class="art"><div class="rarity"></div><div class="chips">${chips}</div></div>
-          <div class="info"><div class="tier">${legend ? 'Legendary' : 'Pack'} · 4 finishes</div><div class="name"></div><div class="blurb"></div>
+          <div class="info"><div class="pack-tier">${legend ? 'Legendary' : 'Pack'} · 4 finishes</div><div class="name"></div><div class="blurb"></div>
           <div class="buy"><div class="price"></div><button></button></div></div>`;
         const art = card.querySelector<HTMLElement>('.art')!;
         if (this.art[pack.id]) art.style.backgroundImage = `url(${this.art[pack.id]})`;
