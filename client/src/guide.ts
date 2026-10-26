@@ -3,6 +3,7 @@
 // how far you got in this browser, and J hides it for good.
 
 import { countItem, type Slots } from '../../shared/items.ts';
+import { pad } from './gamepad.ts';
 
 /** Things you did that a step may be waiting for. */
 export type GuideEvent = 'built' | 'bagPlaced' | 'crateLooted';
@@ -136,7 +137,7 @@ export class Guide {
     }
     const how = document.createElement('div');
     how.className = 'guide-how';
-    how.textContent = s.how;
+    how.textContent = pad.words(s.how);
     const hide = document.createElement('div');
     hide.className = 'guide-hide';
     hide.innerHTML = '<kbd>J</kbd> Hide guide';
