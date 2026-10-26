@@ -63,6 +63,7 @@ import { Gate, clock, downloadedMb, health } from './gate.ts';
 import { pad } from './gamepad.ts';
 import { daylight } from '../../shared/sky.ts';
 import { Track } from './track.ts';
+import { groundGaps } from './groundCheck.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -2086,6 +2087,16 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     /** Where the first-person arms' joints are from the eye (x right, y up, -z ahead), to check they reach the grips. */
     viewArms: () => view.joints(camera),
     viewRoot: () => view.root,
+    /** What floats over or sinks into the ground within `range` of you, worst first (see groundCheck.ts). */
+    ground: (range = 60) => {
+      const near = (o: THREE.Object3D) => o.position.distanceTo(controller.position) < range;
+      const objects = [
+        ...[...world.resourceMeshes.values()].filter(near).map((root) => ({ label: `resource ${root.userData.kind}`, root })),
+        ...[...world.deployableMeshes].filter(([, root]) => near(root)).map(([id, root]) => ({ label: `deployable ${world.deployables.get(id)?.kind}`, root })),
+        ...world.landmarkProps.filter((p) => near(p.root)).map((p) => ({ label: `landmark ${p.label}`, root: p.root })),
+      ];
+      return groundGaps(objects, world.seed);
+    },
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
