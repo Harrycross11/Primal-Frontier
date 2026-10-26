@@ -685,14 +685,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   };
   pause.onOpen = () => net.send({ t: 'getAccount' });
   try {
-    pause.look = controller.lookSpeed = Number(localStorage.getItem('pf-look')) || 1;
+    // Kept apart from the survivor's look ('pf-look'), which saving the speed there used to wipe.
+    pause.look = controller.lookSpeed = Number(localStorage.getItem('pf-look-speed')) || 1;
   } catch {
     // Storage unavailable: normal speed.
   }
   pause.onLook = (speed) => {
     controller.lookSpeed = speed;
     try {
-      localStorage.setItem('pf-look', String(speed));
+      localStorage.setItem('pf-look-speed', String(speed));
     } catch {
       // Not remembered; it still applies now.
     }
