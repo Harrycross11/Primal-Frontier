@@ -80,6 +80,11 @@ export class Guide {
     this.render();
   }
 
+  /** Redraws the hint, e.g. when a controller is picked up and the buttons it names change. */
+  refresh() {
+    this.render();
+  }
+
   inventory(slots: Slots) {
     this.slots = slots;
     this.advance();
@@ -118,7 +123,7 @@ export class Guide {
     const at = this.step;
     const s = STEPS[at];
     const progress = s.count && s.goal ? `${Math.min(s.goal, s.count(this.slots))} / ${s.goal}` : '';
-    const key = `${at}|${progress}`;
+    const key = `${at}|${progress}|${pad.active}`;
     if (key === this.shown) return;
     this.shown = key;
     this.el.hidden = false;

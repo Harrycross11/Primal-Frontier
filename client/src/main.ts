@@ -550,6 +550,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     hud.notice(text, 3);
     effects.objective();
   });
+  pad.onChange = () => guide.refresh();
   const compassMarks = (): CompassMark[] => {
     const out: CompassMark[] = [...sites];
     const h = home();
