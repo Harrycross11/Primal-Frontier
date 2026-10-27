@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { ItemId } from '../../shared/items.ts';
 import { ARM_REST, type BoneName } from './survivorMesh.ts';
-import { clothSurface, leatherSurface, rustSurface } from './textures.ts';
+import { clothSurface, leatherSurface, metalSurface, paintedRustSurface, rustSurface } from './textures.ts';
+import { HEAD, scannedWear } from './survivorLook.ts';
 
 export interface ArmourPart {
   bone: BoneName;
@@ -18,7 +19,7 @@ export interface ArmourPart {
 export type HiddenGear = 'hood' | 'face';
 export const ARMOUR_HIDES: Partial<Record<ItemId, HiddenGear[]>> = {
   burlapHeadwrap: ['hood'],
-  coffeeCanHelmet: [],
+  coffeeCanHelmet: ['hood'],
   metalFacemask: ['face'],
 };
 
@@ -41,15 +42,15 @@ const burlapDark = () =>
     const s = clothSurface();
     return new THREE.MeshStandardMaterial({ color: 0x6f5f40, map: s.map, normalMap: s.normalMap, roughness: 1 });
   });
-const rope = () => mat('rope', () => new THREE.MeshStandardMaterial({ color: 0x8a7550, roughness: 0.95 }));
+const rope = () => mat('rope', () => new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0xb09868, roughness: 1 }));
 const strap = () =>
   mat('armour-strap', () => {
     const s = leatherSurface();
     return new THREE.MeshStandardMaterial({ color: 0x4e3b2a, map: s.map, normalMap: s.normalMap, roughness: 0.75 });
   });
 const steel = () => mat('armour-steel', steelMaterial);
-const darkSteel = () => mat('armour-dark-steel', () => new THREE.MeshStandardMaterial({ color: 0x1c1b1a, roughness: 0.6, metalness: 0.5 }));
-const rivet = () => mat('armour-rivet', () => new THREE.MeshStandardMaterial({ color: 0x8c877c, roughness: 0.35, metalness: 0.9 }));
+const darkSteel = () => mat('armour-dark-steel', () => new THREE.MeshStandardMaterial({ ...metalSurface(), color: 0x2a2928, metalness: 0.5 }));
+const rivet = () => mat('armour-rivet', () => new THREE.MeshStandardMaterial({ ...metalSurface(), color: 0xa09a90, metalness: 0.9 }));
 const can = () =>
   mat('coffee-can', () => {
     const s = rustSurface('#4f5d4a');
@@ -57,108 +58,48 @@ const can = () =>
   });
 const sign = (kind: 'chevron' | 'stop' | 'warning') => mat(`roadsign-${kind}`, () => roadSignMaterial(kind));
 
-/** A battered road sign: reflective paint with its markings, scratched through to bare, rusting metal. */
+/** A battered road sign: its paint and markings over a photo of rusted metal, worn through in places. */
 function roadSignMaterial(kind: 'chevron' | 'stop' | 'warning'): THREE.Material {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d')!;
   const base = kind === 'stop' ? '#9e2a22' : kind === 'warning' ? '#d1a52a' : '#c99a24';
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = kind === 'stop' ? '#e6dccb' : '#1d1b18';
-  if (kind === 'chevron') {
-    for (let x = -64; x < 160; x += 44) {
+  const s = paintedRustSurface(`roadsign-${kind}`, base, (ctx) => {
+    ctx.fillStyle = kind === 'stop' ? '#e6dccb' : '#1d1b18';
+    if (kind === 'chevron') {
+      for (let x = -64; x < 160; x += 44) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + 22, 0);
+        ctx.lineTo(x + 48, 64);
+        ctx.lineTo(x + 22, 128);
+        ctx.lineTo(x, 128);
+        ctx.lineTo(x + 26, 64);
+        ctx.fill();
+      }
+    } else if (kind === 'stop') {
+      ctx.font = '900 40px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('STOP', 64, 78);
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#e6dccb';
+      ctx.strokeRect(6, 6, 116, 116);
+    } else {
+      ctx.lineWidth = 9;
+      ctx.strokeStyle = '#1d1b18';
       ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + 22, 0);
-      ctx.lineTo(x + 48, 64);
-      ctx.lineTo(x + 22, 128);
-      ctx.lineTo(x, 128);
-      ctx.lineTo(x + 26, 64);
-      ctx.fill();
+      ctx.moveTo(64, 14);
+      ctx.lineTo(116, 108);
+      ctx.lineTo(12, 108);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillRect(59, 44, 10, 38);
+      ctx.fillRect(59, 88, 10, 10);
     }
-  } else if (kind === 'stop') {
-    ctx.font = '900 40px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('STOP', 64, 78);
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#e6dccb';
-    ctx.strokeRect(6, 6, 116, 116);
-  } else {
-    ctx.lineWidth = 9;
-    ctx.strokeStyle = '#1d1b18';
-    ctx.beginPath();
-    ctx.moveTo(64, 14);
-    ctx.lineTo(116, 108);
-    ctx.lineTo(12, 108);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.fillRect(59, 44, 10, 38);
-    ctx.fillRect(59, 88, 10, 10);
-  }
-  // Scratches and chips down to bare metal, and rust bleeding from the edges.
-  let seed = kind.length * 7;
-  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 70; i++) {
-    ctx.strokeStyle = rand() < 0.5 ? 'rgba(150,150,145,0.55)' : 'rgba(110,60,30,0.45)';
-    ctx.lineWidth = 0.5 + rand() * 1.5;
-    const x = rand() * 128;
-    const y = rand() * 128;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + (rand() - 0.5) * 30, y + (rand() - 0.5) * 12);
-    ctx.stroke();
-  }
-  for (let i = 0; i < 40; i++) {
-    ctx.fillStyle = `rgba(${110 + rand() * 40},${50 + rand() * 25},${20 + rand() * 15},${0.25 + rand() * 0.4})`;
-    const edge = rand() < 0.5;
-    ctx.beginPath();
-    ctx.arc(edge ? (rand() < 0.5 ? 0 : 128) : rand() * 128, edge ? rand() * 128 : rand() < 0.5 ? 0 : 128, 3 + rand() * 9, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.35, side: THREE.DoubleSide });
+  });
+  return new THREE.MeshStandardMaterial({ ...s, metalness: 0.35, side: THREE.DoubleSide });
 }
 
-/** Dark grey welded steel, scuffed bright on the edges, with a few rust spots and weld seams. */
+/** Welded steel plate: a photo of worn plate, darkened. */
 function steelMaterial(): THREE.Material {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d')!;
-  let seed = 4242;
-  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  ctx.fillStyle = '#5c5e5f';
-  ctx.fillRect(0, 0, 128, 128);
-  // Brushed grain and hammer marks.
-  for (let i = 0; i < 260; i++) {
-    const l = 70 + rand() * 40;
-    ctx.fillStyle = `rgba(${l},${l + 2},${l + 4},0.35)`;
-    ctx.fillRect(rand() * 128, rand() * 128, 6 + rand() * 30, 1);
-  }
-  for (let i = 0; i < 30; i++) {
-    ctx.fillStyle = `rgba(30,30,30,${0.1 + rand() * 0.15})`;
-    ctx.beginPath();
-    ctx.arc(rand() * 128, rand() * 128, 2 + rand() * 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Rust spots, kept small.
-  for (let i = 0; i < 14; i++) {
-    ctx.fillStyle = `rgba(${120 + rand() * 30},${60 + rand() * 20},30,${0.25 + rand() * 0.3})`;
-    ctx.beginPath();
-    ctx.arc(rand() * 128, rand() * 128, 1 + rand() * 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // A weld seam across the plate.
-  for (let x = 0; x < 128; x += 3) {
-    ctx.fillStyle = `rgba(${45 + rand() * 30},${40 + rand() * 25},${35 + rand() * 20},0.9)`;
-    ctx.beginPath();
-    ctx.arc(x, 64 + Math.sin(x * 0.15) * 1.5, 2.2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.48, metalness: 0.8, side: THREE.DoubleSide });
+  return new THREE.MeshStandardMaterial({ ...metalSurface(), color: 0xa4a6a8, metalness: 0.45, side: THREE.DoubleSide });
 }
 
 /** A curved plate: a slice of a cylinder around the y axis, facing +z, `arc` radians wide. */
@@ -216,6 +157,15 @@ export function armourParts(item: ItemId): ArmourPart[] {
       break;
     }
     case 'coffeeCanHelmet': {
+      // A scanned rusty can turned over the scanned head, with a strap under the chin.
+      const scan = scannedWear('wear-can', [0, HEAD.y + 0.025, HEAD.z - 0.01], -0.08);
+      if (scan) {
+        scan.scale.y = 0.45;
+        scan.userData.scanHead = true;
+        parts.push({ bone: 'head', mesh: scan });
+        add('head', new THREE.TorusGeometry(0.08, 0.006, 6, 20, Math.PI), strap(), 0, HEAD.y - 0.02, HEAD.z + 0.01, 0, 0, Math.PI).userData.scanHead = true;
+        break;
+      }
       add('head', new THREE.CylinderGeometry(0.148, 0.152, 0.16, 22, 1, false), can(), 0, 1.79, -0.01, -0.08);
       // Rolled rims and a strap under the chin.
       add('head', new THREE.TorusGeometry(0.152, 0.008, 6, 26), rivet(), 0, 1.712, -0.004, Math.PI / 2 - 0.08);
@@ -256,6 +206,12 @@ export function armourParts(item: ItemId): ArmourPart[] {
       break;
     }
     case 'metalFacemask': {
+      // A scanned welder's mask: a steel shell over the face with a dark window to see through.
+      const scan = scannedWear('wear-welder', [0, 1.54, HEAD.z + 0.02]);
+      if (scan) {
+        parts.push({ bone: 'head', mesh: scan });
+        break;
+      }
       // A welded plate over the face, with an eye slit and breathing holes.
       const plate = add('head', curvedPlate(0.125, 0.22, 2.1), steel(), 0, 1.69, 0.0);
       plate.scale.set(1, 1, 1.05);

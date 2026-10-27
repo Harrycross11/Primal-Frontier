@@ -9,6 +9,7 @@ import type { Vec3 } from '../../shared/combat.ts';
 import { nameTag } from './avatar.ts';
 import type { Effects } from './effects.ts';
 import { character, characterClips, hasCharacter, model, soleMaterial } from './models.ts';
+import { clothSurface } from './textures.ts';
 
 /** Past this far the fog has all but hidden an animal, so it isn't drawn or animated. */
 const HIDE_BEYOND = 170;
@@ -275,7 +276,7 @@ class HoundView {
     if ((this.tag !== null) === (name !== null)) return;
     if (name) {
       if (this.species === 'ashhound') {
-        this.collar = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.028, 6, 18), new THREE.MeshStandardMaterial({ color: 0x6a2018, roughness: 0.95 }));
+        this.collar = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.028, 6, 18), new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0xa02a1c }));
         this.collar.castShadow = true;
         this.root.add(this.collar);
       } else if (this.info.ride) {
@@ -490,32 +491,6 @@ function lighter(base: THREE.MeshStandardMaterial): THREE.Material {
   return m;
 }
 
-/** Woven wool for the saddle blanket: dark red with a pale stripe near each edge. */
-let blanketMap: THREE.CanvasTexture | null = null;
-function blanketTexture(): THREE.CanvasTexture {
-  if (blanketMap) return blanketMap;
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#5a2a1c';
-  ctx.fillRect(0, 0, 128, 128);
-  // Fine weave.
-  for (let y = 0; y < 128; y += 2) {
-    ctx.fillStyle = y % 4 ? 'rgba(0,0,0,0.12)' : 'rgba(255,220,180,0.05)';
-    ctx.fillRect(0, y, 128, 1);
-  }
-  // Stripes running along the animal near each edge of the cloth.
-  for (const x of [8, 112]) {
-    ctx.fillStyle = '#b89a6a';
-    ctx.fillRect(x, 0, 6, 128);
-    ctx.fillStyle = '#2a1610';
-    ctx.fillRect(x + 8, 0, 3, 128);
-  }
-  blanketMap = new THREE.CanvasTexture(c);
-  blanketMap.colorSpace = THREE.SRGBColorSpace;
-  return blanketMap;
-}
-
 /**
  * The scanned leather saddle (see models.ts) on a woven blanket, sat on an animal's back, sized
  * to the animal and widened a little on the broad ones so the flaps and stirrups hang clear of
@@ -523,7 +498,8 @@ function blanketTexture(): THREE.CanvasTexture {
  */
 function buildSaddle({ top, half }: { top: number; half: number }): THREE.Group {
   const g = new THREE.Group();
-  const blanket = new THREE.MeshStandardMaterial({ map: blanketTexture(), roughness: 1, side: THREE.DoubleSide });
+  // Woven wool, dyed dark red.
+  const blanket = new THREE.MeshStandardMaterial({ ...clothSurface(), color: 0x8c3a26, side: THREE.DoubleSide });
   // The saddle's length, front to back: a real one is about 0.6 m, a little longer on the big
   // animals. Its tree rests on the back at 0.6 of that above the stirrups' feet, and its flaps
   // spread a third of it each side, widened to wrap a broad animal.

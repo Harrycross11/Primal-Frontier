@@ -12,6 +12,10 @@ import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { PISTOLS, buildGun, gunHands, muzzleOffset } from './guns.ts';
 import { paintModel } from './paint.ts';
 import { buildHeldItem } from './props.ts';
+import { character } from './models.ts';
+import { ScanArm } from './scanBody.ts';
+import { tintScan } from './survivorLook.ts';
+import type { Look } from '../../shared/look.ts';
 
 /** Where the gun's grip sits at the hip, and how far in front of the eye its sights sit when aiming. */
 const HIP_RIFLE = new THREE.Vector3(0.15, -0.17, -0.3);
@@ -50,6 +54,80 @@ const CUFF_GEO = new THREE.CylinderGeometry(0.044, 0.044, 0.05, 10).rotateX(Math
 
 type Kind = 'gun' | 'pistol' | 'tool' | null;
 
+/** Mixamo bones whose skin is drawn in first person: the arms from just below the shoulder down. */
+const ARM_BONE = /(Arm|ForeArm|Hand)/;
+/** Each scan geometry cut down to just the arms, shared by every copy. */
+const armsOnly = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+
+/**
+ * The scanned survivor's own arms and hands, in your look's sleeves and skin, standing where your
+ * body would be under the camera. The rest of the body is cut away; each frame the arms reach for
+ * the grips of whatever you hold.
+ */
+class ScannedArms {
+  readonly right: ScanArm;
+  readonly left: ScanArm;
+
+  constructor(readonly body: THREE.Object3D, look: Look | undefined) {
+    if (look) tintScan(body, look);
+    const named = new Map<string, THREE.Bone>();
+    body.traverse((o) => {
+      if ((o as THREE.Bone).isBone) named.set(o.name.replace(/^mixamorig:?/, '').replace(/_\d+$/, ''), o as THREE.Bone);
+      const mesh = o as THREE.SkinnedMesh;
+      if (!mesh.isSkinnedMesh) return;
+      mesh.geometry = cutToArms(mesh);
+      mesh.castShadow = false;
+      // Always in front of the camera, and posed far from its bind pose.
+      mesh.frustumCulled = false;
+      mesh.userData.noAO = true;
+    });
+    // The survivor's right is your right once it faces down -z with the camera. The two rigs name
+    // sides differently, so check which arm is on the right.
+    const [a, b] = [named.get('RightHand')!, named.get('LeftHand')!];
+    body.rotation.y = Math.PI;
+    body.updateMatrixWorld(true);
+    const rightIs = a.getWorldPosition(new THREE.Vector3()).x > b.getWorldPosition(new THREE.Vector3()).x ? 'Right' : 'Left';
+    this.right = new ScanArm(named, rightIs);
+    this.left = new ScanArm(named, rightIs === 'Right' ? 'Left' : 'Right');
+    // Scaled to the survivor's height, its head just below the eye. The head sits a little
+    // further forward than a real one would, so the scan's arms reach a gun held out at the hip.
+    const box = new THREE.Box3().setFromObject(body);
+    body.scale.multiplyScalar(1.78 / (box.max.y - box.min.y));
+    body.updateMatrixWorld(true);
+    const head = named.get('Head')!.getWorldPosition(new THREE.Vector3());
+    body.position.sub(head).add(new THREE.Vector3(0, -0.07, 0));
+    body.updateMatrixWorld(true);
+  }
+}
+
+/** A copy of a skinned mesh's geometry keeping only the triangles that move with the arms. */
+function cutToArms(mesh: THREE.SkinnedMesh): THREE.BufferGeometry {
+  const known = armsOnly.get(mesh.geometry);
+  if (known) return known;
+  const geo = mesh.geometry;
+  const bones = mesh.skeleton.bones.map((b) => ARM_BONE.test(b.name) && !/Shoulder/.test(b.name));
+  const si = geo.getAttribute('skinIndex');
+  const sw = geo.getAttribute('skinWeight');
+  const onArm = (i: number) => {
+    let best = 0;
+    let weight = -1;
+    for (let k = 0; k < 4; k++) {
+      const w = sw.getComponent(i, k);
+      if (w > weight) [best, weight] = [si.getComponent(i, k), w];
+    }
+    return bones[best];
+  };
+  const index = geo.index ? geo.index.array : [...Array(geo.getAttribute('position').count).keys()];
+  const kept: number[] = [];
+  for (let t = 0; t < index.length; t += 3) if (onArm(index[t]) && onArm(index[t + 1]) && onArm(index[t + 2])) kept.push(index[t], index[t + 1], index[t + 2]);
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
+  out.setIndex(kept);
+  out.boundingSphere = geo.boundingSphere;
+  armsOnly.set(geo, out);
+  return out;
+}
+
 export class ViewModel {
   readonly root = new THREE.Group();
   private item: ItemId | null = null;
@@ -75,8 +153,10 @@ export class ViewModel {
   private sway = new THREE.Vector2();
   private lastYaw = 0;
   private lastPitch = 0;
+  /** The scanned arms, once the survivor has loaded; the gloves and sleeves built here stand in till then. */
+  private scanned: ScannedArms | null = null;
 
-  constructor() {
+  constructor(private look?: Look) {
     this.root.add(this.held);
     this.arms = [0, 1].map(() => {
       const hand = new THREE.Mesh(FIST_GEO, glove);
@@ -86,6 +166,17 @@ export class ViewModel {
       return { hand, arm, cuff };
     });
     this.root.traverse((o) => (o.userData.noAO = true));
+  }
+
+  /** Puts the scanned survivor's arms in place of the stand-in gloves, if it has loaded. */
+  private scanArms(): ScannedArms | null {
+    if (this.scanned) return this.scanned;
+    const body = character('survivor');
+    if (!body) return null;
+    this.scanned = new ScannedArms(body, this.look);
+    this.root.add(body);
+    for (const a of this.arms) a.hand.visible = a.arm.visible = a.cuff.visible = false;
+    return this.scanned;
   }
 
   /** Builds what is in your hands again, once its scanned model has arrived. */
@@ -215,8 +306,71 @@ export class ViewModel {
     this.placeArms();
   }
 
+  /**
+   * The scanned arms reaching for what you hold, the way the survivor holds it in third person:
+   * the shooting hand round the grip, the other under the handguard or cupping a pistol grip, a
+   * tool in the right fist. A free hand drops out of view.
+   */
+  private reachArms(arms: ScannedArms) {
+    this.root.updateMatrixWorld(true);
+    const world = (x: number, y: number, z: number) => this.root.localToWorld(new THREE.Vector3(x, y, z));
+    const origin = world(0, 0, 0);
+    const right = world(1, 0, 0).sub(origin).normalize();
+    const left = right.clone().negate();
+    // Elbows hang below and out to the side.
+    const poleR = world(0.7, -0.9, 0.3);
+    const poleL = world(-0.7, -0.9, 0.3);
+    const down = (x: number) => world(x, -0.75, 0.15);
+    const model = this.model;
+    if (!model) {
+      arms.right.reach(down(0.25), down(0.25), poleR, left);
+      arms.left.reach(down(-0.25), down(-0.25), poleL, right);
+      arms.right.curl(0.3);
+      arms.left.curl(0.3);
+      return;
+    }
+    model.updateMatrixWorld(true);
+    const on = (p: THREE.Vector3) => model.localToWorld(p.clone());
+    const turn = model.getWorldQuaternion(new THREE.Quaternion());
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(turn);
+    const ahead = new THREE.Vector3(0, 0, 1).applyQuaternion(turn);
+    if (this.kind === 'gun' || this.kind === 'pistol') {
+      // The scanned hand's bulk sits above and ahead of its palm point, so the grip is aimed
+      // for a little low and behind its middle to put the fist round it.
+      const grip = on(this.palm).addScaledVector(ahead, this.kind === 'gun' ? 0.01 : 0.02).addScaledVector(up, this.kind === 'gun' ? -0.035 : -0.02);
+      arms.right.reach(grip, grip, poleR, left, ahead.clone().addScaledVector(up, -0.6));
+      if (this.kind === 'pistol') {
+        const cup = on(this.palm.clone().add(new THREE.Vector3(0, -0.05, 0)));
+        arms.left.reach(cup, cup, poleL, up.clone().add(right).normalize(), ahead.clone().add(right));
+      } else if (this.hold) {
+        // The palm under the handguard rather than inside it; the scanned fingers rise round it.
+        const hold = on(this.hold).addScaledVector(up, 0.01);
+        // A long gun held out at the hip is past the scanned arm's reach, so the hand slides
+        // back along the handguard towards the magazine until it can grip it.
+        const along = hold.clone().sub(on(this.palm));
+        along.addScaledVector(up, -along.dot(up));
+        const back = hold.clone().addScaledVector(along, -0.6);
+        arms.left.reach(back, hold, poleL, up, ahead.clone().addScaledVector(right, 0.6));
+      } else arms.left.reach(down(-0.25), down(-0.25), poleL, right);
+    } else {
+      // A tool's handle runs up its +y from the grip; the fist closes round it from the right,
+      // fingers wrapping forward.
+      const grip = on(new THREE.Vector3(0, 0.02, 0));
+      const forward = world(0, 0, -1).sub(origin);
+      arms.right.reach(grip, grip, poleR, left, forward.addScaledVector(up, -0.4));
+      arms.left.reach(down(-0.25), down(-0.25), poleL, right);
+    }
+    arms.right.curl(1);
+    arms.left.curl(this.kind === 'gun' || this.kind === 'pistol' ? 1 : 0.3);
+  }
+
   /** Gloves on the grip and the handguard, with forearms back to elbows out of view. */
   private placeArms() {
+    const scanned = this.scanArms();
+    if (scanned) {
+      this.reachArms(scanned);
+      return;
+    }
     const m = this.held.matrix;
     const turn = this.kind === 'gun' || this.kind === 'pistol' ? new THREE.Matrix4().makeRotationY(Math.PI) : new THREE.Matrix4();
     const toView = (p: THREE.Vector3) => p.clone().applyMatrix4(turn).applyMatrix4(m);
@@ -242,6 +396,14 @@ export class ViewModel {
     };
     set(0, right, ELBOW_R);
     set(1, left, ELBOW_L);
+  }
+
+  /** The scanned arms' shoulder, elbow, wrist and palm, and the grip, in the camera's space (for tests). */
+  joints(camera: THREE.Camera) {
+    if (!this.scanned) return null;
+    const local = (p: THREE.Vector3) => camera.worldToLocal(p.clone()).toArray().map((n) => +n.toFixed(3));
+    const arm = (a: ScanArm) => [...a.joints(), a.hand.getWorldPosition(new THREE.Vector3()), a.palm()].map(local);
+    return { right: arm(this.scanned.right), left: arm(this.scanned.left), grip: this.model ? local(this.model.localToWorld(this.palm.clone())) : null };
   }
 
   /** Where the muzzle is in the world, for the flash and the tracer. */

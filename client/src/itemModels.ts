@@ -9,6 +9,7 @@ import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { mulberry32 } from '../../shared/terrain.ts';
 import { buildArmourModel } from './armour.ts';
 import { model } from './models.ts';
+import { scannedItem } from './itemScans.ts';
 import { GUN_LOOKS, PISTOLS, buildGun, buildOtherWeapon } from './guns.ts';
 import { buildBoulder, buildDeployable, buildHeldItem } from './props.ts';
 import { barkSurface, clothSurface, concreteSurface, gunMetalSurface, rustSurface, woodGrainSurface } from './textures.ts';
@@ -250,6 +251,11 @@ function resource(item: ItemId): THREE.Object3D | null {
 const PART_MODELS: Partial<Record<ItemId, string>> = { gears: 'part-gears', metalPipe: 'part-pipe', rope: 'part-rope', sheetMetal: 'part-sheet' };
 
 export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'side' | 'top' | 'front' } | null {
+  const scan = scannedItem(item);
+  if (scan) {
+    scan.model.rotation.x = scan.lie;
+    return { model: wrap(scan.model), view: scan.view };
+  }
   const part = PART_MODELS[item] ? model(PART_MODELS[item]!) : undefined;
   if (part) {
     const m = new THREE.Mesh(part.geometry, part.material);
@@ -266,6 +272,19 @@ export function buildItemModel(item: ItemId): { model: THREE.Object3D; view: 'si
     return { model: wrap(gun), view: 'side' };
   }
   const kind = ITEMS[item].kind;
+  // A scanned bow or melee weapon, the same one you hold, rather than the code-built look.
+  if (kind === 'weapon' && model(`gun-${item}`)) {
+    const gun = buildGun(item);
+    if (gun) {
+      gun.rotation.set(-0.6, 0, 0);
+      return { model: wrap(gun), view: 'side' };
+    }
+  }
+  if (kind === 'weapon' && model(`tool-${item}`)) {
+    const held = buildHeldItem(item)!;
+    held.rotation.x = 0.7;
+    return { model: wrap(held), view: 'side' };
+  }
   if (kind === 'weapon' || kind === 'medical' || kind === 'food') {
     const w = buildOtherWeapon(item);
     // Scanned guns with no code-built look, such as the higher-tier rifles and the compound bow.

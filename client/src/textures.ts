@@ -132,6 +132,8 @@ function repaint(ctx: CanvasRenderingContext2D, size: number, paint: string, cov
 export const soilSurface = () => photo('forest-floor', { repeat: 1 });
 /** Dry, cracked grey earth. */
 export const groundSurface = () => photo('ground', { repeat: 2.5 });
+/** The same ground, for the hills past the map's edge (their UVs are in metres). */
+export const farGroundSurface = () => photo('ground', { key: 'ground-far' });
 /** Dusty brown dirt and gravel, blended into the ground in drifts. */
 export const sandSurface = () => photo('dirt', { repeat: 2.5 });
 /** Weathered pale boulder, about 2 m to a tile, tinted per rock by vertex colours. */
@@ -140,6 +142,20 @@ export const rockSurface = () => photo('rock');
 export const barkSurface = (dark = false) => photo(dark ? 'bark-dark' : 'bark');
 /** Rust eating through old paint of the given colour, for wrecks, barrels and scrap. */
 export const rustSurface = (paint = '#5f6b5a') => photo('rust', { key: `rust-${paint}`, edit: (ctx, size) => repaint(ctx, size, paint) });
+/** The rusted-metal photo in `paint`, with markings drawn over it (road signs): `draw` gets a 128-unit square. */
+export const paintedRustSurface = (key: string, paint: string, draw: (ctx: CanvasRenderingContext2D) => void) =>
+  photo('rust', {
+    key,
+    edit: (ctx, size) => {
+      repaint(ctx, size, paint, 0.4);
+      ctx.save();
+      ctx.scale(size / 128, size / 128);
+      // Worn paint: the photo's scratches and rust show through the markings.
+      ctx.globalAlpha = 0.85;
+      draw(ctx);
+      ctx.restore();
+    },
+  });
 /** Weathered horizontal planks. */
 export const plankSurface = () => photo('planks');
 /** Worn tread plate steel. */

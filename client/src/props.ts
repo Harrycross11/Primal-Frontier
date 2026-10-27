@@ -11,8 +11,9 @@ import { PLANTER_SEED_SLOTS, ripeness } from '../../shared/farming.ts';
 import { mulberry32 } from '../../shared/noise.ts';
 import type { ItemId } from '../../shared/items.ts';
 import { buildGun, buildOtherWeapon, muzzleOffset } from './guns.ts';
-import { BOULDERS, model, soleMaterial } from './models.ts';
-import { lighter, lodIndex, rayOnce, withIndex } from './lod.ts';
+import { BOULDERS, markScanned, model, soleMaterial } from './models.ts';
+import { scannedItem } from './itemScans.ts';
+import { lighter, lodIndex, rayOnce, scanMesh, withIndex } from './lod.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { clothSurface, concreteSurface, soilSurface, gunMetalSurface, metalSurface, plankSurface, rustSurface, woodGrainSurface } from './textures.ts';
 
@@ -213,6 +214,7 @@ function scannedBoulder(rand: () => number, kind: BoulderKind): THREE.Group | un
   }
   const merged = mergeGeometries(stones);
   if (merged && stoneMat) {
+    markScanned(merged);
     const rubble = new THREE.Mesh(merged, stoneMat);
     rubble.castShadow = true;
     rubble.receiveShadow = true;
@@ -227,12 +229,14 @@ export function buildHemp(rand: () => number): THREE.Group {
   // The scanned hemp plant, if it loaded, stood on its stem and a little smaller in the wild.
   const scan = model('crop-hemp');
   if (scan) {
-    const plant = new THREE.Mesh(scan.geometry, scan.material);
+    // Full detail only up close; a quarter of it a few steps off, a sixteenth further out.
+    const plant = scanMesh(scan.geometry, scan.material, 8, 25);
     const [x, z] = stemOf(scan.geometry);
     plant.position.set(-x, 0, -z);
     const root = new THREE.Group().add(plant);
     root.rotation.y = rand() * Math.PI * 2;
     root.scale.setScalar(0.65 + rand() * 0.25);
+    g.userData.scanned = true;
     return g.add(root);
   }
   const stalkMat = plain(0x6d7a3a);
@@ -378,9 +382,10 @@ export function buildMushrooms(rand: () => number): THREE.Group {
   if (scan) {
     const g = new THREE.Group();
     const n = 3 + Math.floor(rand() * 4);
-    // The scan has nearly 9,000 triangles for a cap a few centimetres across; an eighth of that
-    // looks the same at any distance you can see it from.
-    const geo = lighter(scan.geometry, 0.12) ?? scan.geometry;
+    // The scan has nearly 9,000 triangles for a cap a few centimetres across; a twentieth of
+    // that looks the same at any distance you can see it from.
+    const geo = lighter(scan.geometry, 0.05) ?? scan.geometry;
+    g.userData.scanned = true;
     for (let k = 0; k < n; k++) {
       const m = new THREE.Mesh(geo, scan.material);
       const a = rand() * Math.PI * 2;
@@ -901,15 +906,20 @@ function shared(m: THREE.Mesh): THREE.Mesh {
 /** A supply signal: a red smoke canister with a pull ring. Lit ones glow at the top. */
 export function buildSignal(lit: boolean): THREE.Group {
   const g = new THREE.Group();
-  g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.17, 16), plain(0xa82a22, 0.55, 0.3), 0, 0.085, 0));
-  g.add(mesh(new THREE.CylinderGeometry(0.041, 0.041, 0.05, 16, 1, true), plain(0xd8d2c0, 0.8), 0, 0.09, 0));
-  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.03, 16), plain(0x2a2c2e, 0.5, 0.6), 0, 0.185, 0));
-  const ring = mesh(new THREE.TorusGeometry(0.02, 0.004, 6, 14), plain(0x9a9c9a, 0.4, 0.8), 0.03, 0.2, 0);
-  ring.rotation.y = Math.PI / 2;
-  g.add(ring);
+  // The scanned smoke grenade, if it loaded.
+  const scan = scannedItem('supplySignal');
+  if (scan) g.add(scan.model);
+  else {
+    g.add(mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.17, 16), plain(0xa82a22, 0.55, 0.3), 0, 0.085, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.041, 0.041, 0.05, 16, 1, true), plain(0xd8d2c0, 0.8), 0, 0.09, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.03, 16), plain(0x2a2c2e, 0.5, 0.6), 0, 0.185, 0));
+    const ring = mesh(new THREE.TorusGeometry(0.02, 0.004, 6, 14), plain(0x9a9c9a, 0.4, 0.8), 0.03, 0.2, 0);
+    ring.rotation.y = Math.PI / 2;
+    g.add(ring);
+  }
   if (lit) {
     const glow = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.position.y = 0.21;
+    glow.position.y = scan ? 0.16 : 0.21;
     glow.userData.noAO = true;
     g.add(glow);
     g.userData.tick = () => glow.scale.setScalar(0.7 + Math.random() * 0.6);
@@ -948,6 +958,23 @@ const TOOL_GRIP: Partial<Record<ItemId, number | 'middle'>> = {
   nailBat: 0.1,
 };
 
+/** How far up a scanned carried item the hand closes, as a fraction of its height (see buildHeldItem). */
+const HELD_AT: Partial<Record<ItemId, number>> = { feedSack: 0.8, torch: 0.3, syringe: 0.3, rawMeat: 0.5, cookedMeat: 0.5 };
+
+/** The burning rags at the top of a torch: two glowing cones that flicker (see the flame flag). */
+function torchFlame(): THREE.Group {
+  const flame = new THREE.Group();
+  const fire = (r: number, h: number, color: number, opacity: number) => {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 10, 1, true).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+    m.userData.noAO = true;
+    flame.add(m);
+  };
+  fire(0.045, 0.2, 0xff6a1a, 0.55);
+  fire(0.028, 0.14, 0xffd27a, 0.8);
+  flame.userData.flame = true;
+  return flame;
+}
+
 /** What a survivor holds in their right hand, modelled pointing along +y from the grip. */
 export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
   if (!item) return null;
@@ -961,6 +988,26 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
     tool.castShadow = true;
     tool.userData.shared = true;
     g.add(tool);
+    return g;
+  }
+  // A scanned item (food, medicine, a plan, the torch), held round its middle, a sack by its neck.
+  const carried = scannedItem(item);
+  if (carried) {
+    const thing = carried.model;
+    const height = new THREE.Box3().setFromObject(thing).max.y;
+    thing.position.y = -height * (HELD_AT[item] ?? 0.4);
+    if (item === 'buildingPlan' || item === 'blueprint') {
+      // The sheet held up facing you, its foot in the hand.
+      thing.rotation.x = Math.PI / 2 - 0.3;
+      thing.position.set(0, 0.12, 0.02);
+    }
+    g.add(thing);
+    if (item === 'torch') {
+      const flame = torchFlame();
+      flame.position.y = thing.position.y + height - 0.03;
+      g.add(flame);
+      g.userData.flame = flame;
+    }
     return g;
   }
   const handle = (len: number, m: THREE.Material) => mesh(new THREE.CylinderGeometry(0.016, 0.019, len, 8), m, 0, len / 2 - 0.12, 0);
@@ -1049,17 +1096,8 @@ export function buildHeldItem(item: ItemId | null): THREE.Object3D | null {
       g.add(handle(0.5, handleMat()));
       g.add(mesh(new THREE.CylinderGeometry(0.034, 0.026, 0.12, 9), plain(0x2a2018, 1), 0, 0.36, 0));
       wrap(0.31, 0.41, 0.03, ropeMat());
-      const flame = new THREE.Group();
+      const flame = torchFlame();
       flame.position.y = 0.44;
-      const fire = (r: number, h: number, color: number, opacity: number) => {
-        const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 10, 1, true).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-        m.userData.noAO = true;
-        flame.add(m);
-        return m;
-      };
-      fire(0.045, 0.2, 0xff6a1a, 0.55);
-      fire(0.028, 0.14, 0xffd27a, 0.8);
-      flame.userData.flame = true;
       g.add(flame);
       g.userData.flame = flame;
       return g;

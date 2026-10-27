@@ -7,7 +7,7 @@ import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { biomeAt, type BiomeId } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
 import type { Decor } from '../../shared/world.ts';
-import { asphaltSurface, barkSurface, concreteSurface } from './textures.ts';
+import { asphaltSurface, barkSurface, concreteSurface, farGroundSurface } from './textures.ts';
 import { lighter } from './lod.ts';
 import { model, variants, type Model } from './models.ts';
 import { rockGeometry, rockMaterial } from './rocks.ts';
@@ -168,9 +168,9 @@ function buildScatter(scene: THREE.Scene, seed: number): Patch[] {
     return meshes;
   };
   /** Scatters a scanned set, sharing `count` between its variants. Cut-out leaves skip the AO pass. */
-  const scatterSet = (set: Model[], count: number, place: Parameters<typeof scatter>[3], cutout = false, big = true) => {
+  const scatterSet = (set: Model[], count: number, place: Parameters<typeof scatter>[3], cutout = false, big = true, shadows = true) => {
     for (const v of set) {
-      for (const mesh of scatter(v.geometry, v.material, Math.ceil(count / set.length), place, true, big)) if (cutout) mesh.userData.noAO = true;
+      for (const mesh of scatter(v.geometry, v.material, Math.ceil(count / set.length), place, shadows, big)) if (cutout) mesh.userData.noAO = true;
     }
   };
   const anywhere = () => ({ x: (rand() - 0.5) * 2 * span, z: (rand() - 0.5) * 2 * span });
@@ -189,17 +189,36 @@ function buildScatter(scene: THREE.Scene, seed: number): Patch[] {
     };
   };
 
-  // Pebbles and small stones.
-  const pebble = rockGeometry(rand, { detail: 1, stretch: [1.1, 0.7, 1], cuts: 3 });
-  const rockMat = rockMaterial('pebble', { color: 0x857c70 });
-  scatter(pebble.geo, rockMat, 12000, () => ({ ...anywhere(), size: 0.04 + rand() * rand() * 0.22, lift: 0.1 }));
+  /** A set's variants cut to a fraction of their triangles, for little things scattered in thousands. */
+  const light = (set: Model[], fraction: number): Model[] => set.map((v) => ({ geometry: lighter(v.geometry, fraction) ?? v.geometry, material: v.material }));
 
-  // Broken concrete rubble and bricks.
+  // Pebbles and small stones: the scanned stones, cut down, as they are a few centimetres across.
+  const stones = variants('stones');
+  if (stones.length) {
+    // Each stone is fitted 0.3 m across; scale them to the pebbles' sizes.
+    scatterSet(light(stones, 0.15), 12000, () => ({ ...anywhere(), size: (0.08 + rand() * rand() * 0.44) / 0.3 * 0.5, flat: true, lift: -0.1 }), false, false, false);
+  } else {
+    const pebble = rockGeometry(rand, { detail: 1, stretch: [1.1, 0.7, 1], cuts: 3 });
+    const rockMat = rockMaterial('pebble', { color: 0x857c70 });
+    scatter(pebble.geo, rockMat, 12000, () => ({ ...anywhere(), size: 0.04 + rand() * rand() * 0.22, lift: 0.1 }));
+  }
+
+  // Broken concrete rubble and old bricks, heaped where buildings stood.
   const rubble = clusters(110, 8);
-  const rubbleMat = new THREE.MeshStandardMaterial({ ...concrete, color: 0x9a9288, roughness: 0.95 });
-  scatter(new THREE.DodecahedronGeometry(1, 0), rubbleMat, 1800, () => ({ ...rubble(), size: 0.08 + rand() * 0.22, lift: 0.3 }), true);
-  const brickMat = new THREE.MeshStandardMaterial({ color: 0x7a4a36, roughness: 0.95 });
-  scatter(new THREE.BoxGeometry(2.2, 0.7, 1), brickMat, 1400, () => ({ ...rubble(), size: 0.1, flat: rand() < 0.6, lift: 0.35 }));
+  const chunks = variants('rubble-chunks');
+  if (chunks.length) {
+    // The chunks are fitted 0.5 m across.
+    scatterSet(light(chunks, 0.2), 1800, () => ({ ...rubble(), size: (0.16 + rand() * 0.44) / 0.5, flat: true, lift: -0.08 }), false, false);
+  } else {
+    const rubbleMat = new THREE.MeshStandardMaterial({ ...concrete, color: 0x9a9288, roughness: 0.95 });
+    scatter(new THREE.DodecahedronGeometry(1, 0), rubbleMat, 1800, () => ({ ...rubble(), size: 0.08 + rand() * 0.22, lift: 0.3 }), true);
+  }
+  const bricks = model('brick-stack');
+  if (bricks) scatter(bricks.geometry, bricks.material, 160, () => ({ ...rubble(), size: 0.5 + rand() * 0.6, flat: true, lift: -0.05 }), true);
+  else {
+    const brickMat = new THREE.MeshStandardMaterial({ color: 0x7a4a36, roughness: 0.95 });
+    scatter(new THREE.BoxGeometry(2.2, 0.7, 1), brickMat, 1400, () => ({ ...rubble(), size: 0.1, flat: rand() < 0.6, lift: 0.35 }));
+  }
 
   // Old tyres lying flat.
   const tyre = model('tyre');
@@ -214,27 +233,31 @@ function buildScatter(scene: THREE.Scene, seed: number): Patch[] {
   const log = model('log');
   if (log) scatter(log.geometry, log.material, 200, () => ({ ...landed(['deadwood', 'deadwood', 'ashlands', 'frost']), size: 0.7 + rand() * 0.6, flat: true, lift: -0.08 }), true);
 
-  // Weathered planks.
-  const plankMat = new THREE.MeshStandardMaterial({ ...bark, color: 0x9a8a78, roughness: 0.95 });
+  // Weathered timber off-cuts lying in heaps.
   const planks = clusters(70, 5);
-  scatter(new THREE.BoxGeometry(1.4, 0.03, 0.16), plankMat, 560, () => ({ ...planks(), size: 0.7 + rand() * 0.6, flat: true, lift: 0.02 }), true);
-
-  // Dead shrubs: a few thin twigs splayed out from one point.
-  const twigs: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 9; i++) {
-    const len = 0.4 + rand() * 0.5;
-    const twig = new THREE.CylinderGeometry(0.006, 0.018, len, 4).translate(0, len / 2, 0);
-    twig.rotateZ(0.3 + rand() * 0.7);
-    twig.rotateY((i / 9) * Math.PI * 2 + rand() * 0.5);
-    twigs.push(twig.toNonIndexed());
+  const timber = model('timber');
+  if (timber) scatter(timber.geometry, timber.material, 560, () => ({ ...planks(), size: 0.9 + rand() * 0.9, flat: true, lift: -0.02 }), true);
+  else {
+    const plankMat = new THREE.MeshStandardMaterial({ ...bark, color: 0x9a8a78, roughness: 0.95 });
+    scatter(new THREE.BoxGeometry(1.4, 0.03, 0.16), plankMat, 560, () => ({ ...planks(), size: 0.7 + rand() * 0.6, flat: true, lift: 0.02 }), true);
   }
-  const shrubGeo = mergeSimple(twigs);
-  const shrubMat = new THREE.MeshStandardMaterial({ color: 0x4e4236, roughness: 1 });
+
+  // Dry bushes, scanned; dead shrubs of a few thin twigs splayed out from one point stand in
+  // if the scan didn't load.
   const bushes = variants('dry-bush');
-  if (bushes.length) {
-    scatter(shrubGeo, shrubMat, 450, () => ({ ...landed(['ashlands', 'mesa', 'flats', 'deadwood']), size: 0.7 + rand() * 0.9, flat: true }), true);
-    scatterSet(bushes, 600, () => ({ ...landed(['ashlands', 'mesa', 'flats', 'deadwood']), size: 0.7 + rand() * 0.8, flat: true }), true);
-  } else scatter(shrubGeo, shrubMat, 1000, () => ({ ...landed(['ashlands', 'mesa', 'flats', 'deadwood']), size: 0.7 + rand() * 0.9, flat: true }), true);
+  if (bushes.length) scatterSet(bushes, 900, () => ({ ...landed(['ashlands', 'mesa', 'flats', 'deadwood']), size: 0.7 + rand() * 0.8, flat: true }), true);
+  else {
+    const twigs: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 9; i++) {
+      const len = 0.4 + rand() * 0.5;
+      const twig = new THREE.CylinderGeometry(0.006, 0.018, len, 4).translate(0, len / 2, 0);
+      twig.rotateZ(0.3 + rand() * 0.7);
+      twig.rotateY((i / 9) * Math.PI * 2 + rand() * 0.5);
+      twigs.push(twig.toNonIndexed());
+    }
+    const shrubMat = new THREE.MeshStandardMaterial({ color: 0x4e4236, roughness: 1 });
+    scatter(mergeSimple(twigs), shrubMat, 1000, () => ({ ...landed(['ashlands', 'mesa', 'flats', 'deadwood']), size: 0.7 + rand() * 0.9, flat: true }), true);
+  }
 
   // Scanned ground cover: clumps of dry grass where the grass grows, fallen branches, small
   // stones and old stumps.
@@ -281,8 +304,10 @@ function buildDistantHills(scene: THREE.Scene) {
   const geo = new THREE.RingGeometry(inner, 1400, 160, 24).rotateX(-Math.PI / 2);
   const p = geo.attributes.position;
   const colors = new Float32Array(p.count * 3);
-  const near = new THREE.Color(0x857a6b);
-  const far = new THREE.Color(0x9a8d78);
+  const uv = geo.attributes.uv;
+  // The ground photo already has the hills' near colour; further off they pale a little.
+  const near = new THREE.Color(1, 1, 1);
+  const far = new THREE.Color(1.35, 1.35, 1.28);
   const c = new THREE.Color();
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i);
@@ -296,8 +321,10 @@ function buildDistantHills(scene: THREE.Scene) {
     p.setY(i, 10 + Math.max(0, ridges) * rise * (16 + 34 * t));
     c.copy(near).lerp(far, t).multiplyScalar(0.9 + ridges * 0.1);
     c.toArray(colors, i * 3);
+    // One photo tile every 30 m.
+    uv.setXY(i, x / 30, z / 30);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })));
+  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ ...farGroundSurface(), vertexColors: true })));
 }

@@ -368,7 +368,7 @@ export class Avatar {
       for (const { bone, mesh } of armourParts(item)) {
         mesh.position.sub(this.boneAt.get(bone)!);
         // The scanned head is smaller than the modelled one in its hood; sit hats lower on it.
-        if (this.scan && item === 'coffeeCanHelmet') mesh.position.y -= 0.07;
+        if (this.scan && item === 'coffeeCanHelmet' && !mesh.userData.scanHead) mesh.position.y -= 0.07;
         this.bones[bone].add(mesh);
         this.wornMeshes[i].push(mesh);
       }

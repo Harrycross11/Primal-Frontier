@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { type Look, lookColor } from '../../shared/look.ts';
+import { model } from './models.ts';
 
 // Body regions of the scan, by height in its own model space (it stands 2 units tall, T-posed).
 const FEET_TOP = 0.13;
@@ -96,8 +97,24 @@ export interface Gear {
 }
 
 // The scanned head's middle and eye height, in the survivor's model space.
-const HEAD = new THREE.Vector3(0, 1.675, -0.008);
-const EYES_Y = 1.657;
+export const HEAD = new THREE.Vector3(0, 1.675, -0.008);
+export const EYES_Y = 1.657;
+
+/**
+ * A scanned hat, mask or helmet (models.ts sizes it, standing on y = 0) put on the scanned head,
+ * its bottom at `at`; null if its scan hasn't loaded.
+ */
+export function scannedWear(name: string, at: [number, number, number], tilt = 0): THREE.Mesh | null {
+  const m = model(name);
+  if (!m) return null;
+  const mesh = new THREE.Mesh(m.geometry, m.material);
+  mesh.position.set(...at);
+  mesh.rotation.x = tilt;
+  mesh.castShadow = true;
+  // Shared with every survivor wearing one.
+  mesh.userData.shared = true;
+  return mesh;
+}
 
 /**
  * Hats, masks and goggles for the scanned head, placed in the survivor's model space.
@@ -110,6 +127,12 @@ export function headGear(look: Look, cloth: (color: number) => THREE.Material, a
     mesh.position.set(...at);
     out.push({ mesh, kind });
     return mesh;
+  };
+  /** Puts on a scanned piece, if it has loaded; the shapes built below stand in until it has. */
+  const wear = (name: string, kind: Gear['kind'], at: [number, number, number], tilt = 0) => {
+    const mesh = scannedWear(name, at, tilt);
+    if (mesh) out.push({ mesh, kind });
+    return !!mesh;
   };
   const leather = mat(0x4a3828, 0.75);
   const rubber = mat(0x2a2927, 0.8);
@@ -127,6 +150,7 @@ export function headGear(look: Look, cloth: (color: number) => THREE.Material, a
     }
     case 2: {
       // A knitted beanie with a turned-up brim.
+      if (wear('wear-beanie', 'hood', [0, HEAD.y + 0.01, HEAD.z - 0.012], -0.1)) break;
       const knit = cloth(0x3a3a3c);
       add(new THREE.SphereGeometry(0.1, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), knit, 'hood', [0, HEAD.y + 0.012, HEAD.z - 0.005]).scale.set(1, 0.95, 1.1);
       const brim = add(new THREE.TorusGeometry(0.099, 0.013, 8, 28), knit, 'hood', [0, HEAD.y + 0.016, HEAD.z - 0.005]);
@@ -136,6 +160,7 @@ export function headGear(look: Look, cloth: (color: number) => THREE.Material, a
     }
     case 3: {
       // A peaked cap.
+      if (wear('wear-cap', 'hood', [0, HEAD.y + 0.015, HEAD.z + 0.045], -0.08)) break;
       const cap = cloth(0x4e533a);
       add(new THREE.SphereGeometry(0.108, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), cap, 'hood', [0, HEAD.y, HEAD.z]).scale.set(1, 0.9, 1.08);
       const peak = add(new THREE.CylinderGeometry(0.08, 0.08, 0.008, 20, 1, false, -Math.PI / 2, Math.PI), cap, 'hood', [0, HEAD.y + 0.005, HEAD.z + 0.065]);
@@ -148,7 +173,8 @@ export function headGear(look: Look, cloth: (color: number) => THREE.Material, a
       break;
     }
     case 5: {
-      // A wide-brimmed leather hat.
+      // A wide-brimmed straw hat.
+      if (wear('wear-hat', 'hood', [0, HEAD.y + 0.035, HEAD.z], -0.06)) break;
       add(new THREE.CylinderGeometry(0.085, 0.098, 0.09, 22), leather, 'hood', [0, HEAD.y + 0.068, HEAD.z]).scale.set(1, 1, 1.12);
       add(new THREE.CylinderGeometry(0.19, 0.19, 0.01, 28), leather, 'hood', [0, HEAD.y + 0.03, HEAD.z]).scale.set(1, 1, 1.08);
       add(new THREE.CylinderGeometry(0.099, 0.099, 0.02, 22), mat(0x2a221a, 0.8), 'hood', [0, HEAD.y + 0.045, HEAD.z]).scale.set(1, 1, 1.12);
@@ -158,7 +184,12 @@ export function headGear(look: Look, cloth: (color: number) => THREE.Material, a
 
   const goggles = look.face === 2 || look.face === 3;
   const respirator = look.face === 1 || look.face === 3;
-  if (goggles) {
+  // A rubber gas mask over the whole head; goggles with it are pushed up on the forehead.
+  if (respirator && wear('wear-gasmask', 'face', [0, 1.53, HEAD.z + 0.012])) {
+    if (goggles) wear('wear-goggles', 'face', [0, HEAD.y + 0.045, HEAD.z + 0.01], -0.5);
+    return out;
+  }
+  if (goggles && !wear('wear-goggles', 'face', [0, EYES_Y - 0.045, HEAD.z + 0.008])) {
     const strap = add(new THREE.TorusGeometry(0.094, 0.009, 6, 28), leather, 'face', [0, EYES_Y + 0.004, HEAD.z]);
     strap.rotation.x = Math.PI / 2;
     strap.scale.set(1, 1.12, 1);

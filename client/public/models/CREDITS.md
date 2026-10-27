@@ -27,6 +27,9 @@ Photo-scanned models from Poly Haven, all CC0 (public domain), simplified for th
 - toolchest: https://polyhaven.com/a/metal_tool_chest
 - tree-quiver: https://polyhaven.com/a/quiver_tree_01
 - tree-dead-quiver: https://polyhaven.com/a/dead_quiver_trunk
+- item-fuel: https://polyhaven.com/a/metal_jerrycan
+- wear-can: https://polyhaven.com/a/can_rusted
+- wear-gasmask: https://polyhaven.com/a/old_gas_mask
 - grass-cards.webp: rendered from https://polyhaven.com/a/grass_medium_02
 
 Models from Sketchfab under Creative Commons Attribution: raw photo scans simplified and re-lit for the game, rigged characters, and weapons and tools.
@@ -46,6 +49,9 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - crop-pumpkin: "Pumpkin" by Maurice Svay (https://sketchfab.com/3d-models/pumpkin-5866a5b13bac4a01918d2b1eb80ad2ff), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - food-corn: "Sweet corn" by Keith Ito (https://sketchfab.com/3d-models/sweet-corn-effa9692c0b64245aba9c163c991b21c), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - laptop: "Panasonic Toughbook CF-18" by Werby213 (https://sketchfab.com/3d-models/panasonic-toughbook-cf-18-0dd4a117aad04fdaa3eb127c153f50b3), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- wear-beanie: "Black Knit Beanie" by Arkify 3D (https://sketchfab.com/3d-models/black-knit-beanie-edb7f2c044b64d5da40484495239fee3), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- wear-cap: "Baseball Cap" by FilipMatlak (https://sketchfab.com/3d-models/baseball-cap-2407f15279f448148ae763ffb2375e9f), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
+- wear-hat: "Cowboy Hat Revenge - Scan and Retopology" by Dawnstar-Chronicles (https://sketchfab.com/3d-models/cowboy-hat-revenge-scan-and-retopology-f923afc33254465294de1993c0d29c2a), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), simplified
 - gun-assaultRifle: "AK-47  - Game Ready Assault Rifle Weapon" by Billy Jackman (https://sketchfab.com/3d-models/ak-47-game-ready-assault-rifle-weapon-dc58144409534abbb60970638d171f9f), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-boltRifle: "Mosin Nagant M91" by MaX3Dd (https://sketchfab.com/3d-models/mosin-nagant-m91-92ede39f23bd40c7982c727dfd7c4be0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - gun-l96: "PGM Ultima Ratio · Game-Ready Sniper Rifle" by flip 3D (https://sketchfab.com/3d-models/pgm-ultima-ratio-game-ready-sniper-rifle-34611493b4104bdba2ce6beabfeb4465), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
@@ -106,6 +112,29 @@ Models from Sketchfab under Creative Commons Attribution: raw photo scans simpli
 - tool-nailBat: "Bloody Baseball Bat" by Pablo88 (https://sketchfab.com/3d-models/bloody-baseball-bat-48095b439ec5464db93337b2c3457fcc), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-fireAxe: "Fireaxe" by Milacetious (https://sketchfab.com/3d-models/fireaxe-23cd18766328497286c925705a724b43), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - tool-sledgehammer: "Rusty Sledgehammer Photoscan" by sixonetwo (https://sketchfab.com/3d-models/rusty-sledgehammer-photoscan-0d4f90b84b1f43ac9ade0eda770a1626), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- wear-welder: "Welding mask" by guss67 (https://sketchfab.com/3d-models/welding-mask-4f0462e1c43e4c1db947b8eb9d37b746), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- wear-goggles: "Aviator googles" by varin (https://sketchfab.com/3d-models/aviator-googles-e8a0b7b1b0f94236a49e7a67599af563), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-bandage: "Worn bandages" by Sousinho (https://sketchfab.com/3d-models/worn-bandages-4de901157af74589b7e30156797d2e8b), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-syringe: "Medical Syringe" by Alexander Troianovskyi (https://sketchfab.com/3d-models/medical-syringe-22e711221a094a48a6ffe826d3fd6185), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-pills: "Prescription Pill Bottle" by 3Dexter (https://sketchfab.com/3d-models/prescription-pill-bottle-b06f10f8b7b64973ba8ecca08e28ee8a), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-cans: "Post- Apocalyptic Canned Foods" by Jungle Jim (https://sketchfab.com/3d-models/post-apocalyptic-canned-foods-d1fff02abaac4e68bd8b800cbf0a2c96), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-water: "Bottle Of Water" by T-Art (https://sketchfab.com/3d-models/bottle-of-water-48fd4f6e90d84d89b5740ee78587d0ff), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-meat: "Meat raw Rib  game ready model" by KIMMEN_AWIP (https://sketchfab.com/3d-models/meat-raw-rib-game-ready-model-7239ceff0bbf4510afe08656553978e0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-feedSack: "Old burlap bag photo scan" by Teilor Andersen (https://sketchfab.com/3d-models/old-burlap-bag-photo-scan-d52b9c947f994d528e872f71a1cabba1), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-sack: "Burlap Sack" by Clockwork Creations (https://sketchfab.com/3d-models/burlap-sack-e3b01fcc08e745758e65b1a997d52bf2), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-torch: "Torch stick" by DJMaesen (https://sketchfab.com/3d-models/torch-stick-d8eadee1a5c14483aade99b1fe5bc150), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-arrow: "CC0 - Wooden Arrow" by plaggy (https://sketchfab.com/3d-models/cc0-wooden-arrow-cab3cc4e956e469db3b9e431110fbbcd), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-pistolAmmo: "9mm Parabellum Rounds" by creationwasteland (https://sketchfab.com/3d-models/9mm-parabellum-rounds-78272e2976aa4997878e738089eca498), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-rifleAmmo: "AK Rounds (5.45x39 7.62x39)" by valterjherson1 (https://sketchfab.com/3d-models/ak-rounds-545x39-762x39-0e27c27e8c764a7d86356b2ce5bff59d), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-shotgunShell: "Shotgun Shells" by creationwasteland (https://sketchfab.com/3d-models/shotgun-shells-1807bebe90c64dbaaf60d6de50eb0a3d), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-dynamite: "Dynamite" by MaX3Dd (https://sketchfab.com/3d-models/dynamite-7308cdc679c14e24880b8d05c2f22ffe), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-blueprints: "Old Blueprints" by FrodoUndead (https://sketchfab.com/3d-models/old-blueprints-4759259e450a4269a93c582dd276f1b9), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-smoke: "M18 Smoke Grenade" by RedRogueXIII (https://sketchfab.com/3d-models/m18-smoke-grenade-6dbb48151a9147b4830aa7bf55fc8282), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-ingot: "Metal Ingot" by Kigha (https://sketchfab.com/3d-models/metal-ingot-499a74a828dc42af9c2ceaa23069f6e0), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-cloth: "Stack of Folded Clothes | Crafted by jerovdl" by Jerovdl (https://sketchfab.com/3d-models/stack-of-folded-clothes-crafted-by-jerovdl-ac31c5ae6eb0449091c371556bb63e00), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- item-wood: "Woodpile (game ready asset)" by Aparicio Silva 3D (https://sketchfab.com/3d-models/woodpile-game-ready-asset-fcd5d5993be64ca38ef8ae2926574874), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- brick-stack: "Stack Of Bricks (Game Ready / 2K PBR)" by Meerschaum Digital (https://sketchfab.com/3d-models/stack-of-bricks-game-ready-2k-pbr-1a9092ab6cb243d990fddad116f04825), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
+- timber: "Low Poly Weathered Wood Block Scan - Game Ready" by -Arthur- (https://sketchfab.com/3d-models/low-poly-weathered-wood-block-scan-game-ready-d6e22786fbfd4b239c54eced37de7a84), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - lm-petrol: "Abandoned Petrol Station" by A9908244 (https://sketchfab.com/3d-models/abandoned-petrol-station-dacd1c0d9f5045a6bc2180702714f12c), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - lm-warehouse: "Small Warehouse" by Wardster (https://sketchfab.com/3d-models/small-warehouse-c7f4c017c20943cb9e9e559822a5c402), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
 - lm-house: "cabin" by kunkun (https://sketchfab.com/3d-models/cabin-f9159874daad499492cc0a488e06b489), licensed CC Attribution (http://creativecommons.org/licenses/by/4.0/), textures resized
