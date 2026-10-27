@@ -19,6 +19,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 OUT = os.path.join(os.path.dirname(__file__), '..', 'client', 'public', 'models')
@@ -57,6 +59,10 @@ MODELS = {
     # A quiver tree and a dead quiver trunk, among the dry lands' dead trees.
     'tree-quiver': ('quiver_tree_01', 6000),
     'tree-dead-quiver': ('dead_quiver_trunk', 4000),
+    # A jerry can: low grade fuel's icon.
+    'item-fuel': ('metal_jerrycan', 3000),
+    'wear-can': ('can_rusted', 2000),
+    'wear-gasmask': ('old_gas_mask', 5000),
 }
 
 # Raw Sketchfab scans (millions of triangles), cut down by scripts/simplify-scan.ts.
@@ -82,6 +88,10 @@ SCANS = {
     'food-corn': ('effa9692c0b64245aba9c163c991b21c', 3000, ['--keep-heading'], 1024),
     # A rugged field laptop, wired into the locked crate the raiders guard: hack it to open it.
     'laptop': ('0dd4a117aad04fdaa3eb127c153f50b3', 4000, ['--keep-heading'], 1024),
+    # Worn on the head: armour helmets and the hats, goggles and masks a survivor can pick.
+    'wear-beanie': ('edb7f2c044b64d5da40484495239fee3', 3000, ['--keep-heading'], 512),
+    'wear-cap': ('2407f15279f448148ae763ffb2375e9f', 3000, ['--keep-heading'], 512),
+    'wear-hat': ('f923afc33254465294de1993c0d29c2a', 4000, ['--keep-heading'], 512),
 }
 
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
@@ -216,8 +226,39 @@ LANDMARK_PROPS = {
     'rad-sign': ('9199df7113744de1b2b5aaf90910f48d', 512),
     'power-pole': ('510d4e3fddfa44359d1f6595a00dcf8a', 1024),
 }
+# Game-ready Sketchfab models for items you carry: food, medicine, ammo, resources and the
+# rest, shown in your hands and drawn as their inventory icons. Small on screen, so 512 px.
+ITEM_PROPS = {
+    # Worn on the head, light enough to use as they come.
+    'wear-welder': '4f0462e1c43e4c1db947b8eb9d37b746',
+    'wear-goggles': 'e8a0b7b1b0f94236a49e7a67599af563',
+    'item-bandage': '4de901157af74589b7e30156797d2e8b',
+    'item-syringe': '22e711221a094a48a6ffe826d3fd6185',
+    'item-pills': 'b06f10f8b7b64973ba8ecca08e28ee8a',
+    'item-cans': 'd1fff02abaac4e68bd8b800cbf0a2c96',
+    'item-water': '48fd4f6e90d84d89b5740ee78587d0ff',
+    'item-meat': '7239ceff0bbf4510afe08656553978e0',
+    'item-feedSack': 'd52b9c947f994d528e872f71a1cabba1',
+    'item-sack': 'e3b01fcc08e745758e65b1a997d52bf2',
+    'item-torch': 'd8eadee1a5c14483aade99b1fe5bc150',
+    'item-arrow': 'cab3cc4e956e469db3b9e431110fbbcd',
+    'item-pistolAmmo': '78272e2976aa4997878e738089eca498',
+    'item-rifleAmmo': '0e27c27e8c764a7d86356b2ce5bff59d',
+    'item-shotgunShell': '1807bebe90c64dbaaf60d6de50eb0a3d',
+    'item-dynamite': '7308cdc679c14e24880b8d05c2f22ffe',
+    'item-blueprints': '4759259e450a4269a93c582dd276f1b9',
+    'item-smoke': '6dbb48151a9147b4830aa7bf55fc8282',
+    'item-ingot': '499a74a828dc42af9c2ceaa23069f6e0',
+    'item-cloth': 'ac31c5ae6eb0449091c371556bb63e00',
+    'item-wood': 'fcd5d5993be64ca38ef8ae2926574874',
+    # Ground clutter: a stack of old bricks and a weathered timber off-cut.
+    'brick-stack': '1a9092ab6cb243d990fddad116f04825',
+    'timber': 'd6e22786fbfd4b239c54eced37de7a84',
+}
 # Every model is fetched when the game loads, so the higher-tier weapons keep their textures at
 # 512 px to hold the download down; they are small on screen.
+# Small on screen, so their photos are cut to 256 px to keep the first download small.
+TINY_TEXTURES = ['wear-can', 'wear-gasmask', 'wear-goggles', 'brick-stack']
 SMALL_TEXTURES = [name for name in PROPS if name.startswith('crop-') or list(PROPS).index(name) >= list(PROPS).index('gun-m4')]
 
 
@@ -271,8 +312,15 @@ def get(url: str, auth: bool = False) -> bytes:
     if auth and os.environ.get('SKETCHFAB_TOKEN'):
         headers['Authorization'] = f'Token {os.environ["SKETCHFAB_TOKEN"]}'
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req) as r:
-        return r.read()
+    # Sketchfab turns away bursts of requests (every credit is looked up each run); wait and retry.
+    for wait in (5, 15, 30, 60, 120, 0):
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or not wait:
+                raise
+            time.sleep(wait)
 
 
 def triangles(path: str) -> int:
@@ -329,6 +377,11 @@ def main():
             ratio = min(1.0, budget / max(1, triangles(full)))
             out = os.path.join(OUT, f'{name}.glb')
             subprocess.run(CLI + ['simplify', full, out, '--ratio', f'{ratio:.4f}', '--error', '0.01'], check=True, capture_output=True)
+            if name in TINY_TEXTURES:
+                with open(out, 'rb') as f:
+                    slim = slim_textures(f.read(), 256)
+                with open(out, 'wb') as f:
+                    f.write(slim)
             print('saved', name, triangles(full), '->', triangles(out), 'triangles')
     scans = []
     for name, (uid, budget, *extra) in SCANS.items():
@@ -366,6 +419,14 @@ def main():
         link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(slim_textures(get(link['glb']['url']), 512 if name in SMALL_TEXTURES else 1024))
+        print('saved', name)
+    for name, uid in ITEM_PROPS.items():
+        scans.append(sketchfab_credit(name, uid, 'textures resized'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
+            f.write(slim_textures(get(link['glb']['url']), 256 if name in TINY_TEXTURES else 512))
         print('saved', name)
     for name, (uid, size) in LANDMARK_PROPS.items():
         scans.append(sketchfab_credit(name, uid, 'textures resized'))

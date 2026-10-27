@@ -15,7 +15,7 @@ import { buildCar } from './car.ts';
 import { HAZE, SUN_DIRECTION } from './graphics.ts';
 import { buildBoulder, buildDeployable, buildDoorLeaf, buildHemp, buildMushrooms, buildRadSign, buildWaterBarrel, scannedRock } from './props.ts';
 import { radZones } from '../../shared/survival.ts';
-import { BOULDERS, WRECKS, lateModels, model, variants, type Model } from './models.ts';
+import { BOULDERS, WRECKS, isScanned, lateModels, markScanned, model, variants, type Model } from './models.ts';
 import { paintRock, rockGeometry, rockMaterial } from './rocks.ts';
 import { buildScenery, type Patch } from './scenery.ts';
 import { terrainLayers } from './terrainLayers.ts';
@@ -423,7 +423,8 @@ export class World {
     const blade = new THREE.PlaneGeometry(0.75, 0.75);
     blade.translate(0, 0.36, 0);
     // Three cards at 60 degrees, so a tuft looks full from every side.
-    const cross = mergeCards([0, 1, 2].map((k) => blade.clone().rotateY((k * Math.PI) / 3)));
+    // Cut from pictures of the scanned clumps, so they count as scanned (see audit.ts).
+    const cross = markScanned(mergeCards([0, 1, 2].map((k) => blade.clone().rotateY((k * Math.PI) / 3))));
     // Point every normal up so the tufts are lit like the ground instead of going black edge-on.
     const n = cross.attributes.normal;
     for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
@@ -918,6 +919,10 @@ export class World {
    * built leaf by leaf, each clump would be dozens of draw calls.
    */
   private smallShape(kind: 'hemp' | 'mushroom', id: number, make: (rand: () => number) => THREE.Group): THREE.Group {
+    // Scanned plants share their shapes already and keep their levels of detail; merging them
+    // would copy every triangle of every level into each clump.
+    const scanned = make(mulberry32(id * 13 + (kind === 'hemp' ? 900 : 1300)));
+    if (scanned.userData.scanned) return scanned;
     let shapes = this.treeShapes.get(kind);
     if (!shapes) {
       shapes = [];
@@ -1064,10 +1069,12 @@ export class World {
       if (rand() < 0.5) car.rotation.y = Math.PI;
       g.add(car);
     } else g = buildCar(rand);
-    const sheet = new THREE.Mesh(new THREE.BoxGeometry(1, 0.04, 0.7), this.materials.scrap);
-    sheet.position.set(2.4, 0.1, 1.1);
-    sheet.rotation.set(0.2, rand() * 3, 0.15);
-    g.add(sheet);
+    // One of its old tyres, scanned, lying in the dirt beside it.
+    const tyre = model('tyre');
+    const loose = tyre ? new THREE.Mesh(tyre.geometry, tyre.material) : new THREE.Mesh(new THREE.BoxGeometry(1, 0.04, 0.7), this.materials.scrap);
+    loose.position.set(2.4, tyre ? -0.02 : 0.1, 1.1);
+    loose.rotation.set(tyre ? 0.08 : 0.2, rand() * 3, tyre ? 0.05 : 0.15);
+    g.add(loose);
     return g;
   }
 
@@ -1442,9 +1449,11 @@ function steepAt(seed: number, x: number, z: number, y: number): boolean {
 function mergeByMaterial(root: THREE.Object3D): THREE.Group {
   root.updateMatrixWorld(true);
   const parts = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; noAO: boolean }>();
+  let scanned = true;
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
+    scanned &&= isScanned(mesh.geometry);
     const mat = mesh.material as THREE.Material;
     const geo = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(mesh.matrixWorld);
     for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
@@ -1456,6 +1465,7 @@ function mergeByMaterial(root: THREE.Object3D): THREE.Group {
   for (const [mat, { geos, noAO }] of parts) {
     const merged = mergeGeometries(geos);
     if (!merged) continue;
+    if (scanned) markScanned(merged);
     const mesh = new THREE.Mesh(merged, mat);
     mesh.userData.noAO = noAO;
     g.add(mesh);

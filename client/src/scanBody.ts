@@ -36,15 +36,6 @@ const LIMBS: [string, string][] = [
  */
 const CURL = [1.8, 0, 0];
 
-interface Hand {
-  hand: THREE.Bone;
-  /** Finger joints from the knuckle out; the rig moves all four fingers together. */
-  fingers: THREE.Bone[];
-  rest: THREE.Quaternion[];
-  upper: THREE.Bone;
-  lower: THREE.Bone;
-}
-
 interface Pair {
   src: THREE.Bone;
   dst: THREE.Bone;
@@ -65,7 +56,7 @@ export class ScanBody {
   private pelvisRest = new THREE.Vector3();
   /** The scan's hands, keyed by the game's elbow bone on the same side. */
   readonly hands = new Map<BoneName, THREE.Bone>();
-  private grips = new Map<BoneName, Hand>();
+  private arms = new Map<BoneName, ScanArm>();
 
   constructor(
     private root: THREE.Object3D,
@@ -136,15 +127,8 @@ export class ScanBody {
       ['Right', rightIs],
     ] as const) {
       const elbow = `elbow${s}` as BoneName;
-      const fingers = [1, 2, 3].map((n) => named.get(`${prefix}HandIndex${n}`)).filter((b): b is THREE.Bone => !!b);
       this.hands.set(elbow, bone(`${prefix}Hand`));
-      this.grips.set(elbow, {
-        hand: bone(`${prefix}Hand`),
-        fingers,
-        rest: fingers.map((f) => f.quaternion.clone()),
-        upper: bone(`${prefix}Arm`),
-        lower: bone(`${prefix}ForeArm`),
-      });
+      this.arms.set(elbow, new ScanArm(named, prefix));
     }
     this.hipsRest.copy(root.worldToLocal(this.hips.getWorldPosition(v)));
     this.pelvisRest.copy(root.worldToLocal(bones.pelvis.getWorldPosition(v)));
@@ -157,93 +141,22 @@ export class ScanBody {
 
   /** Closes the fingers of one hand, from open (0) to a full grip (1). */
   curl(elbow: BoneName, amount: number) {
-    const h = this.grips.get(elbow);
-    if (!h) return;
-    // Every finger joint bends about its own x axis, towards the palm.
-    h.fingers.forEach((f, i) => f.quaternion.copy(h.rest[i]).multiply(q.setFromAxisAngle(X, CURL[i] * amount)));
-    h.hand.updateMatrixWorld(true);
+    this.arms.get(elbow)?.curl(amount);
   }
 
   /** The middle of the palm in world space, where a held handle sits. */
   palm(elbow: BoneName, out = new THREE.Vector3()): THREE.Vector3 {
-    const h = this.grips.get(elbow)!;
-    const wrist = h.hand.getWorldPosition(new THREE.Vector3());
-    if (!h.fingers.length) return out.copy(wrist);
-    const along = h.fingers[0].getWorldPosition(new THREE.Vector3()).sub(wrist);
-    return out.copy(wrist).addScaledVector(along, 0.75).addScaledVector(this.facing(h), along.length() * 0.35);
+    return this.arms.get(elbow)!.palm(out);
   }
 
-  /** Which way the palm of a hand faces, in world space. */
-  private facing(h: Hand): THREE.Vector3 {
-    const along = h.fingers[0].getWorldPosition(new THREE.Vector3()).sub(h.hand.getWorldPosition(v));
-    // Fingers bend about their x axis, so the palm faces along (axis x fingers).
-    const axis = X.clone().applyQuaternion(h.fingers[0].getWorldQuaternion(q2));
-    return new THREE.Vector3().crossVectors(axis, along).normalize();
-  }
-
-  /**
-   * Bends one scanned arm so its palm lands as far along the line from `near` to `far` as the arm
-   * reaches, the elbow bowing towards `pole`, the palm turned to face `up` and the fingers, if
-   * given, pointing along `fingers`. The standard two-bone solve: the triangle of upper arm,
-   * forearm and reach fixes the elbow.
-   */
+  /** Bends one scanned arm to put its palm on a handle (see ScanArm.reach). */
   reach(elbow: BoneName, near: THREE.Vector3, far: THREE.Vector3, pole: THREE.Vector3, up: THREE.Vector3, fingers?: THREE.Vector3) {
-    const h = this.grips.get(elbow)!;
-    if (!h.fingers.length) return;
-    const s = h.upper.getWorldPosition(new THREE.Vector3());
-    const a = s.distanceTo(h.lower.getWorldPosition(v));
-    const b = h.lower.getWorldPosition(v).distanceTo(h.hand.getWorldPosition(new THREE.Vector3()));
-    // Turning the wrist moves the palm, so solve twice.
-    for (let pass = 0; pass < 2; pass++) {
-      // Aim the wrist so the palm, rather than the wrist, ends up on the target.
-      const offset = this.palm(elbow).sub(h.hand.getWorldPosition(v));
-      const wristAt = (t: number) => near.clone().lerp(far, t).sub(offset);
-      let lo = 0;
-      let hi = 1;
-      if (wristAt(1).distanceTo(s) <= a + b - 0.01) lo = 1;
-      else for (let i = 0; i < 12; i++) {
-        const mid = (lo + hi) / 2;
-        if (wristAt(mid).distanceTo(s) <= a + b - 0.01) lo = mid;
-        else hi = mid;
-      }
-      const toTarget = wristAt(lo).sub(s);
-      const d = THREE.MathUtils.clamp(toTarget.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
-      const dir = toTarget.normalize();
-      const x = (a * a - b * b + d * d) / (2 * d);
-      const bow = pole.clone().sub(s);
-      bow.addScaledVector(dir, -bow.dot(dir)).normalize();
-      const elbowAt = s.clone().addScaledVector(dir, x).addScaledVector(bow, Math.sqrt(Math.max(0, a * a - x * x)));
-      this.turn(h.upper, s, h.lower.getWorldPosition(new THREE.Vector3()), elbowAt);
-      this.turn(h.lower, elbowAt, h.hand.getWorldPosition(new THREE.Vector3()), s.clone().addScaledVector(dir, d));
-      // Roll the hand so the palm faces the handle.
-      const wrist = h.hand.getWorldPosition(new THREE.Vector3());
-      this.turn(h.hand, wrist, wrist.clone().add(this.facing(h)), wrist.clone().add(up));
-      // Then turn it about that facing so the fingers run the way the handle needs them to.
-      if (fingers) {
-        const axis = up.clone().normalize();
-        const flat = (d: THREE.Vector3) => d.addScaledVector(axis, -d.dot(axis)).normalize();
-        const was = flat(h.fingers[0].getWorldPosition(new THREE.Vector3()).sub(wrist));
-        const want = flat(fingers.clone());
-        const angle = Math.atan2(new THREE.Vector3().crossVectors(was, want).dot(axis), was.dot(want));
-        const world = h.hand.getWorldQuaternion(new THREE.Quaternion()).premultiply(new THREE.Quaternion().setFromAxisAngle(axis, angle));
-        h.hand.quaternion.copy(h.hand.parent!.getWorldQuaternion(q).invert().multiply(world));
-        h.hand.updateMatrixWorld(true);
-      }
-    }
+    this.arms.get(elbow)!.reach(near, far, pole, up, fingers);
   }
 
   /** Where a scanned arm's shoulder and elbow joints are, in world space. */
   arm(elbow: BoneName): [THREE.Vector3, THREE.Vector3] {
-    const h = this.grips.get(elbow)!;
-    return [h.upper.getWorldPosition(new THREE.Vector3()), h.lower.getWorldPosition(new THREE.Vector3())];
-  }
-
-  /** Swings a bone about the point `from` so the direction towards `was` points towards `want`. */
-  private turn(bone: THREE.Object3D, from: THREE.Vector3, was: THREE.Vector3, want: THREE.Vector3) {
-    const turn = new THREE.Quaternion().setFromUnitVectors(was.clone().sub(from).normalize(), want.clone().sub(from).normalize());
-    const world = bone.getWorldQuaternion(new THREE.Quaternion()).premultiply(turn);
-    bone.quaternion.copy(bone.parent!.getWorldQuaternion(q).invert().multiply(world));
-    bone.updateMatrixWorld(true);
+    return this.arms.get(elbow)!.joints();
   }
 
   /** Turns the scan's bones to match the game skeleton's current pose. */
@@ -264,4 +177,109 @@ export class ScanBody {
       p.dst.updateMatrixWorld(true);
     }
   }
+}
+
+/** One arm of a Mixamo-rigged scan: upper arm, forearm, hand and fingers, posed by code. */
+export class ScanArm {
+  readonly upper: THREE.Bone;
+  readonly lower: THREE.Bone;
+  readonly hand: THREE.Bone;
+  /** Finger joints from the knuckle out; the rig moves all four fingers together. */
+  private fingers: THREE.Bone[];
+  private rest: THREE.Quaternion[];
+
+  /** `named` holds the rig's bones without their mixamorig prefix; `prefix` is Left or Right. */
+  constructor(named: Map<string, THREE.Bone>, prefix: 'Left' | 'Right') {
+    this.upper = named.get(`${prefix}Arm`)!;
+    this.lower = named.get(`${prefix}ForeArm`)!;
+    this.hand = named.get(`${prefix}Hand`)!;
+    this.fingers = [1, 2, 3].map((n) => named.get(`${prefix}HandIndex${n}`)).filter((b): b is THREE.Bone => !!b);
+    this.rest = this.fingers.map((f) => f.quaternion.clone());
+  }
+
+  /** Closes the fingers, from open (0) to a full grip (1). */
+  curl(amount: number) {
+    // Every finger joint bends about its own x axis, towards the palm.
+    this.fingers.forEach((f, i) => f.quaternion.copy(this.rest[i]).multiply(q.setFromAxisAngle(X, CURL[i] * amount)));
+    this.hand.updateMatrixWorld(true);
+  }
+
+  /** The middle of the palm in world space, where a held handle sits. */
+  palm(out = new THREE.Vector3()): THREE.Vector3 {
+    const wrist = this.hand.getWorldPosition(new THREE.Vector3());
+    if (!this.fingers.length) return out.copy(wrist);
+    const along = this.fingers[0].getWorldPosition(new THREE.Vector3()).sub(wrist);
+    return out.copy(wrist).addScaledVector(along, 0.75).addScaledVector(this.facing(), along.length() * 0.35);
+  }
+
+  /** Which way the palm faces, in world space. */
+  private facing(): THREE.Vector3 {
+    const along = this.fingers[0].getWorldPosition(new THREE.Vector3()).sub(this.hand.getWorldPosition(v));
+    // Fingers bend about their x axis, so the palm faces along (axis x fingers).
+    const axis = X.clone().applyQuaternion(this.fingers[0].getWorldQuaternion(q2));
+    return new THREE.Vector3().crossVectors(axis, along).normalize();
+  }
+
+  /**
+   * Bends the arm so its palm lands as far along the line from `near` to `far` as the arm
+   * reaches, the elbow bowing towards `pole`, the palm turned to face `up` and the fingers, if
+   * given, pointing along `fingers`. The standard two-bone solve: the triangle of upper arm,
+   * forearm and reach fixes the elbow.
+   */
+  reach(near: THREE.Vector3, far: THREE.Vector3, pole: THREE.Vector3, up: THREE.Vector3, fingers?: THREE.Vector3) {
+    if (!this.fingers.length) return;
+    const s = this.upper.getWorldPosition(new THREE.Vector3());
+    const a = s.distanceTo(this.lower.getWorldPosition(v));
+    const b = this.lower.getWorldPosition(v).distanceTo(this.hand.getWorldPosition(new THREE.Vector3()));
+    // Turning the wrist moves the palm, so solve twice.
+    for (let pass = 0; pass < 2; pass++) {
+      // Aim the wrist so the palm, rather than the wrist, ends up on the target.
+      const offset = this.palm().sub(this.hand.getWorldPosition(v));
+      const wristAt = (t: number) => near.clone().lerp(far, t).sub(offset);
+      let lo = 0;
+      let hi = 1;
+      if (wristAt(1).distanceTo(s) <= a + b - 0.01) lo = 1;
+      else for (let i = 0; i < 12; i++) {
+        const mid = (lo + hi) / 2;
+        if (wristAt(mid).distanceTo(s) <= a + b - 0.01) lo = mid;
+        else hi = mid;
+      }
+      const toTarget = wristAt(lo).sub(s);
+      const d = THREE.MathUtils.clamp(toTarget.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
+      const dir = toTarget.normalize();
+      const x = (a * a - b * b + d * d) / (2 * d);
+      const bow = pole.clone().sub(s);
+      bow.addScaledVector(dir, -bow.dot(dir)).normalize();
+      const elbowAt = s.clone().addScaledVector(dir, x).addScaledVector(bow, Math.sqrt(Math.max(0, a * a - x * x)));
+      turn(this.upper, s, this.lower.getWorldPosition(new THREE.Vector3()), elbowAt);
+      turn(this.lower, elbowAt, this.hand.getWorldPosition(new THREE.Vector3()), s.clone().addScaledVector(dir, d));
+      // Roll the hand so the palm faces the handle.
+      const wrist = this.hand.getWorldPosition(new THREE.Vector3());
+      turn(this.hand, wrist, wrist.clone().add(this.facing()), wrist.clone().add(up));
+      // Then turn it about that facing so the fingers run the way the handle needs them to.
+      if (fingers) {
+        const axis = up.clone().normalize();
+        const flat = (d: THREE.Vector3) => d.addScaledVector(axis, -d.dot(axis)).normalize();
+        const was = flat(this.fingers[0].getWorldPosition(new THREE.Vector3()).sub(wrist));
+        const want = flat(fingers.clone());
+        const angle = Math.atan2(new THREE.Vector3().crossVectors(was, want).dot(axis), was.dot(want));
+        const world = this.hand.getWorldQuaternion(new THREE.Quaternion()).premultiply(new THREE.Quaternion().setFromAxisAngle(axis, angle));
+        this.hand.quaternion.copy(this.hand.parent!.getWorldQuaternion(q).invert().multiply(world));
+        this.hand.updateMatrixWorld(true);
+      }
+    }
+  }
+
+  /** Where the shoulder and elbow joints are, in world space. */
+  joints(): [THREE.Vector3, THREE.Vector3] {
+    return [this.upper.getWorldPosition(new THREE.Vector3()), this.lower.getWorldPosition(new THREE.Vector3())];
+  }
+}
+
+/** Swings a bone about the point `from` so the direction towards `was` points towards `want`. */
+function turn(bone: THREE.Object3D, from: THREE.Vector3, was: THREE.Vector3, want: THREE.Vector3) {
+  const by = new THREE.Quaternion().setFromUnitVectors(was.clone().sub(from).normalize(), want.clone().sub(from).normalize());
+  const world = bone.getWorldQuaternion(new THREE.Quaternion()).premultiply(by);
+  bone.quaternion.copy(bone.parent!.getWorldQuaternion(q).invert().multiply(world));
+  bone.updateMatrixWorld(true);
 }

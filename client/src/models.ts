@@ -28,6 +28,8 @@ interface Fit {
   length?: number;
   /** Parts of the file left out, by mesh name: spare magazines, bayonets, loose rounds. */
   drop?: RegExp;
+  /** The only parts of the file kept, by mesh name: one can or bottle out of a set of them. */
+  keep?: RegExp;
   /**
    * Loose bits merged into the same mesh as the gun, such as a shell lying beside it, cut out by
    * boxes of [back, front, bottom, top] as fractions of the turned model's length and height.
@@ -198,9 +200,57 @@ const FIT: Record<string, Fit> = {
   'food-corn': { width: 0.2 },
   // Lies at an angle in all three axes; found by lining the handle up with y and the head with z.
   'tool-sledgehammer': { height: 0.9, turn: [-2.679, -0.679, 2.835] },
+  // Things you carry (see itemScans.ts), at real size, standing up: one roll of bandage, one can
+  // and one bottle out of their sets, a handful of each kind of round.
+  'item-bandage': { height: 0.1, keep: /^Object_6$/ },
+  // Lies along x in the file, needle at +x; stood needle up.
+  'item-syringe': { height: 0.15, turn: [0, 0, Math.PI / 2] },
+  'item-pills': { height: 0.1 },
+  'item-cans': { height: 0.11, keep: /^canned_food_02001/ },
+  'item-water': { height: 0.25, keep: /^(Cover|Poster|BottleLowPol|Support_Cover)_/ },
+  'item-meat': { width: 0.22 },
+  'item-feedSack': { height: 0.45 },
+  'item-sack': { height: 0.3 },
+  'item-torch': { height: 0.6 },
+  'item-arrow': { width: 0.5 },
+  'item-pistolAmmo': { width: 0.1, keep: /^9mm_low00[0-4]_/ },
+  'item-rifleAmmo': { width: 0.14, keep: /^7_62_39mm_shell00[2-5]_/ },
+  'item-shotgunShell': { width: 0.15, keep: /^Shell(00[1-5])?_/ },
+  // A bundle of sticks lying along z; stood on end.
+  'item-dynamite': { height: 0.22, turn: [Math.PI / 2, 0, 0] },
+  'item-blueprints': { width: 0.3, keep: /^Object_6$/ },
+  'item-smoke': { height: 0.15 },
+  'item-ingot': { width: 0.16 },
+  'item-cloth': { width: 0.35, drop: /^Object_17$/ },
+  'item-wood': { width: 0.6 },
+  'item-fuel': { height: 0.45 },
+  // Ground clutter: a heap of old bricks, and a weathered timber off-cut laid on its side.
+  // Worn on the head (survivorLook.ts, armour.ts): sized to the scanned head.
+  // Wide enough to go over a head; armour.ts squashes it to a helmet's height.
+  'wear-can': { width: 0.21, turn: [Math.PI, 0, 0] },
+  'wear-welder': { height: 0.26, turn: [0, Math.PI / 2, 0] },
+  'wear-beanie': { width: 0.235 },
+  'wear-cap': { width: 0.29 },
+  'wear-hat': { width: 0.38 },
+  'wear-goggles': { width: 0.2 },
+  // An old rubber hood mask; its hose and filter are cut away below the chin.
+  'wear-gasmask': { height: 0.29, cut: [[-1, 2, -1, 0.8]] },
+  'brick-stack': { width: 1.2 },
+  timber: { length: 0.5, turn: [Math.PI / 2, 0, 0] },
 };
 
 const models = new Map<string, Model[]>();
+/** The vertex positions of every loaded model and character, so a mesh can be told to be one (see `isScanned`). */
+const scannedPositions = new WeakSet<object>();
+
+/** Whether a geometry draws a loaded model or character (or a lighter copy of one) rather than a shape built in code. */
+export const isScanned = (geo: THREE.BufferGeometry) => scannedPositions.has(geo.attributes.position);
+
+/** Counts a geometry made from scans (several merged into one, or cards cut from a scan's picture) as scanned. */
+export function markScanned<T extends THREE.BufferGeometry>(geo: T): T {
+  scannedPositions.add(geo.attributes.position);
+  return geo;
+}
 
 function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | undefined {
   const parts: THREE.BufferGeometry[] = [];
@@ -208,7 +258,7 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
   root.updateMatrixWorld(true);
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || fit.drop?.test(mesh.name)) return;
+    if (!mesh.isMesh || fit.drop?.test(mesh.name) || (fit.keep && !fit.keep.test(mesh.name))) return;
     const geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
     // Keep only what every part has, so the parts can be merged.
     for (const key of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(key)) geo.deleteAttribute(key);
@@ -312,7 +362,10 @@ async function load(loader: GLTFLoader, name: string) {
     alpha.flipY = false;
   }
   const out = roots.map((r) => build(r, fit, alpha)).filter((m): m is Model => !!m);
-  for (const m of out) m.geometry.name = name;
+  for (const m of out) {
+    m.geometry.name = name;
+    scannedPositions.add(m.geometry.attributes.position);
+  }
   if (out.length) models.set(name, out);
 }
 
@@ -328,6 +381,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isMesh) return;
+    scannedPositions.add(mesh.geometry.attributes.position);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     // Skinned bounds come from the bind pose, so give them room for swinging limbs (and lying
@@ -350,7 +404,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 /** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
 const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$|laptop$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
-const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|crop-(?!hemp)|food-|planter$|gear-saddle$)/.test(name);
+const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|item-|crop-(?!hemp)|food-|planter$|gear-saddle$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */
 const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 

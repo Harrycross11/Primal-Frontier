@@ -58,6 +58,7 @@ import { Guide } from './guide.ts';
 import { EventBanner } from './eventBanner.ts';
 import { countdown, HACK_SECONDS, type LiveEvent } from '../../shared/events.ts';
 import { ViewModel } from './viewModel.ts';
+import { auditItems, auditScene } from './audit.ts';
 import { Gate, clock, downloadedMb, health } from './gate.ts';
 import { pad } from './gamepad.ts';
 import { daylight } from '../../shared/sky.ts';
@@ -649,7 +650,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       return true;
     }
   })();
-  const view = new ViewModel();
+  const view = new ViewModel(welcome.you.look);
   camera.add(view.root);
   if (!camera.parent) world.scene.add(camera);
   /** Extra upward tilt from recoil that settles back by itself, on top of the climb you pull down. */
@@ -2016,6 +2017,20 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
         quality: gfx.quality,
       };
     },
+    /** Everything in the world and every item still built in code rather than scanned (see audit.ts). */
+    audit: () => ({
+      scene: auditScene(world.scene, (o) => {
+        if (o.userData.resourceId !== undefined) return `resource ${resources.find((r) => r.id === o.userData.resourceId)?.kind}`;
+        if (o.userData.deployableId !== undefined) return `deployable ${world.deployables.get(o.userData.deployableId)?.kind}`;
+        if (o.userData.pieceKey !== undefined) return 'building piece';
+        if (o.userData.door) return 'door';
+        if (o === view.root) return 'first-person hands';
+        for (const r of remotes.values()) if (o === r.avatar.root) return `player ${r.state.name}`;
+        if (o === me.root) return 'me';
+        return o.name || undefined;
+      }),
+      items: auditItems(),
+    }),
     paint: () => openPaint(),
     pause: () => pause.showMenu(),
     look: (yaw: number, pitch: number) => {
@@ -2063,6 +2078,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     aim: (on: boolean) => (aiming = on),
     fire: () => fire(),
     firstPerson: (on: boolean) => (firstPerson = on),
+    /** Where the first-person arms' joints are from the eye (x right, y up, -z ahead), to check they reach the grips. */
+    viewArms: () => view.joints(camera),
+    viewRoot: () => view.root,
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
