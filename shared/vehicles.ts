@@ -7,6 +7,7 @@
 import type { Box } from './building.ts';
 import { rayBox, type Vec3 } from './combat.ts';
 import { SITE_RADIUS, landmarkSites, terrainHeight } from './terrain.ts';
+import { generateResources } from './world.ts';
 
 export type VehicleKind = 'pickup' | 'sedan' | 'van' | 'jeep' | 'heli';
 
@@ -96,7 +97,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 3.6,
     width: 1.6,
     height: 0.9,
-    seat: { y: 0.55, left: 0.35, ahead: -0.3 },
+    seat: { y: 0.9, left: 0.35, ahead: -0.3 },
     tank: 80,
     range: 32,
   },
@@ -111,7 +112,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 7.6,
     width: 1.5,
     height: 1.7,
-    seat: { y: 0.95, left: 0.3, ahead: 1.3 },
+    seat: { y: 0.95, left: 0.22, ahead: 0.6 },
     tank: 60,
     range: 22,
     flies: { climb: 6, ceiling: 55 },
@@ -154,16 +155,59 @@ export interface VehicleState {
 
 /** Where each car is parked: just outside each landmark, on the side facing the middle of the map. */
 export function vehicleSpots(seed: number): { x: number; z: number; yaw: number }[] {
-  return landmarkSites(seed).map((s) => {
-    const len = Math.hypot(s.x, s.z);
-    // The middle land's landmark may sit near the very centre; park that car to its south.
-    const [ux, uz] = len > 10 ? [-s.x / len, -s.z / len] : [0, 1];
-    const d = SITE_RADIUS + 3;
+  return parked(seed).cars;
+}
+
+/** Each seed's parking spots, worked out once: finding a clear one looks through every tree. */
+const PARKED = new Map<number, { cars: { x: number; z: number; yaw: number }[]; helis: { spot: number; x: number; z: number; yaw: number }[] }>();
+
+/**
+ * The spot outside a landmark `d` metres out, `turn` radians round from the side facing the
+ * middle of the map, moved further round until no tree, rock or barrel is in its way.
+ */
+function clearSpot(seed: number, n: number, d: number, turn: number): { x: number; z: number; ux: number; uz: number } {
+  const s = landmarkSites(seed)[n];
+  const len = Math.hypot(s.x, s.z);
+  // The middle land's landmark may sit near the very centre; park that car to its south.
+  const base = len > 10 ? Math.atan2(-s.z / len, -s.x / len) : Math.PI / 2;
+  const nodes = resourcesNear(seed, s.x, s.z, d + 8);
+  let best = { x: 0, z: 0, ux: 0, uz: 0, room: -1 };
+  for (const step of [0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1, -1, 1.3, -1.3]) {
+    const a = base + turn + step;
+    const ux = Math.cos(a);
+    const uz = Math.sin(a);
     const x = s.x + ux * d;
     const z = s.z + uz * d;
+    const room = Math.min(Infinity, ...nodes.map((r) => Math.hypot(r.x - x, r.z - z)));
+    if (room > best.room) best = { x, z, ux, uz, room };
+    if (room > 4.5) break;
+  }
+  return best;
+}
+
+const RESOURCES = new Map<number, ReturnType<typeof generateResources>>();
+function resourcesNear(seed: number, x: number, z: number, r: number) {
+  let all = RESOURCES.get(seed);
+  if (!all) RESOURCES.set(seed, (all = generateResources(seed)));
+  return all.filter((n) => Math.hypot(n.x - x, n.z - z) < r);
+}
+
+function parked(seed: number) {
+  let out = PARKED.get(seed);
+  if (out) return out;
+  const d = SITE_RADIUS + 3;
+  const cars = landmarkSites(seed).map((_, n) => {
+    const { x, z, ux, uz } = clearSpot(seed, n, d, 0);
     // Parked side-on to the landmark.
     return { x, z, yaw: Math.atan2(uz, -ux) };
   });
+  const helis = PADS.map((n) => {
+    // A quarter of the way round from the car.
+    const { x, z, ux, uz } = clearSpot(seed, n, SITE_RADIUS + 6, Math.PI / 2);
+    return { spot: HELI_SPOT + n, x, z, yaw: Math.atan2(uz, -ux) };
+  });
+  PARKED.set(seed, (out = { cars, helis }));
+  return out;
 }
 
 /** Landmarks with a minicopter pad: the Ashlands' and Rust Mesa's. */
@@ -174,14 +218,7 @@ const PADS = [0, 2];
  * round from where the car is parked. Numbered from HELI_SPOT, so they never share a car's spot.
  */
 export function heliSpots(seed: number): { spot: number; x: number; z: number; yaw: number }[] {
-  const sites = landmarkSites(seed);
-  return PADS.map((n) => {
-    const s = sites[n];
-    const len = Math.hypot(s.x, s.z);
-    const [ux, uz] = len > 10 ? [-s.x / len, -s.z / len] : [0, 1];
-    const d = SITE_RADIUS + 6;
-    return { spot: HELI_SPOT + n, x: s.x - uz * d, z: s.z + ux * d, yaw: Math.atan2(ux, uz) };
-  });
+  return parked(seed).helis;
 }
 
 /** Forward and right along the ground for a heading. */

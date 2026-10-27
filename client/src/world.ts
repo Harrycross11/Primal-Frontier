@@ -46,6 +46,8 @@ const SCANNED_TREES = {
   tree: ['tree-pine', 'tree-spruce'],
   deadTree: ['tree-dead-old', 'tree-dead-pine', 'tree-dead-quiver', 'tree-quiver'],
 };
+/** Charges stuck to a wall or door, which stay exactly where they were put. */
+const STUCK_ON = new Set<Deployable['kind']>(['beancan', 'satchel', 'c4']);
 /** How far each kind may be let down into the ground to sit flush on a slope (see settle). */
 const SETTLE: Record<ResourceNode['kind'], number> = {
   tree: 0.5,
@@ -1178,6 +1180,8 @@ export class World {
       g = buildDeployable(d.kind);
       g.position.set(d.x, d.y, d.z);
       g.rotation.y = d.rot;
+      // Stood on a slope, the downhill side comes down to the ground rather than hanging in the air.
+      if (!STUCK_ON.has(d.kind) && Math.abs(d.y - terrainHeight(this.seed, d.x, d.z)) < 0.45) settle(g, this.seed, 0.2);
       g.traverse((o) => (o.userData.deployableId = id));
       this.scene.add(g);
       this.deployableMeshes.set(id, g);

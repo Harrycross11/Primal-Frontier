@@ -16,8 +16,8 @@ const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** Past this far the fog has all but hidden an animal, so it isn't drawn or animated. */
 const HIDE_BEYOND = 170;
-/** Past this far its legs move at a quarter of the frame rate, which nobody can see. */
-const STEP_SLOWLY_BEYOND = 50;
+/** Past this far its legs move at half the frame rate, and past twice this at a quarter. */
+const STEP_SLOWLY_BEYOND = 60;
 
 /** The scanned saddle's fitted length (models.ts FIT). */
 const SADDLE_LENGTH = 1;
@@ -358,7 +358,8 @@ class HoundView {
       this.root.position.set(at.x, at.y, at.z);
       this.root.rotation.y = at.yaw;
     }
-    // Lost in the fog: not drawn or animated at all. A way off: animated every fourth frame.
+    // Lost in the fog: not drawn or animated at all. A way off: animated every other frame,
+    // further still every fourth, which is too small to see stutter.
     this.root.visible = away < HIDE_BEYOND;
     if (dt > 0) {
       const v = Math.hypot(this.root.position.x - this.lastAt.x, this.root.position.z - this.lastAt.z) / dt;
@@ -366,8 +367,10 @@ class HoundView {
       this.lastAt.copy(this.root.position);
       this.stride();
     }
-    this.owed += dt;
-    if (!this.root.visible || (away > STEP_SLOWLY_BEYOND && ++this.frame % 4 !== 0)) return;
+    // Kept short so one coming back out of the fog doesn't leap through a whole clip.
+    this.owed = Math.min(this.owed + dt, 0.25);
+    const every = away > STEP_SLOWLY_BEYOND * 2 ? 4 : away > STEP_SLOWLY_BEYOND ? 2 : 1;
+    if (!this.root.visible || ++this.frame % every !== 0) return;
     this.mixer?.update(this.owed);
     this.owed = 0;
     if (this.collar && this.neck && this.head) {

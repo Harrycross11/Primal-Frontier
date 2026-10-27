@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { HALF_WORLD, WORLD_SIZE } from '../../shared/constants.ts';
 import { biomeAt, type BiomeId } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
+import { drawnGround } from './groundCheck.ts';
 import type { Decor } from '../../shared/world.ts';
 import { asphaltSurface, barkSurface, concreteSurface, farGroundSurface } from './textures.ts';
 import { lighter } from './lod.ts';
@@ -139,7 +140,8 @@ function buildScatter(scene: THREE.Scene, seed: number): Patch[] {
     for (let i = 0; i < count; i++) {
       const p = place(i);
       if (!p) continue;
-      const y = terrainHeight(seed, p.x, p.z);
+      // On the ground as drawn, which on rough slopes sits a little off the smooth curve.
+      const y = drawnGround(seed, p.x, p.z);
       // Nothing settles on a cliff face.
       if (p.flat && Math.hypot(terrainHeight(seed, p.x + 0.8, p.z) - y, terrainHeight(seed, p.x, p.z + 0.8) - y) > 0.8) continue;
       e.set(p.flat ? (rand() - 0.5) * 0.2 : rand() * Math.PI, rand() * Math.PI * 2, p.flat ? (rand() - 0.5) * 0.2 : rand() * Math.PI);

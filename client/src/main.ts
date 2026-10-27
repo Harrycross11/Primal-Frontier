@@ -2087,6 +2087,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     /** Where the first-person arms' joints are from the eye (x right, y up, -z ahead), to check they reach the grips. */
     viewArms: () => view.joints(camera),
     viewRoot: () => view.root,
+    /** The scanned body's width and depth at each height, for fitting armour (see Avatar.bodyBands). */
+    bodyBands: () => me.bodyBands(),
     /** What floats over or sinks into the ground within `range` of you, worst first (see groundCheck.ts). */
     ground: (range = 60) => {
       const near = (o: THREE.Object3D) => o.position.distanceTo(controller.position) < range;

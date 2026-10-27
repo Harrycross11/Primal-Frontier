@@ -107,6 +107,74 @@ function curvedPlate(radius: number, height: number, arc: number, taper = 1): TH
   return new THREE.CylinderGeometry(radius * taper, radius, height, 16, 1, true, -arc / 2, arc);
 }
 
+/**
+ * The scanned survivor's trunk, measured at each height in the avatar's own space (Avatar.bodyBands):
+ * [height, half width, front, back]. Clothes and plates over the chest are shaped to it.
+ */
+const TRUNK: [number, number, number, number][] = [
+  [0.95, 0.166, 0.114, -0.144],
+  [1.0, 0.188, 0.137, -0.164],
+  [1.1, 0.182, 0.132, -0.159],
+  [1.2, 0.183, 0.122, -0.165],
+  [1.3, 0.185, 0.108, -0.177],
+  [1.4, 0.189, 0.079, -0.171],
+  [1.45, 0.205, 0.068, -0.171],
+  [1.5, 0.2, 0.044, -0.149],
+  [1.55, 0.13, 0, -0.127],
+];
+
+/** The trunk's half width, front and back at a height, between the measured ones. */
+function trunkAt(y: number): [number, number, number] {
+  const i = THREE.MathUtils.clamp(TRUNK.findIndex((t) => t[0] >= y), 1, TRUNK.length - 1);
+  const [y0, ...a] = TRUNK[i - 1];
+  const [y1, ...b] = TRUNK[i];
+  const t = THREE.MathUtils.clamp((y - y0) / (y1 - y0), 0, 1);
+  return [0, 1, 2].map((k) => a[k] + (b[k] - a[k]) * t) as [number, number, number];
+}
+
+/** How far forward a trunk shell `off` metres clear of the body is, `x` to the side at height `y`. */
+function shellFront(x: number, y: number, off: number): number {
+  const [w, front, back] = trunkAt(y);
+  const a = Math.asin(THREE.MathUtils.clamp(x / (w + off), -1, 1));
+  return (front + back) / 2 + Math.cos(a) * ((front - back) / 2 + off);
+}
+
+/**
+ * A shell over the trunk from height `y0` to `y1`, standing `off` metres clear of it, round
+ * `arc` radians centred on the chest (2π for all the way round). Placed in avatar space, with
+ * the same UVs as a cylinder's so printed signs read the right way.
+ */
+function trunkShell(y0: number, y1: number, arc: number, off: number, rows = 8): THREE.BufferGeometry {
+  const cols = Math.max(8, Math.round(arc * 5));
+  const position: number[] = [];
+  const uv: number[] = [];
+  const index: number[] = [];
+  for (let r = 0; r <= rows; r++) {
+    const y = y1 - ((y1 - y0) * r) / rows;
+    const [w, front, back] = trunkAt(y);
+    const mid = (front + back) / 2;
+    const depth = (front - back) / 2;
+    for (let c = 0; c <= cols; c++) {
+      const a = -arc / 2 + (arc * c) / cols;
+      position.push(Math.sin(a) * (w + off), y, mid + Math.cos(a) * (depth + off));
+      uv.push(c / cols, 1 - r / rows);
+    }
+  }
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const a = r * (cols + 1) + c;
+      const b = a + cols + 1;
+      index.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /** The pieces of one armour item, or an empty list for anything else. */
 export function armourParts(item: ItemId): ArmourPart[] {
   const parts: ArmourPart[] = [];
@@ -137,13 +205,10 @@ export function armourParts(item: ItemId): ArmourPart[] {
       break;
     }
     case 'burlapShirt': {
-      add('torso', new THREE.CylinderGeometry(0.188, 0.172, 0.46, 20, 1, true), burlap(), 0, 1.2, 0.005).scale.set(1, 1, 0.74);
-      add('torso', new THREE.TorusGeometry(0.15, 0.014, 6, 24), rope(), 0, 1.0, 0.005, Math.PI / 2).scale.set(1.12, 0.85, 1);
-      for (const [side, s] of sides) {
-        const sleeve = add(`shoulder${s}`, new THREE.CylinderGeometry(0.075, 0.07, 0.17, 14, 1, true), burlap(), 0, 0, 0, 0, 0, side * ARM_REST);
-        const dir = new THREE.Vector3(side * Math.sin(ARM_REST), -Math.cos(ARM_REST), 0);
-        sleeve.position.set(side * 0.19, 1.4, 0).addScaledVector(dir, 0.09);
-      }
+      // Sacking hung over the jacket from the shoulders to the belt, tied round the waist; the
+      // jacket's own sleeves show through the arm holes.
+      add('torso', trunkShell(0.96, 1.52, Math.PI * 2, 0.012, 12), burlap(), 0, 0, 0);
+      add('torso', new THREE.TorusGeometry(0.15, 0.014, 6, 24), rope(), 0, 1.0, -0.013, Math.PI / 2).scale.set(1.33, 1.03, 1);
       break;
     }
     case 'burlapTrousers': {
@@ -179,18 +244,14 @@ export function armourParts(item: ItemId): ArmourPart[] {
     }
     case 'roadsignJacket': {
       // A sign on the chest, a smaller one on the belly, and bent plates on the shoulders.
-      add('torso', curvedPlate(0.2, 0.25, 1.5), sign('chevron'), 0, 1.3, -0.012).scale.set(1, 1, 0.73);
-      add('torso', curvedPlate(0.18, 0.15, 1.3), sign('warning'), 0, 1.1, -0.01, 0.06).scale.set(1, 1, 0.74);
-      rivets('torso', [
-        [-0.12, 1.4, 0.115],
-        [0.12, 1.4, 0.115],
-        [-0.12, 1.2, 0.12],
-        [0.12, 1.2, 0.12],
-      ]);
+      add('torso', trunkShell(1.18, 1.43, 1.5, 0.02), sign('chevron'), 0, 0, 0);
+      add('torso', trunkShell(1.03, 1.17, 1.3, 0.02), sign('warning'), 0, 0, 0);
+      rivets('torso', [-0.12, 0.12].flatMap((x) => [1.4, 1.21].map((y) => [x, y, shellFront(x, y, 0.024)] as [number, number, number])));
+      // Bent down over each shoulder, following its slope.
       for (const [side] of sides) {
-        add('torso', new RoundedBoxGeometry(0.16, 0.02, 0.2, 2, 0.008), sign('stop'), side * 0.17, 1.47, -0.01, 0, 0, side * -0.38);
+        add('torso', new RoundedBoxGeometry(0.15, 0.018, 0.2, 2, 0.008), sign('stop'), side * 0.16, 1.5, -0.05, 0, 0, side * -0.5);
       }
-      for (const x of [-0.1, 0.1]) add('torso', new THREE.BoxGeometry(0.035, 0.02, 0.3), strap(), x, 1.46, -0.01);
+      for (const x of [-0.1, 0.1]) add('torso', new THREE.BoxGeometry(0.035, 0.02, 0.24), strap(), x, 1.52, -0.05);
       break;
     }
     case 'roadsignKilt': {
@@ -228,19 +289,14 @@ export function armourParts(item: ItemId): ArmourPart[] {
       break;
     }
     case 'metalChestplate': {
-      add('torso', curvedPlate(0.205, 0.4, 1.9, 1.05), steel(), 0, 1.23, -0.01).scale.set(1, 1, 0.78);
+      add('torso', trunkShell(1.03, 1.43, 1.9, 0.02), steel(), 0, 0, 0);
       // A ridge down the middle and shoulder guards.
-      add('torso', new THREE.BoxGeometry(0.025, 0.36, 0.02), steel(), 0, 1.24, 0.15);
+      add('torso', new THREE.BoxGeometry(0.025, 0.36, 0.02), steel(), 0, 1.24, shellFront(0, 1.24, 0.03), -0.12);
       for (const [side] of sides) {
-        add('torso', curvedPlate(0.09, 0.14, 2.6), steel(), side * 0.21, 1.43, -0.01, 0, side * (Math.PI / 2), side * -0.5);
+        add('torso', curvedPlate(0.08, 0.12, 2.4), steel(), side * 0.2, 1.44, -0.05, 0, side * (Math.PI / 2), side * -0.5);
       }
-      for (const x of [-0.11, 0.11]) add('torso', new THREE.BoxGeometry(0.035, 0.02, 0.3), strap(), x, 1.45, -0.01);
-      rivets('torso', [
-        [-0.13, 1.4, 0.12],
-        [0.13, 1.4, 0.12],
-        [-0.13, 1.07, 0.11],
-        [0.13, 1.07, 0.11],
-      ]);
+      for (const x of [-0.11, 0.11]) add('torso', new THREE.BoxGeometry(0.035, 0.02, 0.24), strap(), x, 1.5, -0.05);
+      rivets('torso', [-0.13, 0.13].flatMap((x) => [1.4, 1.07].map((y) => [x, y, shellFront(x, y, 0.024)] as [number, number, number])));
       break;
     }
     case 'metalLegPlates': {
