@@ -2185,7 +2185,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
-    me.seated = riding !== null || driving !== null;
+    me.seated = riding !== null ? 'saddle' : driving !== null ? 'seat' : false;
     // Your own car goes where you drive it at once, rather than waiting on the server.
     const car = driving === null ? undefined : vehicles.views.get(driving);
     if (car && controller.car) {
@@ -2269,7 +2269,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
-      r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
+      r.avatar.seated = r.state.riding !== undefined ? 'saddle' : r.state.driving !== undefined ? 'seat' : false;
       r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
     creatures.update(dt, camera.position);

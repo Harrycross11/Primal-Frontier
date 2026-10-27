@@ -112,8 +112,8 @@ export class Avatar {
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
-  /** Astride an animal: sitting, legs either side. */
-  seated = false;
+  /** Sitting: astride an animal (legs either side), or on a car or minicopter seat. */
+  seated: false | 'saddle' | 'seat' = false;
   private tag: THREE.Sprite | null = null;
   /** Bind-pose positions of the bones, for hanging armour on them. */
   private boneAt = new Map<BoneName, THREE.Vector3>();
@@ -649,11 +649,13 @@ export class Avatar {
 
     if (this.seated && !this.dead) {
       // Sat on an animal's back (the avatar stands at the saddle): thighs forward and apart,
-      // shins hanging, sitting up straight with a gentle sway as it moves.
+      // shins hanging, sitting up straight with a gentle sway as it moves. In a car or the
+      // minicopter the knees are together and the feet forward on the floor.
+      const saddle = this.seated === 'saddle';
       b.root.position.set(0, -0.93, 0);
-      b.hipL.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipL')!.x));
-      b.hipR.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipR')!.x));
-      b.kneeL.rotation.x = b.kneeR.rotation.x = 1.25;
+      b.hipL.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipL')!.x));
+      b.hipR.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipR')!.x));
+      b.kneeL.rotation.x = b.kneeR.rotation.x = saddle ? 1.25 : 0.85;
       b.torso.rotation.set(0.05 + s * 0.04 * w, 0, 0);
       b.shoulderL.rotation.set(-0.5, 0, hang);
       b.shoulderR.rotation.set(-0.5, 0, -hang);

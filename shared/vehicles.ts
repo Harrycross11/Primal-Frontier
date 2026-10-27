@@ -112,7 +112,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 7.6,
     width: 1.5,
     height: 1.7,
-    seat: { y: 0.95, left: 0.22, ahead: 0.6 },
+    seat: { y: 1.05, left: 0.12, ahead: 0.65 },
     tank: 60,
     range: 22,
     flies: { climb: 6, ceiling: 55 },
