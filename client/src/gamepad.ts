@@ -85,9 +85,10 @@ export class Gamepads {
       if (Math.abs(e.movementX) + Math.abs(e.movementY) > 2) this.setActive(false);
     });
     addEventListener('keydown', (e) => e.isTrusted && this.setActive(false));
+    // The next frame is asked for first, so one bad frame can't leave the pad dead for good.
     const loop = (now: number) => {
-      this.tick(now / 1000);
       requestAnimationFrame(loop);
+      this.tick(now / 1000);
     };
     requestAnimationFrame(loop);
   }
