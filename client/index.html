@@ -875,6 +875,26 @@
       #help .pad-help, body.pad #help .mouse-help, body.pad #guide .guide-hide { display: none; }
       body.pad #help .pad-help { display: block; }
       @media (prefers-reduced-motion: reduce) { #pad-ring { transition: none; } }
+      /* A phone held upright: the belt fits the width, the vitals sit above it, and the corner
+         panels and event banner move down out from under the compass. */
+      @media (max-width: 560px) {
+        #belt { bottom: 8px; gap: 4px; }
+        #belt .slot { width: 50px; height: 50px; }
+        #belt .slot svg, #belt .slot .icon { inset: 5px; width: 36px; height: 36px; }
+        #vitals { right: 8px; bottom: 66px; width: 180px; }
+        #top-left { left: 8px; top: 62px; padding: 7px 10px; font-size: 12px; }
+        #resources { right: 8px; top: 62px; max-width: calc(100% - 200px); }
+        #netstats { right: 8px; top: 96px; }
+        /* Shrunk to the screen's width, keeping its shape. */
+        #compass { width: calc(100vw - 16px) !important; height: auto !important; }
+        #event-banner { top: 140px; min-width: 0; width: calc(100% - 32px); }
+        /* The inventory, a box and crafting stack one above another, scrolling, at full width. */
+        #screen { flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px 8px 90px; }
+        #screen .grid { grid-template-columns: repeat(6, 48px); gap: 4px; }
+        #screen .slot { width: 48px; height: 48px; }
+        #screen .slot svg, #screen .slot .icon { inset: 5px; width: 34px; height: 34px; }
+        #crafting { width: 100%; max-width: 360px; }
+      }
     </style>
   </head>
   <body>
