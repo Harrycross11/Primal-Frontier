@@ -62,6 +62,8 @@ import { auditItems, auditScene } from './audit.ts';
 import { Gate, clock, downloadedMb, health } from './gate.ts';
 import { pad } from './gamepad.ts';
 import { daylight } from '../../shared/sky.ts';
+import { Track } from './track.ts';
+import { groundGaps } from './groundCheck.ts';
 
 const RESOURCE_NAMES = {
   tree: 'Living tree',
@@ -116,7 +118,8 @@ const RAIDER_RED = 0xa8261c;
 interface Remote {
   state: PlayerState;
   avatar: Avatar;
-  target: THREE.Vector3;
+  /** Their snapshots from the server, drawn smoothly a moment behind. */
+  track: Track;
 }
 
 const hud = new Hud();
@@ -618,7 +621,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
-    remotes.set(p.id, { state: p, avatar, target: new THREE.Vector3(p.x, p.y, p.z) });
+    const track = new Track();
+    track.push(performance.now(), p.x, p.y, p.z, p.yaw);
+    remotes.set(p.id, { state: p, avatar, track });
     if (teamIds.includes(p.id) || p.title) avatar.setTag(p.name, p.color, teamIds.includes(p.id), p.title);
   };
   welcome.players.forEach(addRemote);
@@ -681,14 +686,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   };
   pause.onOpen = () => net.send({ t: 'getAccount' });
   try {
-    pause.look = controller.lookSpeed = Number(localStorage.getItem('pf-look')) || 1;
+    // Kept apart from the survivor's look ('pf-look'), which saving the speed there used to wipe.
+    pause.look = controller.lookSpeed = Number(localStorage.getItem('pf-look-speed')) || 1;
   } catch {
     // Storage unavailable: normal speed.
   }
   pause.onLook = (speed) => {
     controller.lookSpeed = speed;
     try {
-      localStorage.setItem('pf-look', String(speed));
+      localStorage.setItem('pf-look-speed', String(speed));
     } catch {
       // Not remembered; it still applies now.
     }
@@ -793,7 +799,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
           const r = remotes.get(p.id);
           if (!r) continue;
           r.state = p;
-          r.target.set(p.x, p.y, p.z);
+          r.track.push(performance.now(), p.x, p.y, p.z, p.yaw);
         }
         creatures.sync(m.creatures);
         vehicles.sync(m.vehicles);
@@ -2081,6 +2087,18 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     /** Where the first-person arms' joints are from the eye (x right, y up, -z ahead), to check they reach the grips. */
     viewArms: () => view.joints(camera),
     viewRoot: () => view.root,
+    /** The scanned body's width and depth at each height, for fitting armour (see Avatar.bodyBands). */
+    bodyBands: () => me.bodyBands(),
+    /** What floats over or sinks into the ground within `range` of you, worst first (see groundCheck.ts). */
+    ground: (range = 60) => {
+      const near = (o: THREE.Object3D) => o.position.distanceTo(controller.position) < range;
+      const objects = [
+        ...[...world.resourceMeshes.values()].filter(near).map((root) => ({ label: `resource ${root.userData.kind}`, root })),
+        ...[...world.deployableMeshes].filter(([, root]) => near(root)).map(([id, root]) => ({ label: `deployable ${world.deployables.get(id)?.kind}`, root })),
+        ...world.landmarkProps.filter((p) => near(p.root)).map((p) => ({ label: `landmark ${p.label}`, root: p.root })),
+      ];
+      return groundGaps(objects, world.seed);
+    },
     deployAt: (item: DeployableKind, x: number, z: number, rot = 0) => {
       const n = slots.findIndex((s, i) => i < 6 && s?.item === item);
       if (n < 0) return false;
@@ -2167,7 +2185,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
     me.root.rotation.y = controller.yaw + Math.PI;
-    me.seated = riding !== null || driving !== null;
+    me.seated = riding !== null ? 'saddle' : driving !== null ? 'seat' : false;
     // Your own car goes where you drive it at once, rather than waiting on the server.
     const car = driving === null ? undefined : vehicles.views.get(driving);
     if (car && controller.car) {
@@ -2243,13 +2261,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       for (const d of world.deployables.values()) if (CHARGE_KINDS.includes(d.kind)) effects.chargeSound(d.kind as ExplosiveId, new THREE.Vector3(d.x, d.y, d.z));
     }
 
+    const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
     for (const r of remotes.values()) {
-      r.avatar.root.position.lerp(r.target, Math.min(1, dt * 12));
-      r.avatar.root.rotation.y = r.state.yaw + Math.PI;
+      const at = r.track.sample(now, drawn);
+      r.avatar.root.position.set(at.x, at.y, at.z);
+      r.avatar.root.rotation.y = at.yaw + Math.PI;
       r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
-      r.avatar.seated = r.state.riding !== undefined || r.state.driving !== undefined;
+      r.avatar.seated = r.state.riding !== undefined ? 'saddle' : r.state.driving !== undefined ? 'seat' : false;
       r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
     creatures.update(dt, camera.position);

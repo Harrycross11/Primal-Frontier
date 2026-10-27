@@ -9,6 +9,7 @@ import { DOORWAY, MAX_HP, ROOF_RISE, STOREY, THICK, TILE, pieceBoxes, pieceKey, 
 import { DEPLOYABLE_INFO, type Deployable } from '../../shared/deployables.ts';
 import { BIOME_IDS, biomeWeights } from '../../shared/biomes.ts';
 import { craters, mulberry32, terrainHeight } from '../../shared/terrain.ts';
+import { drawnGround, settle } from './groundCheck.ts';
 import { RESOURCE_INFO, generateDecor, type Decor, type ResourceNode } from '../../shared/world.ts';
 import { landmarks, toWorld } from '../../shared/landmarks.ts';
 import { buildCar } from './car.ts';
@@ -45,6 +46,21 @@ const SCANNED_TREES = {
   tree: ['tree-pine', 'tree-spruce'],
   deadTree: ['tree-dead-old', 'tree-dead-pine', 'tree-dead-quiver', 'tree-quiver'],
 };
+/** Charges stuck to a wall or door, which stay exactly where they were put. */
+const STUCK_ON = new Set<Deployable['kind']>(['beancan', 'satchel', 'c4']);
+/** How far each kind may be let down into the ground to sit flush on a slope (see settle). */
+const SETTLE: Record<ResourceNode['kind'], number> = {
+  tree: 0.5,
+  deadTree: 0.8,
+  hemp: 0.3,
+  mushroom: 0.2,
+  waterBarrel: 0.25,
+  scrap: 0.3,
+  stone: 0.3,
+  metalOre: 0.3,
+  sulfurOre: 0.3,
+  hqmOre: 0.3,
+};
 const VIEW = 240;
 /**
  * How far off smaller things still show: a clump of hemp or a barrel is a speck in the haze
@@ -64,6 +80,8 @@ export class World {
   private doorSwing = new Map<string, number>();
   readonly terrain: THREE.Mesh;
   readonly resourceMeshes = new Map<number, THREE.Group>();
+  /** The landmarks' buildings and props, by model name, for the ground check. */
+  readonly landmarkProps: { label: string; root: THREE.Object3D }[] = [];
   readonly pieces = new Map<string, Piece>();
   readonly pieceMeshes = new Map<string, THREE.Group>();
   readonly deployables = new Map<number, Deployable>();
@@ -759,6 +777,7 @@ export class World {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.scene.add(mesh);
+        this.landmarkProps.push({ label: prop.model, root: mesh });
         if (prop.solid) this.cameraBlockers.push(mesh);
         for (const [x0, x1, z0, z1, h] of prop.solid ?? []) {
           // Turn the box's corners with the prop, then the landmark, and take their bounds.
@@ -788,6 +807,7 @@ export class World {
         m.castShadow = true;
         m.receiveShadow = true;
         this.scene.add(m);
+        this.landmarkProps.push({ label: piece === tyre ? 'tyre' : piece === barrel ? 'barrel' : 'stones', root: m });
       }
     }
   }
@@ -852,6 +872,9 @@ export class World {
       g.position.set(node.x, node.y, node.z);
       g.rotation.y = node.rot;
       g.scale.setScalar(node.scale);
+      // Sat down onto the ground as drawn, so on a slope no side of it floats.
+      if (node.kind === 'scrap') this.lieOnSlope(g, node.rot);
+      settle(g, this.seed, SETTLE[node.kind]);
       g.userData.baseScale = node.scale;
       g.userData.kind = node.kind;
       g.traverse((o) => {
@@ -1058,6 +1081,23 @@ export class World {
   }
 
   /** A rusted-out old car, with a loose sheet of scrap lying beside it. */
+  /**
+   * Tips a wreck to lie along the slope it sits on, rather than level with one end dug into the
+   * hill and the other in the air. Wrecks run along their own x.
+   */
+  private lieOnSlope(g: THREE.Group, rot: number) {
+    const [L, W] = [2.1, 0.85];
+    const [cx, cz] = [g.position.x, g.position.z];
+    const h = (along: number, across: number) =>
+      drawnGround(this.seed, cx + Math.cos(rot) * along + Math.sin(rot) * across, cz - Math.sin(rot) * along + Math.cos(rot) * across);
+    const front = h(L, 0);
+    const back = h(-L, 0);
+    const left = h(0, -W);
+    const right = h(0, W);
+    g.rotation.set(-Math.atan2(right - left, 2 * W), rot, Math.atan2(front - back, 2 * L), 'YXZ');
+    g.position.y = (front + back + left + right) / 4;
+  }
+
   private wreck(rand: () => number): THREE.Group {
     const scan = model(WRECKS[Math.floor(rand() * WRECKS.length)]);
     let g: THREE.Group;
@@ -1140,6 +1180,8 @@ export class World {
       g = buildDeployable(d.kind);
       g.position.set(d.x, d.y, d.z);
       g.rotation.y = d.rot;
+      // Stood on a slope, the downhill side comes down to the ground rather than hanging in the air.
+      if (!STUCK_ON.has(d.kind) && Math.abs(d.y - terrainHeight(this.seed, d.x, d.z)) < 0.45) settle(g, this.seed, 0.2);
       g.traverse((o) => (o.userData.deployableId = id));
       this.scene.add(g);
       this.deployableMeshes.set(id, g);

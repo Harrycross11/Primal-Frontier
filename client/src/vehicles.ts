@@ -8,6 +8,9 @@ import { VEHICLES, axes, rayVehicle, type VehicleKind, type VehicleState } from 
 import type { Effects } from './effects.ts';
 import { character } from './models.ts';
 import { painted, type PaintMode } from './paint.ts';
+import { Track } from './track.ts';
+
+const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** Which parts of a mesh take paint: the whole surface, only its coloured parts, or none. */
 type PaintRule = (mesh: THREE.Mesh, material: THREE.Material) => PaintMode | null;
@@ -37,7 +40,8 @@ class VehicleView {
   private surfaces: { mesh: THREE.Mesh; base: THREE.Material }[] = [];
   private shownKind: VehicleKind;
   private shownPaint = 0;
-  private target = new THREE.Vector3();
+  /** The server's snapshots, drawn smoothly a moment behind. */
+  private track = new Track();
   private yaw: number;
   /** Speed along its heading as last seen, for the wheels and the engine. */
   speed = 0;
@@ -53,7 +57,7 @@ class VehicleView {
     this.build();
     this.repaint();
     this.root.position.set(state.x, state.y, state.z);
-    this.target.copy(this.root.position);
+    this.track.push(performance.now(), state.x, state.y, state.z, state.yaw);
   }
 
   /** The scanned truck turned to face along -z (its heading), sat on the ground, wheels free to spin. */
@@ -122,7 +126,7 @@ class VehicleView {
 
   sync(state: VehicleState) {
     this.state = state;
-    this.target.set(state.x, state.y, state.z);
+    this.track.push(performance.now(), state.x, state.y, state.z, state.yaw);
     if (state.kind !== this.shownKind) {
       this.shownKind = state.kind;
       this.build();
@@ -143,8 +147,7 @@ class VehicleView {
 
   /** Puts it right under its driver (you), rather than where the server last had it. */
   carry(x: number, z: number, yaw: number, speed: number, y = terrainHeight(this.seed, x, z)) {
-    this.target.set(x, y, z);
-    this.root.position.copy(this.target);
+    this.root.position.set(x, y, z);
     this.yaw = yaw;
     this.speed = speed;
   }
@@ -152,10 +155,9 @@ class VehicleView {
   update(dt: number, mine: boolean) {
     if (!mine) {
       const was = this.root.position.clone();
-      this.root.position.lerp(this.target, Math.min(1, dt * 10));
-      let d = this.state.yaw - this.yaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      this.yaw += d * Math.min(1, dt * 10);
+      const at = this.track.sample(performance.now(), drawn);
+      this.root.position.set(at.x, at.y, at.z);
+      this.yaw = at.yaw;
       const { fx, fz } = axes(this.yaw);
       const moved = (this.root.position.x - was.x) * fx + (this.root.position.z - was.z) * fz;
       this.speed += ((dt > 0 ? moved / dt : 0) - this.speed) * Math.min(1, dt * 6);

@@ -112,8 +112,8 @@ export class Avatar {
   private recoilTimer = 0;
   private reloadTimer = 0;
   private dead = false;
-  /** Astride an animal: sitting, legs either side. */
-  seated = false;
+  /** Sitting: astride an animal (legs either side), or on a car or minicopter seat. */
+  seated: false | 'saddle' | 'seat' = false;
   private tag: THREE.Sprite | null = null;
   /** Bind-pose positions of the bones, for hanging armour on them. */
   private boneAt = new Map<BoneName, THREE.Vector3>();
@@ -378,6 +378,38 @@ export class Avatar {
     for (const kind of ['hood', 'face'] as const) for (const o of this.gear[kind]) o.visible = !hidden.has(kind);
   }
 
+  /**
+   * How wide and deep the scanned body is at each height, from its trunk's skinned vertices in
+   * the avatar's own space, for fitting armour to it (window.__pf.bodyBands; players never run it).
+   */
+  bodyBands(step = 0.05): { y: number; x: [number, number]; z: [number, number] }[] {
+    const bands = new Map<number, { y: number; x: [number, number]; z: [number, number] }>();
+    this.root.updateMatrixWorld(true);
+    const toRoot = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
+    const p = new THREE.Vector3();
+    this.root.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      const bones = m.skeleton.bones;
+      const index = m.geometry.attributes.skinIndex;
+      const weight = m.geometry.attributes.skinWeight;
+      for (let i = 0; i < m.geometry.attributes.position.count; i += 3) {
+        // Only the trunk: the bone with the most weight is the spine, hips, neck or a collarbone.
+        let best = 0;
+        for (let k = 1; k < 4; k++) if (weight.getComponent(i, k) > weight.getComponent(i, best)) best = k;
+        if (!/Spine|Hips|Neck|Shoulder/.test(bones[index.getComponent(i, best)]?.name ?? '')) continue;
+        m.getVertexPosition(i, p);
+        p.applyMatrix4(m.matrixWorld).applyMatrix4(toRoot);
+        const key = Math.round(p.y / step);
+        const b = bands.get(key) ?? { y: +(key * step).toFixed(2), x: [Infinity, -Infinity], z: [Infinity, -Infinity] };
+        b.x = [Math.min(b.x[0], p.x), Math.max(b.x[1], p.x)];
+        b.z = [Math.min(b.z[0], p.z), Math.max(b.z[1], p.z)];
+        bands.set(key, b);
+      }
+    });
+    return [...bands.values()].sort((a, b) => a.y - b.y).map((b) => ({ y: b.y, x: [+b.x[0].toFixed(3), +b.x[1].toFixed(3)], z: [+b.z[0].toFixed(3), +b.z[1].toFixed(3)] }));
+  }
+
   /** World position of the torch flame they hold, or null without one. */
   flamePosition(out = new THREE.Vector3()): THREE.Vector3 | null {
     if (!this.flame || this.dead) return null;
@@ -617,11 +649,13 @@ export class Avatar {
 
     if (this.seated && !this.dead) {
       // Sat on an animal's back (the avatar stands at the saddle): thighs forward and apart,
-      // shins hanging, sitting up straight with a gentle sway as it moves.
+      // shins hanging, sitting up straight with a gentle sway as it moves. In a car or the
+      // minicopter the knees are together and the feet forward on the floor.
+      const saddle = this.seated === 'saddle';
       b.root.position.set(0, -0.93, 0);
-      b.hipL.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipL')!.x));
-      b.hipR.rotation.set(-1.35, 0, 0.32 * Math.sign(this.boneAt.get('hipR')!.x));
-      b.kneeL.rotation.x = b.kneeR.rotation.x = 1.25;
+      b.hipL.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipL')!.x));
+      b.hipR.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipR')!.x));
+      b.kneeL.rotation.x = b.kneeR.rotation.x = saddle ? 1.25 : 0.85;
       b.torso.rotation.set(0.05 + s * 0.04 * w, 0, 0);
       b.shoulderL.rotation.set(-0.5, 0, hang);
       b.shoulderR.rotation.set(-0.5, 0, -hang);

@@ -1896,7 +1896,10 @@ export class Game {
     // Worn armour goes in the bag too, after the inventory.
     const carried = [...victim.slots, ...victim.wear];
     if (carried.some(Boolean)) {
-      const bag = newDeployable(this.nextDeployableId++, 'lootBag', victim.x, victim.y, victim.z, victim.yaw, 0);
+      // On whatever is under them: a survivor shot off a ladder, mid-jump or out of the saddle
+      // drops their bag to the floor or ground, not in the air.
+      const bagY = this.groundBelow(victim.x, victim.y + 0.5, victim.z);
+      const bag = newDeployable(this.nextDeployableId++, 'lootBag', victim.x, bagY, victim.z, victim.yaw, 0);
       bag.slots = carried;
       bag.label = victim.name;
       this.deployables.set(bag.id, bag);
