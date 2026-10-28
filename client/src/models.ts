@@ -270,6 +270,23 @@ export function markScanned<T extends THREE.BufferGeometry>(geo: T): T {
   return geo;
 }
 
+/**
+ * Glass that bends the light behind it (transmission) makes three.js draw everything solid a
+ * second time, into a picture behind the glass, on every frame the glass is in view: a petrol
+ * station's windows doubled the work of the whole view. Plain see-through glass looks much the
+ * same at a glance.
+ */
+export function plainGlass(material: THREE.Material | THREE.Material[]) {
+  for (const m of Array.isArray(material) ? material : [material]) {
+    const glass = m as THREE.MeshPhysicalMaterial;
+    if (!glass.isMeshPhysicalMaterial || !(glass.transmission > 0)) continue;
+    glass.opacity = Math.min(glass.opacity, 1 - glass.transmission * 0.65);
+    glass.transmission = 0;
+    glass.transparent = true;
+    glass.depthWrite = false;
+  }
+}
+
 function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | undefined {
   const parts: THREE.BufferGeometry[] = [];
   const materials: THREE.MeshStandardMaterial[] = [];
@@ -283,6 +300,7 @@ function build(root: THREE.Object3D, fit: Fit, alpha?: THREE.Texture): Model | u
     // Untextured parts (a door's handles) come without UVs; give them blank ones to merge.
     if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
     parts.push(geo);
+    plainGlass(mesh.material);
     materials.push(mesh.material as THREE.MeshStandardMaterial);
   });
   if (!parts.length) return undefined;
@@ -412,6 +430,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
       mesh.computeBoundingSphere();
       mesh.boundingSphere!.radius *= 1.6;
     }
+    plainGlass(mesh.material);
     const m = mesh.material as THREE.MeshStandardMaterial;
     if (m.map) m.map.anisotropy = 8;
   });
@@ -518,8 +537,10 @@ export function warmShaders(renderer: THREE.WebGLRenderer, camera: THREE.Camera,
   // of the map, the lands you haven't been to, the stand-ins. Each one left out stalled a frame
   // when you turned or walked to face it.
   const hidden: THREE.Object3D[] = [];
+  // Not the lights, though: shaders are built for the lights shown, and one switched off for the
+  // game (the menu's spotlight on the survivor) would have every shader built for the wrong set.
   scene.traverse((o) => {
-    if (o.visible) return;
+    if (o.visible || (o as THREE.Light).isLight) return;
     o.visible = true;
     hidden.push(o);
   });
@@ -567,6 +588,8 @@ function standIns(): THREE.Mesh[] {
 function warmShadows(scene: THREE.Scene, camera: THREE.Camera, roots: THREE.Object3D[]) {
   const kinds = new Set<string>();
   const stand = new THREE.Group();
+  // Only there for the renderer: kept out of the map's photo from above.
+  stand.userData.warmUp = true;
   for (const root of roots) {
     root.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -593,6 +616,7 @@ function warmShadows(scene: THREE.Scene, camera: THREE.Camera, roots: THREE.Obje
   // few common shadow shaders; small stand-ins with each are drawn once, just behind the camera,
   // where the sun's shadow still reaches but the view doesn't.
   const near = new THREE.Group();
+  near.userData.warmUp = true;
   if (!shadowStandIns) {
     shadowStandIns = standIns();
     near.add(...shadowStandIns);

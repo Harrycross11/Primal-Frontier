@@ -80,8 +80,6 @@ export class Effects {
   private tosses: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; t: number; time: number; done: () => void }[] = [];
   /** How hard the camera should shake right now, from nearby blasts; read and eased by the game. */
   shake = 0;
-  /** One light reused for every muzzle flash: adding and removing lights makes three.js recompile shaders. */
-  private flashLight = new THREE.PointLight(0xffa860, 0, 7, 1.6);
   private flashLife = 0;
   private tracerMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
   private arrowMat = new THREE.MeshBasicMaterial({ color: 0x6a5030, transparent: true });
@@ -114,8 +112,11 @@ export class Effects {
   /** The camera, so world sounds are panned and fade with distance. */
   listener: THREE.Camera | null = null;
 
-  constructor(private scene: THREE.Scene) {
-    scene.add(this.flashLight);
+  constructor(
+    private scene: THREE.Scene,
+    /** One light reused for every muzzle flash and blast (the world's own: see `World.flash`). */
+    private flashLight: THREE.PointLight,
+  ) {
     this.loadSamples();
   }
 
