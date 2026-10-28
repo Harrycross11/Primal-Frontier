@@ -14,6 +14,10 @@ const $ = (id: string) => document.getElementById(id)!;
 const SIZE = 360;
 /** Pixels across the map as drawn, so the marks and names stay sharp. */
 const OUT = 1000;
+/** Seconds into the game before the map starts being drawn in the background. */
+const MAKE_AFTER = 25;
+/** Rows of the land's shading worked out between pauses. */
+const ROWS = 24;
 
 /** The radiation hazard sign: three blades round a dot. */
 function hazard(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string) {
@@ -53,6 +57,11 @@ export interface MapMarks {
 
 export class WorldMap {
   private base: HTMLCanvasElement | null = null;
+  /** The base being drawn a little at a time, in the background, before anyone opens the map. */
+  private making: Generator<void, HTMLCanvasElement> | null = null;
+  /** Seconds since the game started; the map is drawn once the start has settled down. */
+  private age = 0;
+  private drawnAt = 0;
   private canvas = $('map-canvas') as HTMLCanvasElement;
   private land: BiomeId | null = null;
   private bannerTimer = 0;
@@ -61,8 +70,8 @@ export class WorldMap {
   constructor(
     private seed: number,
     private decor: Decor[],
-    /** The world photographed from above, to draw the map on; without it the lands are painted flat. */
-    private aerial?: () => HTMLCanvasElement | null,
+    /** The world photographed from above a tile at a time, to draw the map on; without it the lands are painted flat. */
+    private aerial?: () => { canvas: HTMLCanvasElement; next: () => boolean },
   ) {}
 
   get open(): boolean {
@@ -80,7 +89,10 @@ export class WorldMap {
 
   /** Keeps the map's marks moving while it is open, and names a land when you enter it. */
   update(dt: number, marks: MapMarks) {
-    if (this.open) this.draw(marks);
+    this.age += dt;
+    // A few frames a second keep the marks moving; redrawing the whole sheet every frame is wasted.
+    if (this.open && performance.now() - this.drawnAt > 60) this.draw(marks);
+    else if (!this.base && this.age > MAKE_AFTER) this.work(3);
     this.checkIn -= dt;
     if (this.checkIn > 0) return;
     this.checkIn = 0.5;
@@ -100,11 +112,27 @@ export class WorldMap {
     return [((x + HALF_WORLD) / WORLD_SIZE) * OUT, ((z + HALF_WORLD) / WORLD_SIZE) * OUT];
   }
 
+  /** Draws more of the base for about `ms` milliseconds (all of it if it is needed now). */
+  private work(ms: number) {
+    this.making ??= this.drawBase();
+    const until = performance.now() + ms;
+    for (;;) {
+      const step = this.making.next();
+      if (step.done) {
+        this.base = step.value;
+        this.making = null;
+        return;
+      }
+      if (performance.now() > until) return;
+    }
+  }
+
   /**
    * The lands as a survey map: muted colours, hill shading and contour lines, a lettered grid,
-   * the radiation zones, ruins, road and landmarks, and the lands' names. Drawn once.
+   * the radiation zones, ruins, road and landmarks, and the lands' names. Drawn once, pausing
+   * (yield) between slices of the work so it can be spread over frames.
    */
-  private drawBase(): HTMLCanvasElement {
+  private *drawBase(): Generator<void, HTMLCanvasElement> {
     const land = document.createElement('canvas');
     land.width = land.height = SIZE;
     const lctx = land.getContext('2d')!;
@@ -122,6 +150,7 @@ export class WorldMap {
     const heights = new Float32Array(SIZE * SIZE);
     for (let j = 0; j < SIZE; j++) {
       for (let i = 0; i < SIZE; i++) heights[j * SIZE + i] = terrainHeight(this.seed, -HALF_WORLD + (i + 0.5) * step, -HALF_WORLD + (j + 0.5) * step);
+      if (j % ROWS === ROWS - 1) yield;
     }
     const height = (i: number, j: number) => heights[Math.max(0, Math.min(SIZE - 1, j)) * SIZE + Math.max(0, Math.min(SIZE - 1, i))];
     for (let j = 0; j < SIZE; j++) {
@@ -157,6 +186,7 @@ export class WorldMap {
         img.data[at + 2] = Math.min(255, b * shade);
         img.data[at + 3] = 255;
       }
+      if (j % ROWS === ROWS - 1) yield;
     }
     lctx.putImageData(img, 0, 0);
 
@@ -167,7 +197,11 @@ export class WorldMap {
     ctx.drawImage(land, 0, 0, OUT, OUT);
     let photo: HTMLCanvasElement | null = null;
     try {
-      photo = this.aerial?.() ?? null;
+      const shot = this.aerial?.();
+      if (shot) {
+        while (shot.next()) yield;
+        photo = shot.canvas;
+      }
     } catch (e) {
       console.warn('aerial map failed', e);
     }
@@ -277,11 +311,12 @@ export class WorldMap {
   }
 
   private draw(marks: MapMarks) {
-    this.base ??= this.drawBase();
+    if (!this.base) this.work(Infinity);
+    this.drawnAt = performance.now();
     const c = this.canvas;
-    c.width = c.height = OUT;
+    if (c.width !== OUT) c.width = c.height = OUT;
     const ctx = c.getContext('2d')!;
-    ctx.drawImage(this.base, 0, 0);
+    ctx.drawImage(this.base!, 0, 0);
     ctx.lineJoin = 'round';
     ctx.fillStyle = '#c0502e';
     ctx.strokeStyle = '#1c1a18';
