@@ -46,6 +46,8 @@ const SCANNED_TREES = {
   tree: ['tree-pine', 'tree-spruce'],
   deadTree: ['tree-dead-old', 'tree-dead-pine', 'tree-dead-quiver', 'tree-quiver'],
 };
+/** Deployables that are thrown or fall from the sky, which the game shows and hides itself. */
+const UNCULLED = new Set<Deployable['kind']>(['beancan', 'satchel', 'c4', 'supplySignal', 'supplyDrop']);
 /** Charges stuck to a wall or door, which stay exactly where they were put. */
 const STUCK_ON = new Set<Deployable['kind']>(['beancan', 'satchel', 'c4']);
 /** How far each kind may be let down into the ground to sit flush on a slope (see settle). */
@@ -84,6 +86,8 @@ export class World {
   readonly landmarkProps: { label: string; root: THREE.Object3D }[] = [];
   readonly pieces = new Map<string, Piece>();
   readonly pieceMeshes = new Map<string, THREE.Group>();
+  /** Told of each base piece or deployable as it is made, to start building its shaders. */
+  onBuilt: ((root: THREE.Object3D) => void) | null = null;
   readonly deployables = new Map<number, Deployable>();
   readonly deployableMeshes = new Map<number, THREE.Group>();
   /** Objects the crosshair can target. */
@@ -389,7 +393,7 @@ export class World {
         const sign = buildRadSign();
         sign.position.set(x, terrainHeight(this.seed, x, z) - 0.05, z);
         sign.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
-        this.scene.add(sign);
+        this.cellAt(x, z, VIEW_MEDIUM).add(sign);
       }
     }
   }
@@ -536,13 +540,25 @@ export class World {
   }
 
   private grassView = GRASS_VIEW;
+  /**
+   * How far things are drawn, as a share of their usual distance. Low draws them three quarters
+   * as far, in a little thicker haze so they still fade out before they stop; that is about half
+   * the things to draw.
+   */
+  private reach = 1;
+  /** How much thicker the haze is than usual (see reach). */
+  get fogScale(): number {
+    return this.reach < 1 ? 1.2 : 1;
+  }
 
   /**
-   * Low graphics: half the grass, drawn less far and without shadows on it, and the scattered
-   * stones, bushes and logs cast no shadows. Everything else looks the same.
+   * Low graphics: half the grass, drawn less far and without shadows on it, the scattered
+   * stones, bushes and logs cast no shadows, and everything is drawn three quarters as far.
    */
   setLow(low: boolean) {
     this.grassView = low ? 55 : GRASS_VIEW;
+    this.reach = low ? 0.75 : 1;
+    this.cullIn = 0;
     for (const g of this.grassCells) {
       g.count = low ? Math.ceil(g.userData.placed / 2) : g.userData.placed;
       g.receiveShadow = !low;
@@ -558,13 +574,24 @@ export class World {
   /** Hides the squares too far off to see through the haze, and the grass beyond a short way. */
   private cull(focus: THREE.Vector3) {
     const flat = (v: THREE.Vector3) => Math.hypot(v.x - focus.x, v.z - focus.z);
-    for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < cell.userData.view + CELL * 0.71;
+    for (const cell of this.cells.values()) cell.visible = flat(cell.userData.centre) < cell.userData.view * this.reach + CELL * 0.71;
     for (const g of this.grassCells) g.visible = flat(g.userData.centre) < this.grassView + GRASS_CELL * 0.71;
     for (const p of this.patches) {
       const far = flat(p.centre);
-      p.mesh.visible = far < p.view;
+      p.mesh.visible = far < p.view * this.reach;
       // Batches of scanned logs, stumps and bushes a good way off draw a lighter shape.
-      if (p.low && p.mesh.visible) (p.mesh as THREE.Mesh).geometry = far > p.lowFrom! ? p.low : p.full!;
+      // On Low they switch to it at half the distance.
+      if (p.low && p.mesh.visible) (p.mesh as THREE.Mesh).geometry = far > p.lowFrom! * (this.reach < 1 ? 0.5 : 1) ? p.low : p.full!;
+    }
+    // Bases are drawn as far as the land; boxes, beds and benches only near by. Thrown and
+    // falling things are left alone, as the game hides and shows those itself.
+    for (const [key, g] of this.pieceMeshes) {
+      const p = this.pieces.get(key);
+      if (p) g.visible = Math.hypot((p.i + 0.5) * TILE - focus.x, (p.k + 0.5) * TILE - focus.z) < VIEW * this.reach;
+    }
+    for (const [id, g] of this.deployableMeshes) {
+      const d = this.deployables.get(id);
+      if (d && !UNCULLED.has(d.kind)) g.visible = Math.hypot(d.x - focus.x, d.z - focus.z) < VIEW_SMALL * this.reach;
     }
   }
 
@@ -708,7 +735,8 @@ export class World {
     };
     /** An invisible wall for walking into, in the ruin's own space. */
     const block = (x: number, z: number, w: number, h: number, depth: number) => {
-      const o = new THREE.Mesh();
+      // A bare point rather than a mesh, so it isn't sent to be drawn.
+      const o = new THREE.Object3D();
       o.position.set(x, h / 2, z);
       g.add(o);
       this.pushCollider(g, o, w, h, depth);
@@ -743,14 +771,21 @@ export class World {
       block(0, 0, size.x * 0.85, 3, 0.8);
       if (pile) place(pile, (rand() - 0.5) * 2, size.z / 2 + 3, rand() * 6, 1 + rand() * 0.3, false);
     }
-    // Loose chunks of concrete kicked out across the ground.
+    // Loose chunks of concrete kicked out across the ground. They are small, so they are drawn
+    // only near by, like the other small things, and too low to throw a shadow worth drawing.
     const chunks = variants('rubble-chunks');
+    const loose = new THREE.Group();
+    loose.position.copy(g.position);
+    loose.rotation.copy(g.rotation);
     for (let n = 0; n < 14 && chunks.length; n++) {
       const a = rand() * Math.PI * 2;
       const r = 5 + rand() * 6;
       const chunk = place(chunks[n % chunks.length], Math.cos(a) * r, Math.sin(a) * r, rand() * 6, 0.6 + rand() * 1.4, false, false);
       chunk.position.y = -0.05;
+      chunk.castShadow = false;
+      loose.add(chunk);
     }
+    if (loose.children.length) this.cellAt(d.x, d.z, VIEW_SMALL).add(loose);
   }
 
   /**
@@ -776,7 +811,7 @@ export class World {
         mesh.rotation.y = (turn * Math.PI) / 2;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
-        this.scene.add(mesh);
+        this.cellAt(x, z).add(mesh);
         this.landmarkProps.push({ label: prop.model, root: mesh });
         if (prop.solid) this.cameraBlockers.push(mesh);
         for (const [x0, x1, z0, z1, h] of prop.solid ?? []) {
@@ -806,7 +841,7 @@ export class World {
         m.scale.setScalar(piece === tyre || piece === barrel ? 1 : 1 + rand() * 1.5);
         m.castShadow = true;
         m.receiveShadow = true;
-        this.scene.add(m);
+        this.cellAt(px, pz, VIEW_SMALL).add(m);
         this.landmarkProps.push({ label: piece === tyre ? 'tyre' : piece === barrel ? 'barrel' : 'stones', root: m });
       }
     }
@@ -1123,6 +1158,8 @@ export class World {
     const old = this.pieceMeshes.get(key);
     if (old) {
       this.scene.remove(old);
+      // Its merged shapes are its own; the door's may be shared with other doors.
+      old.traverse((o) => o.userData.merged && (o as THREE.Mesh).geometry?.dispose());
       this.pieceMeshes.delete(key);
       this.pickables.splice(this.pickables.indexOf(old), 1);
       this.cameraBlockers.splice(this.cameraBlockers.indexOf(old), 1);
@@ -1132,8 +1169,13 @@ export class World {
       return;
     }
     this.pieces.set(key, piece);
-    const g = buildPieceMesh(piece, this.pieceMaterial(piece));
-    this.addFraming(g, piece);
+    const parts = buildPieceMesh(piece, this.pieceMaterial(piece));
+    this.addFraming(parts, piece);
+    // One mesh per material rather than one per slab, board and post: a base is hundreds of
+    // pieces, and each mesh is a separate thing for the graphics card to draw.
+    const g = mergeByMaterial(parts);
+    parts.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    g.traverse((o) => (o.userData.merged = true));
     if (piece.door) g.add(this.doorFor(key, piece));
     else this.doorSwing.delete(key);
     g.traverse((o) => {
@@ -1143,6 +1185,7 @@ export class World {
     });
     this.scene.add(g);
     this.pieceMeshes.set(key, g);
+    this.onBuilt?.(g);
     this.pickables.push(g);
     this.cameraBlockers.push(g);
   }
@@ -1185,6 +1228,7 @@ export class World {
       g.traverse((o) => (o.userData.deployableId = id));
       this.scene.add(g);
       this.deployableMeshes.set(id, g);
+      this.onBuilt?.(g);
       this.pickables.push(g);
       this.cameraBlockers.push(g);
     }

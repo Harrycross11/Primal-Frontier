@@ -44,7 +44,7 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { lateLoaded, lateModels, loadModels, variants, warmShaders } from './models.ts';
+import { lateLoaded, lateModels, loadModels, variants, warmObject, warmShaders } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi, planterStatus } from './inventory.ts';
@@ -621,6 +621,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     avatar.root.position.set(p.x, p.y, p.z);
     avatar.onStep = (sprint) => effects.footstep(surfaceUnder(avatar.root.position), avatar.root.position, sprint, landUnder(avatar.root.position));
     world.scene.add(avatar.root);
+    warmObject(gfx.renderer, camera, world.scene, avatar.root);
     const track = new Track();
     track.push(performance.now(), p.x, p.y, p.z, p.yaw);
     remotes.set(p.id, { state: p, avatar, track });
@@ -744,6 +745,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   // Swap the stand-ins for the scanned guns, tools and crops once they arrive (the world swaps its own).
   // Shaders for the whole world and every model, unless the menu already built them.
   if (!ready) warmShaders(gfx.renderer, camera, world.scene);
+  gfx.renderer.compileAsync(effects.shaderSamples(), camera, world.scene).catch(() => {});
+  // Huts, boxes and beds others build start their shaders at once, in the background.
+  world.onBuilt = (root) => void gfx.renderer.compileAsync(root, camera, world.scene).catch(() => {});
   if (!lateLoaded())
     lateModels.then(() => {
       warmShaders(gfx.renderer, camera, world.scene);
@@ -1956,7 +1960,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     players: () => [...remotes.values()].map((r) => ({ id: r.state.id, name: r.state.name, x: r.state.x, y: r.state.y, z: r.state.z, dead: r.state.dead })),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
     /** How many shader programs have been built so far: each new one is a stutter while it compiles. */
-    programs: () => gfx.renderer.info.programs?.map((p) => p.name) ?? [],
+    programs: (keys = false) => gfx.renderer.info.programs?.map((p) => (keys ? `${p.name} ${p.cacheKey}` : p.name)) ?? [],
     perf: (frames = 5) => {
       const r = gfx.renderer;
       const seen = (o: THREE.Object3D) => {
@@ -2006,9 +2010,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       for (let i = 0; i < frames; i++) gfx.render();
       r.getContext().finish();
       const ms = (performance.now() - t0) / frames;
+      const all = { calls: r.info.render.calls / frames, tris: r.info.render.triangles / frames };
+      // Again without the sun's shadow pass, to split the cost between it and the view.
+      r.info.reset();
+      r.shadowMap.autoUpdate = false;
+      for (let i = 0; i < frames; i++) gfx.render();
+      r.shadowMap.autoUpdate = true;
+      const view = { calls: Math.round(r.info.render.calls / frames), tris: Math.round(r.info.render.triangles / frames) };
+      const shadowPass = { calls: Math.round(all.calls - view.calls), tris: Math.round(all.tris - view.tris) };
+      r.info.reset();
+      for (let i = 0; i < frames; i++) gfx.render();
       r.info.autoReset = true;
       return {
         ms: +ms.toFixed(1),
+        view,
+        shadowPass,
         calls: Math.round(r.info.render.calls / frames),
         drawnTris: Math.round(r.info.render.triangles / frames),
         memory: { ...r.info.memory },

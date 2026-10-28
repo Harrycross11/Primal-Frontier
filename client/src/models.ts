@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { lodReady } from './lod.ts';
+import { prepareTextures, texturesIn } from './textureBudget.ts';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -471,7 +472,118 @@ export function warmShaders(renderer: THREE.WebGLRenderer, camera: THREE.Camera,
     const body = character(name);
     if (body) spare.add(body);
   }
-  return Promise.all([renderer.compileAsync(scene, camera), renderer.compileAsync(spare, camera, scene)]).catch(() => {});
+  // compile() only builds for what is shown, so for that moment everything is: the far squares
+  // of the map, the lands you haven't been to, the stand-ins. Each one left out stalled a frame
+  // when you turned or walked to face it.
+  const hidden: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if (o.visible) return;
+    o.visible = true;
+    hidden.push(o);
+  });
+  spare.traverse((o) => (o.visible = true));
+  const compiled = Promise.all([renderer.compileAsync(scene, camera), renderer.compileAsync(spare, camera, scene)]).catch(() => {});
+  for (const o of hidden) o.visible = false;
+  warmShadows(scene, camera, [scene, spare]);
+  // Then their photos, a few a frame, so nothing waits on them the first time it comes into view.
+  return compiled.then(() => prepareTextures(renderer, texturesIn([scene, spare])));
+}
+
+let shadowStandIns: THREE.Mesh[] | null = null;
+
+/** A tiny mesh of each kind (single, batched, rigged) in each common material: one side or both, photo or not, cut out or not. */
+function standIns(): THREE.Mesh[] {
+  const geo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+  const n = geo.attributes.position.count;
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(n * 4), 4));
+  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(new Float32Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)), 4));
+  const photo = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  photo.needsUpdate = true;
+  const out: THREE.Mesh[] = [];
+  for (const side of [THREE.FrontSide, THREE.DoubleSide]) {
+    for (const look of ['plain', 'photo', 'cutout']) {
+      const mat = new THREE.MeshStandardMaterial({ side, map: look === 'plain' ? null : photo, alphaTest: look === 'cutout' ? 0.5 : 0 });
+      const bone = new THREE.Bone();
+      const rigged = new THREE.SkinnedMesh(geo, mat);
+      rigged.add(bone);
+      rigged.bind(new THREE.Skeleton([bone]));
+      for (const m of [new THREE.Mesh(geo, mat), new THREE.InstancedMesh(geo, mat, 1), rigged]) {
+        m.castShadow = m.receiveShadow = true;
+        out.push(m);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The sun's shadow is drawn with depth shaders of its own, which compile() doesn't build: one
+ * for each kind of thing that casts a shadow (cut-out leaves, batches, single meshes). Puts one
+ * of each kind behind the camera, where the frame can't show it but the shadow pass still draws
+ * it, for a few frames.
+ */
+function warmShadows(scene: THREE.Scene, camera: THREE.Camera, roots: THREE.Object3D[]) {
+  const kinds = new Set<string>();
+  const stand = new THREE.Group();
+  for (const root of roots) {
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.castShadow || (m as THREE.SkinnedMesh).isSkinnedMesh) return;
+      const batch = (m as THREE.InstancedMesh).isInstancedMesh;
+      const mats = ([] as THREE.Material[]).concat(m.material);
+      const kind = `${batch}|${m.receiveShadow}|${mats.map((x) => x.uuid).join()}|${m.customDepthMaterial?.uuid ?? ''}`;
+      if (kinds.has(kind)) return;
+      kinds.add(kind);
+      const copy = batch ? new THREE.InstancedMesh(m.geometry, m.material, 1) : new THREE.Mesh(m.geometry, m.material);
+      copy.customDepthMaterial = m.customDepthMaterial;
+      // Tinted copies in a batch are a shader of their own.
+      if (batch) (copy as THREE.InstancedMesh).instanceColor = (m as THREE.InstancedMesh).instanceColor;
+      copy.castShadow = true;
+      copy.receiveShadow = m.receiveShadow;
+      copy.frustumCulled = false;
+      stand.add(copy);
+    });
+  }
+  const back = camera.getWorldDirection(new THREE.Vector3());
+  stand.position.copy(camera.getWorldPosition(new THREE.Vector3())).addScaledVector(back, -30);
+  scene.add(stand);
+  // Things made later (other players in their own clothes, their huts) mostly need one of a
+  // few common shadow shaders; small stand-ins with each are drawn once, just behind the camera,
+  // where the sun's shadow still reaches but the view doesn't.
+  const near = new THREE.Group();
+  if (!shadowStandIns) {
+    shadowStandIns = standIns();
+    near.add(...shadowStandIns);
+    near.position.copy(camera.getWorldPosition(new THREE.Vector3())).addScaledVector(back, -8);
+    scene.add(near);
+  }
+  let frames = 3;
+  const tick = () => {
+    if (--frames > 0) return void requestAnimationFrame(tick);
+    scene.remove(stand, near);
+    for (const c of stand.children) {
+      const batch = c as THREE.InstancedMesh;
+      if (!batch.isInstancedMesh) continue;
+      // The tints belong to the real batch.
+      batch.instanceColor = null;
+      batch.dispose();
+    }
+  };
+  requestAnimationFrame(tick);
+}
+
+/**
+ * Builds the shaders for something new in the world (another player in their own clothes) in
+ * the background. It is hidden until they are ready, rather than stalling the frame it first
+ * comes into view on; four seconds at most.
+ */
+export function warmObject(renderer: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene, root: THREE.Object3D) {
+  const ready = renderer.compileAsync(root, camera, scene).catch(() => {});
+  warmShadows(scene, camera, [root]);
+  root.visible = false;
+  const show = () => (root.visible = true);
+  ready.then(show);
+  setTimeout(show, 4000);
 }
 
 /** Whether a rigged character has loaded. */
