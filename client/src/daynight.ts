@@ -143,7 +143,7 @@ export class DayNight {
     c.lerp(NIGHT, 1 - light);
     const fog = this.world.scene.fog as THREE.FogExp2;
     fog.color.copy(c);
-    fog.density = DAY_FOG * (1 + rain * 1.3 + dust * 5 + snow * 3.2) * (1 + (1 - light) * 0.4);
+    fog.density = DAY_FOG * this.world.fogScale * (1 + rain * 1.3 + dust * 5 + snow * 3.2) * (1 + (1 - light) * 0.4);
     this.gfx.setSky(light, storm, this.stormColor.clone().multiplyScalar(0.55 + 0.45 * light));
     this.gfx.renderer.toneMappingExposure = 1.1 + (1 - light) * 0.45;
 

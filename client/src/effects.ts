@@ -120,6 +120,20 @@ export class Effects {
   }
 
   /** Bits of wood, stone or metal knocked off whatever was hit, falling with gravity. */
+  /**
+   * One of each kind of thing the effects draw (tracer, spark, shell, chip, bullet hole, puff),
+   * so their shaders can be built before the first shot rather than on it.
+   */
+  shaderSamples(): THREE.Group {
+    const g = new THREE.Group();
+    const add = (o: THREE.Object3D) => g.add(o);
+    for (const mat of [this.tracerMat, this.arrowMat, this.sparkMat, this.shellMat]) add(new THREE.Mesh(HOLE_GEO, mat));
+    add(new THREE.Mesh(HOLE_GEO, new THREE.MeshStandardMaterial({ roughness: 0.9, transparent: true })));
+    add(new THREE.Mesh(HOLE_GEO, new THREE.MeshBasicMaterial({ map: holeTexture('dirt'), transparent: true, depthWrite: false })));
+    add(new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dustTex, depthWrite: false, transparent: true })));
+    return g;
+  }
+
   chipsAt(at: THREE.Vector3, surface: Surface, floor: number, count = 7, power = 1) {
     const colors = CHIP_COLORS[surface];
     for (let n = 0; n < count; n++) {

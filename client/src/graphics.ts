@@ -11,6 +11,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { setLowTextures } from './textureBudget.ts';
 
 export type Quality = 'high' | 'medium' | 'low';
 export const QUALITIES: Quality[] = ['high', 'medium', 'low'];
@@ -365,6 +366,8 @@ export class Graphics {
       this.composer.setPixelRatio(ratio);
       this.resize();
     }
+    // Low keeps its photos smaller, so they fit in a laptop's graphics memory.
+    setLowTextures(q === 'low');
     // The sun's shadow map is the other big cost: 4096 square on high, less below.
     const shadowSize = q === 'high' ? 4096 : q === 'medium' ? 2048 : 1024;
     this.scene.traverse((o) => {
