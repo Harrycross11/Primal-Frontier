@@ -12,19 +12,37 @@ import { model } from './models.ts';
 /**
  * The scanned people a survivor can be, by the look's `body` option. The first is loaded with the
  * game; the others when someone first wears them. `pale` keeps a light shirt under a jacket its
- * own colour when the jacket is recoloured.
+ * own colour when the jacket is recoloured. `grime` is how much dirt, sweat and fading the
+ * wasteland has worked into their clothes and skin (the survivor's scan came that way already;
+ * people photographed in clean clothes get the most). `cap` is how far down from the top of
+ * their head their own scanned beanie or cap reaches (metres): it is pressed flat under a picked
+ * hat, which then sits that much lower. `hat` moves a picked hat further down, back and larger
+ * [metres, metres, times] on a bald head, which has no hair to sit it on and a longer skull than
+ * the survivor's.
  */
-export const BODIES: { model: string; pale?: boolean }[] = [
-  { model: 'survivor', pale: true },
-  { model: 'body-viktor' },
-  { model: 'body-tony' },
-  { model: 'body-carla' },
-  { model: 'body-sophia' },
-  { model: 'body-nathan' },
-  { model: 'body-hank' },
-  { model: 'body-rico' },
-  { model: 'body-claudia' },
+export const BODIES: { model: string; pale?: boolean; grime: number; cap?: number; hat?: [number, number, number] }[] = [
+  { model: 'survivor', pale: true, grime: 0 },
+  { model: 'body-viktor', grime: 0.8 },
+  { model: 'body-tony', grime: 1, cap: 0.07 },
+  { model: 'body-carla', grime: 1.5 },
+  { model: 'body-sophia', grime: 1.4 },
+  { model: 'body-balthazar', hat: [0.016, 0.008, 1], grime: 0.7 },
+  { model: 'body-dutch', hat: [0.004, 0.012, 1.08], grime: 0.8 },
+  { model: 'body-rico', hat: [0.016, 0.02, 1.03], grime: 1.3 },
+  { model: 'body-claudia', grime: 1.7 },
 ];
+
+/** How much of their own beanie is left standing under a picked hat. */
+const CAP_KEPT = 0.35;
+
+/**
+ * How a picked hat is moved on this look's survivor, beyond fitting it to their head's size: down
+ * onto their own beanie pressed flat under it, or onto a bald head.
+ */
+export function hatShift(look: Look): { down: number; back: number; scale: number } {
+  const { cap = 0, hat = [0, 0, 1] } = BODIES[look.body] ?? BODIES[0];
+  return { down: cap * (1 - CAP_KEPT) + hat[0], back: hat[1], scale: hat[2] };
+}
 
 /** The rigged model a look's survivor is drawn with. */
 export const bodyModel = (look: Look) => (BODIES[look.body] ?? BODIES[0]).model;
@@ -62,11 +80,27 @@ function addRegions(mesh: THREE.SkinnedMesh) {
 
 const linear = (hex: number) => new THREE.Color(hex);
 
-/** Recolours the scanned body's skin, hair, jacket, trousers and boots. */
-export function tintScan(scan: THREE.Object3D, look: Look, pale = false) {
+let grimeMap: THREE.Texture | null = null;
+/** Two photographed stain maps (red: blotches, green: streaks), shared by every survivor. */
+function grimeTexture(): THREE.Texture {
+  if (grimeMap) return grimeMap;
+  grimeMap = new THREE.TextureLoader().load('/textures/grime.webp');
+  grimeMap.wrapS = grimeMap.wrapT = THREE.RepeatWrapping;
+  grimeMap.colorSpace = THREE.NoColorSpace;
+  return grimeMap;
+}
+
+/**
+ * Recolours the scanned person `body` (a BODIES model) in the look's skin, hair, jacket, trousers
+ * and boots, and works their grime into it.
+ */
+export function tintScan(scan: THREE.Object3D, look: Look, body: string) {
+  const { pale = false, grime = 0, cap = 0 } = BODIES.find((b) => b.model === body) ?? {};
+  // Their own beanie, flattened under a picked hat.
+  const capped = look.head && cap ? cap : 0;
   const skin = lookColor(look, 'skin');
   const parts = [lookColor(look, 'hair'), lookColor(look, 'jacket'), lookColor(look, 'trousers'), lookColor(look, 'boots')];
-  if (skin === null && parts.every((p) => p === null)) return;
+  if (skin === null && parts.every((p) => p === null) && !grime && !capped) return;
   const skinScale = skin === null ? new THREE.Vector3(1, 1, 1) : new THREE.Vector3(linear(skin).r / SKIN_REF.r, linear(skin).g / SKIN_REF.g, linear(skin).b / SKIN_REF.b);
   const refLum = CLOTH_REF.r * 0.2126 + CLOTH_REF.g * 0.7152 + CLOTH_REF.b * 0.0722;
   const tints = parts.map((p) => (p === null ? new THREE.Vector3() : new THREE.Vector3(linear(p).r, linear(p).g, linear(p).b).divideScalar(refLum)));
@@ -75,17 +109,30 @@ export function tintScan(scan: THREE.Object3D, look: Look, pale = false) {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isSkinnedMesh) return;
     addRegions(mesh);
+    // The stains are laid on in metres, whatever units the scan was made in.
+    mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox!;
+    const metre = 1.78 / Math.max(1e-6, box.max.y - box.min.y);
     const m = (mesh.material as THREE.MeshStandardMaterial).clone();
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uSkin = { value: skinScale };
       shader.uniforms.uTint = { value: tints };
       shader.uniforms.uOn = { value: on };
       shader.uniforms.uPale = { value: pale ? 1 : 0 };
+      shader.uniforms.uGrime = { value: grime };
+      shader.uniforms.uGrimeMap = { value: grimeTexture() };
+      shader.uniforms.uMetre = { value: metre };
+      shader.uniforms.uFeet = { value: box.min.y };
+      shader.uniforms.uCapFrom = { value: capped ? 1.78 - capped : 99 };
+      shader.uniforms.uCapKept = { value: CAP_KEPT };
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec4 region;\nvarying vec4 vRegion;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRegion = region;');
+        .replace('#include <common>', '#include <common>\nattribute vec4 region;\nvarying vec4 vRegion;\nvarying vec3 vRest;\nvarying vec3 vRestNormal;\nuniform float uMetre;\nuniform float uFeet;\nuniform float uCapFrom;\nuniform float uCapKept;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRegion = region;\nvRest = vec3(position.x, position.y - uFeet, position.z) * uMetre;\nvRestNormal = normal;\nif (vRest.y > uCapFrom) transformed.y -= (vRest.y - uCapFrom) * (1.0 - uCapKept) / uMetre;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 uSkin;\nuniform vec3 uTint[4];\nuniform vec4 uOn;\nuniform float uPale;\nvarying vec4 vRegion;')
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform vec3 uSkin;\nuniform vec3 uTint[4];\nuniform vec4 uOn;\nuniform float uPale;\nuniform float uGrime;\nuniform sampler2D uGrimeMap;\nvarying vec4 vRegion;\nvarying vec3 vRest;\nvarying vec3 vRestNormal;\nfloat gDirt = 0.0;',
+        )
         .replace(
           '#include <map_fragment>',
           `#include <map_fragment>
@@ -100,9 +147,33 @@ export function tintScan(scan: THREE.Object3D, look: Look, pale = false) {
             float shirt = uPale * smoothstep(0.1, 0.18, lum);
             vec3 cloth = c;
             for (int i = 0; i < 4; i++) cloth = mix(cloth, uTint[i] * lum, vRegion[i] * uOn[i] * (i == 1 ? 1.0 - shirt : 1.0));
-            diffuseColor.rgb = mix(cloth, c * uSkin, skin);
+            vec3 flesh = c * uSkin;
+            if (uGrime > 0.0) {
+              // The stain photos laid over the body from three sides, where it stood when scanned
+              // (so they move with the cloth).
+              vec3 w = pow(abs(normalize(vRestNormal)), vec3(4.0));
+              w /= w.x + w.y + w.z;
+              vec2 g = texture2D(uGrimeMap, vRest.zy * 1.3).rg * w.x + texture2D(uGrimeMap, vRest.xz * 1.3).rg * w.y + texture2D(uGrimeMap, vRest.xy * 1.3).rg * w.z;
+              vec2 g2 = texture2D(uGrimeMap, vRest.xy * 0.45 + 0.37).rg;
+              // The photos' darkest quarter is stains (and a fainter film of dirt around them).
+              float blotch = smoothstep(0.27, 0.12, g.r);
+              float film = smoothstep(0.4, 0.2, g2.r);
+              float streak = smoothstep(0.1, 0.04, g.g) * film;
+              // Mud and dust thickest at the boots, up the trouser legs, and on the knees.
+              float mud = smoothstep(0.75, 0.05, vRest.y) * smoothstep(0.35, 0.15, g2.r * 0.6 + g.r * 0.6);
+              gDirt = clamp((blotch * 0.8 + film * 0.25 + streak * 0.6 + mud * 0.9) * uGrime, 0.0, 1.0);
+              float cl = dot(cloth, vec3(0.2126, 0.7152, 0.0722));
+              // Sun-faded and greyed, bright whites gone dingy, then the dirt itself.
+              cloth = mix(vec3(cl), cloth, 1.0 - 0.3 * min(1.0, uGrime));
+              cloth *= 1.0 - 0.45 * min(1.0, uGrime) * smoothstep(0.25, 0.75, cl);
+              cloth = mix(cloth, cloth * vec3(0.5, 0.42, 0.33) + vec3(0.012, 0.009, 0.006), gDirt);
+              // Sweat, soot and dust on the skin.
+              flesh = mix(flesh, flesh * vec3(0.68, 0.6, 0.52), clamp((blotch * 0.6 + film * 0.3) * uGrime * 0.6, 0.0, 0.55));
+            }
+            diffuseColor.rgb = mix(cloth, flesh, skin);
           }`,
-        );
+        )
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = min(1.0, roughnessFactor + 0.2 * gDirt);');
     };
     m.customProgramCacheKey = () => 'tinted-scan';
     mesh.material = m;
