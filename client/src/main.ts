@@ -44,7 +44,8 @@ import { PAINTS, paintOwned } from '../../shared/paint.ts';
 import { PACKS } from '../../shared/shop.ts';
 import { LookPicker } from './lookPicker.ts';
 import { MenuStage } from './menuStage.ts';
-import { lateLoaded, lateModels, loadModels, variants, warmObject, warmShaders } from './models.ts';
+import { measuredFits } from './bodyFit.ts';
+import { lateLoaded, lateModels, loadModels, onArrival, variants, warmObject, warmShaders } from './models.ts';
 import { Effects, type Surface } from './effects.ts';
 import { iconSvg } from './icons.ts';
 import { InventoryUi, planterStatus } from './inventory.ts';
@@ -759,6 +760,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       // Rebuilds the preview of a bench or box in your hands.
       deployGhostKind = null;
     });
+  // Scanned people, hats and packs someone wears arrive as they are needed: dress everyone again.
+  onArrival(() => {
+    me.redress();
+    for (const r of remotes.values()) r.avatar.redress();
+  });
   const refreshPlayers = () =>
     hud.setPlayers([welcome.you.name, ...[...remotes.values()].filter((r) => !r.state.raider).map((r) => (teamIds.includes(r.state.id) ? `${r.state.name} (team)` : r.state.name))]);
   refreshPlayers();
@@ -2105,6 +2111,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     viewRoot: () => view.root,
     /** The scanned body's width and depth at each height, for fitting armour (see Avatar.bodyBands). */
     bodyBands: () => me.bodyBands(),
+    /** Each scanned person's head and trunk measurements so far (see bodyFit.ts). */
+    bodyFits: () => measuredFits(),
     /** What floats over or sinks into the ground within `range` of you, worst first (see groundCheck.ts). */
     ground: (range = 60) => {
       const near = (o: THREE.Object3D) => o.position.distanceTo(controller.position) < range;

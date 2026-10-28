@@ -92,6 +92,24 @@ SCANS = {
     'wear-beanie': ('edb7f2c044b64d5da40484495239fee3', 3000, ['--keep-heading'], 512),
     'wear-cap': ('2407f15279f448148ae763ffb2375e9f', 3000, ['--keep-heading'], 512),
     'wear-hat': ('f923afc33254465294de1993c0d29c2a', 4000, ['--keep-heading'], 512),
+    # More to pick in the locker: hats and helmets, a balaclava, a head scarf worn as a hood,
+    # glasses, and two backpacks.
+    'wear-scarfhood': ('5c037f1a66634c5ea25ad8e87a4c3923', 3000, ['--keep-heading'], 512),
+    'wear-huntercap': ('937a78fabfa94013b219d8c949fedfc8', 2000, ['--keep-heading'], 512),
+    'wear-outback': ('5c3397413a014792a13b6aeada221dde', 3000, ['--keep-heading'], 512),
+    'wear-straw': ('5b32d39eef874ecaa0aeca5f186ebdae', 3000, ['--keep-heading'], 512),
+    'wear-bucket': ('c2959e0c752443afb9b821d888501715', 3000, ['--keep-heading'], 512),
+    'wear-flatcap': ('86881130d2264dbf8f3033d0e87daaec', 3000, ['--keep-heading'], 512),
+    'wear-hardhat': ('10edb2bd02444f3a8a3067b9da7ac2d5', 3000, ['--keep-heading'], 512),
+    'wear-rustyhat': ('4c71eda1e1b745fb8b7aa4060c0b70d4', 3000, ['--keep-heading'], 512),
+    'wear-m1': ('e3e3824d440d4c60b546175674d06d1b', 3000, ['--keep-heading'], 512),
+    'wear-tactical': ('491be9b3174c4a94a3cb2933d91a39ea', 4000, ['--keep-heading'], 512),
+    'wear-trapper': ('9b460dc4995c454cab30ea43ce020ba8', 4000, ['--keep-heading'], 512),
+    'wear-balaclava': ('4de30a1250744965b15e547262b1ee6b', 2000, ['--keep-heading'], 512),
+    'wear-sunglasses': ('d939e09e1a18413bb9c0288eb64f211e', 2000, ['--keep-heading'], 256),
+    'wear-glasses': ('e4f348e98ceb45e3abc77da5b738f1b2', 1500, ['--keep-heading'], 256),
+    'gear-daypack': ('708a2854348b46c7aa0fd9af55fe76a5', 4000, ['--keep-heading'], 512),
+    'gear-kanken': ('3c47af8b6a3e413f94c74f86d4c396ed', 4000, ['--keep-heading'], 512),
 }
 
 # Rigged Sketchfab characters, saved as they come (the game animates their skeletons itself).
@@ -99,6 +117,20 @@ CHARACTERS = {
     'survivor': 'f56ffc64d18c40cf95d17559542ca44c',
     # A spotted hyena, re-coloured in the game into the ash-grey Ashhound.
     'ashhound': '134831b49ca54a1ab8f5bf28441fc2fc',
+}
+
+# Rigged, photo-scanned people a survivor can be, besides the survivor above: merged into one
+# mesh and one atlas, simplified and given Mixamo bone names by scripts/prepare-character.ts.
+# Our name: (Sketchfab model uid, target triangles).
+BODIES = {
+    'body-viktor': ('2b1f384bd61a4ff0a952e1fb064d0381', 12000),
+    'body-tony': ('0bbafaaffefe477eae9ec20f67cf4883', 12000),
+    'body-carla': ('acf520f450d14dd799f98a6fede3edf5', 12000),
+    'body-sophia': ('dc448c3be0e74f96a55fb475a13433cf', 12000),
+    'body-nathan': ('143a2b1ea5eb4385ae90a73657aca3bc', 12000),
+    'body-hank': ('e7d8bd71210c40efb97367e136c17f5b', 12000),
+    'body-rico': ('c30b13c1de1144308c6767b9c95fa276', 12000),
+    'body-claudia': ('c659bd0accab47c6bbe390cf822a2b92', 12000),
 }
 
 # Rigged, animated Sketchfab animals: each land's animal to tame and ride. Only the clips the
@@ -444,6 +476,21 @@ def main():
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(get(link['glb']['url']))
         print('saved', name)
+    for name, (uid, budget) in BODIES.items():
+        scans.append(sketchfab_credit(name, uid, 'merged into one mesh, simplified, animated by the game'))
+        if only and name not in only:
+            continue
+        link = json.loads(get(f'https://api.sketchfab.com/v3/models/{uid}/download', auth=True))
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = os.path.join(tmp, 'raw.glb')
+            with open(raw, 'wb') as f:
+                f.write(get(link['glb']['url']))
+            out = os.path.join(OUT, f'{name}.glb')
+            result = subprocess.run(
+                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'prepare-character.ts'), raw, out, str(budget)],
+                check=True, capture_output=True, text=True,
+            )
+        print('saved', name, result.stdout.strip().splitlines()[-1])
     for name, (uid, keep) in ANIMALS.items():
         scans.append(sketchfab_credit(name, uid, 'unused animations dropped, textures resized'))
         if only and name not in only:

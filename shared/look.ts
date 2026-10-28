@@ -1,8 +1,24 @@
-// How a survivor looks, picked before joining: skin, hair and clothing colours, and what they
-// wear on their head, face and back. Each part is an index into its list of options; the first
-// option is how the scanned survivor looks as it was scanned (null colour: left as scanned).
+// How a survivor looks, picked before joining: which photo-scanned person they are, skin, hair
+// and clothing colours, and what they wear on their head, face and back. Each part is an index
+// into its list of options; the first option is how the scanned person looks as they were
+// scanned (null colour: left as scanned).
 
 export const LOOK_PARTS = {
+  // Which scanned person (client/src/survivorLook.ts BODIES has their models).
+  body: {
+    label: 'Survivor',
+    options: [
+      ['Drifter', null],
+      ['Viktor', null],
+      ['Tony', null],
+      ['Carla', null],
+      ['Sophia', null],
+      ['Nathan', null],
+      ['Hank', null],
+      ['Rico', null],
+      ['Claudia', null],
+    ],
+  },
   skin: {
     label: 'Skin',
     options: [
@@ -23,6 +39,9 @@ export const LOOK_PARTS = {
       ['Auburn', 0x8a3f22],
       ['Blond', 0xb8955c],
       ['Grey', 0x8c8a86],
+      ['Ginger', 0xa4552c],
+      ['Platinum', 0xc8bca0],
+      ['Ash brown', 0x5a4c40],
     ],
   },
   jacket: {
@@ -39,6 +58,12 @@ export const LOOK_PARTS = {
       ['Oxblood', 0x5e2c2a],
       ['Ashfall grey', 0x4b4844],
       ['Ember', 0x7c2c1a],
+      ['Desert sand', 0xa08a62],
+      ['Slate blue', 0x4a5a6a],
+      ['Mustard', 0x9a7a2a],
+      ['Bone white', 0xb8b2a2],
+      ['Moss', 0x56603a],
+      ['Plum', 0x4e3446],
     ],
   },
   trousers: {
@@ -52,6 +77,10 @@ export const LOOK_PARTS = {
       ['Olive', 0x4e533a],
       ['Camo grey', 0x5c5c56],
       ['Ash', 0x46443f],
+      ['Sand', 0x9a8862],
+      ['Navy', 0x2e3a52],
+      ['Rust', 0x6a3e2a],
+      ['Forest', 0x3a4a36],
     ],
   },
   boots: {
@@ -62,17 +91,28 @@ export const LOOK_PARTS = {
       ['Brown', 0x5a3e2a],
       ['Tan', 0x9a7a54],
       ['Ember red', 0x5e2216],
+      ['Olive', 0x4a4a32],
+      ['Grey', 0x585856],
     ],
   },
   head: {
     label: 'Headwear',
     options: [
       ['None', null],
-      ['Hood', null],
+      ['Scarf hood', null],
       ['Beanie', null],
       ['Cap', null],
-      ['Bandana', null],
-      ['Wide hat', null],
+      ['Hunting cap', null],
+      ['Cowboy hat', null],
+      ['Outback hat', null],
+      ['Straw hat', null],
+      ['Bucket hat', null],
+      ['Flat cap', null],
+      ['Trapper hat', null],
+      ['Hard hat', null],
+      ['Rusty hard hat', null],
+      ['Army helmet', null],
+      ['Tactical helmet', null],
     ],
   },
   face: {
@@ -82,7 +122,10 @@ export const LOOK_PARTS = {
       ['Respirator', null],
       ['Goggles', null],
       ['Goggles and respirator', null],
-      ['Scarf mask', null],
+      ['Balaclava', null],
+      ['Balaclava and goggles', null],
+      ['Sport glasses', null],
+      ['Glasses', null],
     ],
   },
   pack: {
@@ -94,6 +137,8 @@ export const LOOK_PARTS = {
       ['Tan', 0x8a7652],
       ['None', null],
       ['Ember', 0x7a3a22],
+      ['Daypack', null],
+      ['Red daypack', null],
     ],
   },
 } as const satisfies Record<string, { label: string; options: readonly (readonly [string, number | null])[] }>;

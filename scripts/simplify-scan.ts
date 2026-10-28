@@ -94,7 +94,7 @@ await MeshoptSimplifier.ready;
 const total = [...parts.values()].reduce((s, p) => s + p.idx.length / 3, 0);
 const simple = new Map<Part, Uint32Array>();
 for (const part of parts.values()) {
-  const share = Math.max(64, Math.round((budget * part.idx.length) / 3 / total));
+  const share = Math.min(part.idx.length / 3, Math.max(64, Math.round((budget * part.idx.length) / 3 / total)));
   const [out] = MeshoptSimplifier.simplifyWithAttributes(
     new Uint32Array(part.idx),
     new Float32Array(part.pos),

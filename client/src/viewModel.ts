@@ -12,9 +12,9 @@ import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { PISTOLS, buildGun, gunHands, muzzleOffset } from './guns.ts';
 import { paintModel } from './paint.ts';
 import { buildHeldItem } from './props.ts';
-import { character } from './models.ts';
+import { character, hasCharacter } from './models.ts';
 import { ScanArm } from './scanBody.ts';
-import { tintScan } from './survivorLook.ts';
+import { bodyModel, tintScan } from './survivorLook.ts';
 import type { Look } from '../../shared/look.ts';
 
 /** Where the gun's grip sits at the hip, and how far in front of the eye its sights sit when aiming. */
@@ -68,8 +68,8 @@ class ScannedArms {
   readonly right: ScanArm;
   readonly left: ScanArm;
 
-  constructor(readonly body: THREE.Object3D, look: Look | undefined) {
-    if (look) tintScan(body, look);
+  constructor(readonly body: THREE.Object3D, look: Look | undefined, pale: boolean) {
+    if (look) tintScan(body, look, pale);
     const named = new Map<string, THREE.Bone>();
     body.traverse((o) => {
       if ((o as THREE.Bone).isBone) named.set(o.name.replace(/^mixamorig:?/, '').replace(/_\d+$/, ''), o as THREE.Bone);
@@ -155,6 +155,8 @@ export class ViewModel {
   private lastPitch = 0;
   /** The scanned arms, once the survivor has loaded; the gloves and sleeves built here stand in till then. */
   private scanned: ScannedArms | null = null;
+  /** Whose arms they are. */
+  private armsOf = '';
 
   constructor(private look?: Look) {
     this.root.add(this.held);
@@ -168,12 +170,16 @@ export class ViewModel {
     this.root.traverse((o) => (o.userData.noAO = true));
   }
 
-  /** Puts the scanned survivor's arms in place of the stand-in gloves, if it has loaded. */
+  /** Puts your scanned person's arms in place of the stand-in gloves, once they have loaded (the survivor's till then). */
   private scanArms(): ScannedArms | null {
-    if (this.scanned) return this.scanned;
-    const body = character('survivor');
-    if (!body) return null;
-    this.scanned = new ScannedArms(body, this.look);
+    const want = this.look ? bodyModel(this.look) : 'survivor';
+    const name = hasCharacter(want) ? want : 'survivor';
+    if (this.scanned && this.armsOf === name) return this.scanned;
+    const body = character(name);
+    if (!body) return this.scanned;
+    this.scanned?.body.removeFromParent();
+    this.armsOf = name;
+    this.scanned = new ScannedArms(body, this.look, name === 'survivor');
     this.root.add(body);
     for (const a of this.arms) a.hand.visible = a.arm.visible = a.cuff.visible = false;
     return this.scanned;

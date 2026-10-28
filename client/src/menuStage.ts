@@ -15,7 +15,7 @@ import { VEHICLES, vehicleSpots, type VehicleKind } from '../../shared/vehicles.
 import { Avatar } from './avatar.ts';
 import { DayNight } from './daynight.ts';
 import { Graphics } from './graphics.ts';
-import { lateModels, warmShaders } from './models.ts';
+import { lateModels, onArrival, warmShaders } from './models.ts';
 import { Vehicles } from './vehicles.ts';
 import { World } from './world.ts';
 
@@ -141,6 +141,8 @@ export class MenuStage {
     this.cars = new Vehicles(this.world.scene, { engine() {}, puff() {} } as never, seed);
     this.park();
     this.avatar = this.dress(look);
+    // A scanned person, hat or pack picked in the locker arrives after the menu is up.
+    onArrival(() => this.avatar.redress());
     const keyAt = this.survivorAt();
     this.key.position.copy(keyAt).addScaledVector(this.out, 3.2).addScaledVector(this.side, -2.2).add(new THREE.Vector3(0, 3.8, 0));
     this.key.target.position.copy(keyAt).add(new THREE.Vector3(0, 1, 0));
