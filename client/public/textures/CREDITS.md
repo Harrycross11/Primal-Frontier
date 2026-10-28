@@ -24,3 +24,4 @@ Photo-scanned textures and sky from Poly Haven, all CC0 (public domain).
 - snow: https://polyhaven.com/a/snow_02
 - cliff: https://polyhaven.com/a/rock_face
 - sky: https://polyhaven.com/a/wasteland_clouds_puresky
+- grime (worn into the survivors' clothes): photographed stain maps from ambientCG, CC0 (https://ambientcg.com/a/SurfaceImperfections015 in red, https://ambientcg.com/a/SurfaceImperfections003 in green), resized to 512 px

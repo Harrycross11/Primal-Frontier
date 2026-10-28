@@ -213,11 +213,14 @@ export function armourParts(item: ItemId): ArmourPart[] {
     }
     case 'burlapTrousers': {
       for (const [side, s] of sides) {
-        add(`hip${s}`, new THREE.CylinderGeometry(0.097, 0.073, 0.42, 14, 1, true), burlap(), side * 0.092, 0.71, 0);
-        add(`knee${s}`, new THREE.CylinderGeometry(0.072, 0.064, 0.26, 14, 1, true), burlap(), side * 0.092, 0.38, 0.003);
+        // Deeper than wide, like a thigh, and full at the top to cover the seat of the trousers under it.
+        add(`hip${s}`, new THREE.CylinderGeometry(0.112, 0.076, 0.42, 14, 1, true), burlap(), side * 0.092, 0.71, 0).scale.z = 1.15;
+        add(`knee${s}`, new THREE.CylinderGeometry(0.084, 0.066, 0.26, 14, 1, true), burlap(), side * 0.092, 0.38, -0.012).scale.z = 1.25;
         // A sewn-on patch over each knee.
-        add(`knee${s}`, new RoundedBoxGeometry(0.08, 0.09, 0.02, 2, 0.008), burlapDark(), side * 0.092, 0.49, 0.07);
+        add(`knee${s}`, new RoundedBoxGeometry(0.08, 0.09, 0.02, 2, 0.008), burlapDark(), side * 0.092, 0.49, 0.088);
       }
+      // The seat, joining the legs at the crotch.
+      add('pelvis', new THREE.BoxGeometry(0.15, 0.16, 0.24), burlap(), 0, 0.87, 0);
       add('pelvis', new THREE.TorusGeometry(0.15, 0.013, 6, 24), rope(), 0, 0.97, 0, Math.PI / 2).scale.set(1.1, 0.8, 1);
       break;
     }

@@ -15,7 +15,7 @@ import { buildHeldItem } from './props.ts';
 import { character, hasCharacter } from './models.ts';
 import { ScanArm } from './scanBody.ts';
 import { bodyModel, tintScan } from './survivorLook.ts';
-import type { Look } from '../../shared/look.ts';
+import { type Look, defaultLook } from '../../shared/look.ts';
 
 /** Where the gun's grip sits at the hip, and how far in front of the eye its sights sit when aiming. */
 const HIP_RIFLE = new THREE.Vector3(0.15, -0.17, -0.3);
@@ -68,8 +68,8 @@ class ScannedArms {
   readonly right: ScanArm;
   readonly left: ScanArm;
 
-  constructor(readonly body: THREE.Object3D, look: Look | undefined, pale: boolean) {
-    if (look) tintScan(body, look, pale);
+  constructor(readonly body: THREE.Object3D, look: Look, name: string) {
+    tintScan(body, look, name);
     const named = new Map<string, THREE.Bone>();
     body.traverse((o) => {
       if ((o as THREE.Bone).isBone) named.set(o.name.replace(/^mixamorig:?/, '').replace(/_\d+$/, ''), o as THREE.Bone);
@@ -179,7 +179,7 @@ export class ViewModel {
     if (!body) return this.scanned;
     this.scanned?.body.removeFromParent();
     this.armsOf = name;
-    this.scanned = new ScannedArms(body, this.look, name === 'survivor');
+    this.scanned = new ScannedArms(body, this.look ?? defaultLook(), name);
     this.root.add(body);
     for (const a of this.arms) a.hand.visible = a.arm.visible = a.cuff.visible = false;
     return this.scanned;

@@ -108,8 +108,16 @@ function fit(source: Picture) {
 function show(source: Picture, picture: Photo | ImageBitmap) {
   const list = users.get(source)!;
   if (source.data !== picture) {
+    const old = source.data as Photo;
+    const resized = old.width !== picture.width || old.height !== picture.height;
     source.data = picture;
-    for (const t of list) t.needsUpdate = true;
+    for (const t of list) {
+      // A photo already on the card has room for its old size only: a new size sent into it
+      // fills just one corner and leaves the rest of the old picture around it (blotches on a
+      // scanned person, whose photo is hundreds of small patches). Start it afresh.
+      if (resized) t.dispose();
+      t.needsUpdate = true;
+    }
   }
   for (const t of list) queue.add(t);
   if (sending) return;

@@ -127,8 +127,9 @@ BODIES = {
     'body-tony': ('0bbafaaffefe477eae9ec20f67cf4883', 12000),
     'body-carla': ('acf520f450d14dd799f98a6fede3edf5', 12000),
     'body-sophia': ('dc448c3be0e74f96a55fb475a13433cf', 12000),
-    'body-nathan': ('143a2b1ea5eb4385ae90a73657aca3bc', 12000),
-    'body-hank': ('e7d8bd71210c40efb97367e136c17f5b', 12000),
+    # Character Creator people: their mouths, lashes and eye wetness are left out.
+    'body-balthazar': ('dbf9fe0cb81d4758ad2525a56d10e2fc', 12000, '--drop=Tongue|Teeth|Eyelash|Cornea|Occlusion|Tearline|Mouth'),
+    'body-dutch': ('b730b58e1ffa418daf84e10a822ec08b', 12000, '--drop=Tongue|Teeth|Eyelash|Cornea|Occlusion|Tearline|Mouth'),
     'body-rico': ('c30b13c1de1144308c6767b9c95fa276', 12000),
     'body-claudia': ('c659bd0accab47c6bbe390cf822a2b92', 12000),
 }
@@ -476,7 +477,7 @@ def main():
         with open(os.path.join(OUT, f'{name}.glb'), 'wb') as f:
             f.write(get(link['glb']['url']))
         print('saved', name)
-    for name, (uid, budget) in BODIES.items():
+    for name, (uid, budget, *flags) in BODIES.items():
         scans.append(sketchfab_credit(name, uid, 'merged into one mesh, simplified, animated by the game'))
         if only and name not in only:
             continue
@@ -487,7 +488,7 @@ def main():
                 f.write(get(link['glb']['url']))
             out = os.path.join(OUT, f'{name}.glb')
             result = subprocess.run(
-                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'prepare-character.ts'), raw, out, str(budget)],
+                ['npx', 'tsx', os.path.join(os.path.dirname(__file__), 'prepare-character.ts'), raw, out, str(budget), *flags],
                 check=True, capture_output=True, text=True,
             )
         print('saved', name, result.stdout.strip().splitlines()[-1])
