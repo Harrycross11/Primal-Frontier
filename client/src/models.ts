@@ -236,6 +236,23 @@ const FIT: Record<string, Fit> = {
   'wear-goggles': { width: 0.2 },
   // An old rubber hood mask; its hose and filter are cut away below the chin.
   'wear-gasmask': { height: 0.29, cut: [[-1, 2, -1, 0.8]] },
+  'wear-scarfhood': { height: 0.36 },
+  'wear-huntercap': { width: 0.29 },
+  'wear-outback': { width: 0.4 },
+  'wear-straw': { width: 0.4 },
+  'wear-bucket': { width: 0.31 },
+  'wear-flatcap': { width: 0.27, turn: [Math.PI / 2, 0, 0] },
+  'wear-trapper': { width: 0.3 },
+  'wear-hardhat': { width: 0.31 },
+  'wear-rustyhat': { width: 0.3 },
+  'wear-m1': { width: 0.29 },
+  'wear-tactical': { width: 0.27 },
+  'wear-balaclava': { height: 0.33 },
+  'wear-sunglasses': { width: 0.15, turn: [0, Math.PI / 2, 0] },
+  'wear-glasses': { width: 0.145 },
+  // Other packs to wear in place of the rucksack, straps facing +z like it.
+  'gear-daypack': { height: 0.48, turn: [0, Math.PI, 0] },
+  'gear-kanken': { height: 0.42, turn: [0, Math.PI, 0] },
   'brick-stack': { width: 1.2 },
   timber: { length: 0.5, turn: [Math.PI / 2, 0, 0] },
 };
@@ -405,7 +422,7 @@ async function loadCharacter(loader: GLTFLoader, name: string) {
 /** Things players build (benches, furnaces, boxes, bags, charges) and drop from the sky: the menu never shows them, and the world swaps them in as they arrive. */
 const LATE_BUILT = /^(workbench-|toolchest$|furnace$|campfire$|storage-box$|cupboard$|sleeping-bag$|loot-bag$|charge-|part-|crate-drop$|parachute$|plane$|laptop$)/;
 /** Models only needed once you are in the game (held guns and tools, farming), fetched after the rest. */
-const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|item-|crop-(?!hemp)|food-|planter$|gear-saddle$)/.test(name);
+const isLate = (name: string) => LATE_BUILT.test(name) || /^(gun-|tool-|item-|crop-(?!hemp)|food-|planter$|gear-saddle$|wear-|gear-daypack$|gear-kanken$)/.test(name);
 /** Animals, fetched first of the late ones: the menu never shows them, and the world adds them as they arrive. */
 const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
 
@@ -415,9 +432,7 @@ const LATE_CHARACTERS = ['ashhound', 'mule', 'elk', 'buffalo', 'camel', 'bear'];
  * then load in the background while the menu is open: `lateModels` resolves once they have.
  */
 export async function loadModels(progress?: (done: number, total: number, failed: number) => void): Promise<void> {
-  // The files are Draco-compressed (see scripts/compress-assets.py); the decoder is served
-  // from /draco.
-  const loader = new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
+  const loader = gltfLoader();
   let failed = 0;
   const warn = (n: string) => (e: unknown) => {
     failed++;
@@ -440,10 +455,37 @@ export async function loadModels(progress?: (done: number, total: number, failed
   Promise.all([next(), next(), next(), next()]).then(() => gotLate());
 }
 
+let sharedLoader: GLTFLoader | null = null;
+/** The files are Draco-compressed (see scripts/compress-assets.py); the decoder is served from /draco. */
+function gltfLoader(): GLTFLoader {
+  return (sharedLoader ??= new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')));
+}
+
+const arrivalListeners: (() => void)[] = [];
+/** Calls `listener` whenever more models arrive: a person someone wears, or the late batch. */
+export function onArrival(listener: () => void) {
+  arrivalListeners.push(listener);
+}
+const arrived = () => arrivalListeners.forEach((l) => l());
+
+const wanted = new Set<string>();
+/**
+ * Fetches a rigged person nobody needed until now (the scanned people other than the survivor are
+ * only downloaded once someone wears one); `onArrival` hears when it is in.
+ */
+export function wantCharacter(name: string) {
+  if (characters.has(name) || wanted.has(name)) return;
+  wanted.add(name);
+  loadCharacter(gltfLoader(), name).then(arrived, (e) => console.warn(`character ${name} failed to load`, e));
+}
+
 let late = false;
 let gotLate!: () => void;
 /** Resolves once the built things, animals, guns and tools have loaded (or failed to), after `loadModels`. */
-export const lateModels = new Promise<void>((resolve) => (gotLate = resolve)).then(() => void (late = true));
+export const lateModels = new Promise<void>((resolve) => (gotLate = resolve)).then(() => {
+  late = true;
+  arrived();
+});
 /** Whether `lateModels` has resolved. */
 export const lateLoaded = () => late;
 

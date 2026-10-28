@@ -6,14 +6,15 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
-import { type Look, defaultLook, lookColor } from '../../shared/look.ts';
+import { type Look, defaultLook } from '../../shared/look.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
-import { character, model, soleMaterial } from './models.ts';
+import { character, hasCharacter, model, soleMaterial, wantCharacter } from './models.ts';
 import { PISTOLS, gunHands } from './guns.ts';
 import { buildHeldItem } from './props.ts';
 import { paintModel } from './paint.ts';
 import { ScanBody } from './scanBody.ts';
-import { headGear, tintScan } from './survivorLook.ts';
+import { type BodyFit, SURVIVOR_FIT, bodyFit } from './bodyFit.ts';
+import { bodyModel, headGear, packOf, tintScan } from './survivorLook.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
@@ -94,6 +95,18 @@ export class Avatar {
   private grip: THREE.Group;
   /** The photo-scanned body, when it loaded; it replaces the modelled one. */
   private scan: ScanBody | null = null;
+  /** What they look like, kept to dress them again as scans arrive (see `dress`). */
+  private look: Look;
+  /** Where each bone sits in the bind pose, in the avatar's space. */
+  private bindAt: Map<BoneName, THREE.Vector3>;
+  /** The modelled body, and the pieces made for it, hidden under a scanned one. */
+  private drawn: { geometry: THREE.BufferGeometry; fitted: THREE.Object3D[] };
+  /** The scanned person they are drawn as, and what `dress` hung on them (head gear, pack). */
+  private dressedAs: string | null = null;
+  private scanned: THREE.Object3D | null = null;
+  private dressing: THREE.Object3D[] = [];
+  /** How this scanned person's head and trunk differ from the survivor's, for fitting gear. */
+  private fit: BodyFit = SURVIVOR_FIT;
   private held: ItemId | null | undefined = undefined;
   private heldPaint = 0;
   /** What they have in their hands. */
@@ -136,8 +149,7 @@ export class Avatar {
     hood.side = THREE.DoubleSide;
     const darkLeather = leather(0x5a4634);
     const brownLeather = leather(0x6a5038);
-    const packColor = lookColor(look, 'pack');
-    const canvas = cloth(packColor ?? 0x6a6150);
+    const canvas = cloth(packOf(look)?.color ?? 0x6a6150);
     const bedroll = cloth(0x5b6450);
     const metal = plain(0x55524a, 0.45, 0.7);
     const rubber = plain(0x2a2927, 0.8);
@@ -232,15 +244,9 @@ export class Avatar {
     scarf.rotation.x = Math.PI / 2 - 0.15;
     attach('torso', box(0.07, 0.18, 0.025, 0.01), accent, 0.05, 1.37, 0.1).rotation.set(-0.3, 0, 0.12);
 
-    // Backpack with a rolled bedroll and a canteen, unless they chose to go without.
-    tight = false;
-    const packStart = this.bones.torso.children.length;
-    const scanned = model('gear-backpack');
-    if (scanned) {
-      // The scanned canvas rucksack with its blanket roll, flask and spade, tinted toward the
-      // colour chosen in the locker.
-      attach('torso', scanned.geometry, packMaterial(soleMaterial(scanned), packColor ?? 0x6a6150), 0, PACK_AT[1], PACK_AT[2]).castShadow = true;
-    } else {
+    // Backpack with a rolled bedroll and a canteen, unless they chose to go without: built
+    // pieces on the modelled body, the scanned pack on a scanned one (see `dress`).
+    if (packOf(look)) {
       attach('torso', box(0.32, 0.4, 0.17, 0.045), canvas, 0, 1.24, -0.2);
       attach('torso', box(0.34, 0.1, 0.19, 0.03), canvas, 0, 1.41, -0.195);
       attach('torso', box(0.22, 0.14, 0.05, 0.015), canvas, 0, 1.18, -0.3);
@@ -248,7 +254,7 @@ export class Avatar {
       for (const x of [-0.12, 0.12]) attach('torso', new THREE.CylinderGeometry(0.079, 0.079, 0.025, 16), darkLeather, x, 1.51, -0.2).rotation.z = Math.PI / 2;
       attach('torso', new THREE.CylinderGeometry(0.045, 0.045, 0.16, 14), plain(0x4f5a44, 0.6, 0.3), 0.2, 1.18, -0.19);
     }
-    if (packColor === null) for (const o of this.bones.torso.children.slice(packStart)) o.removeFromParent();
+    tight = false;
 
     // Armband in the player's colour, around the left upper arm.
     const band = (this.band = attach('shoulderL', new THREE.CylinderGeometry(0.066, 0.064, 0.05, 16), accent, ...HAND(-1)));
@@ -291,29 +297,136 @@ export class Avatar {
     this.hand.rotation.x = Math.PI / 2 - 0.2;
     grip.add(this.hand);
 
-    const scan = character('survivor');
-    if (scan) {
-      // The modelled body draws nothing but keeps its bones, which carry the gear.
-      geometry.setDrawRange(0, 0);
-      for (const o of fitted) o.visible = false;
-      tintScan(scan, look);
-      // Their own pick of hat, mask and goggles, made for the scanned head, in place of the
-      // modelled body's hood and mask.
-      this.gear = { hood: [], face: [] };
-      for (const { mesh, kind } of headGear(look, (c) => cloth(c), accent)) {
-        mesh.position.sub(world.get('head')!);
-        this.bones.head.add(mesh);
-        this.gear[kind].push(mesh);
-      }
-      this.scan = new ScanBody(this.root, scan, this.bones, world);
-      this.scan.update();
-    }
+    this.look = look;
+    this.bindAt = world;
+    this.drawn = { geometry, fitted };
+    this.dress();
 
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });
 
     if (name) this.setTag(name, color, false);
+  }
+
+  /**
+   * Puts on the scanned person of their look, with its hats, masks and pack, as far as those
+   * scans have arrived; until a person someone picked has loaded, they are the survivor. Called
+   * again (`redress`) as more scans arrive.
+   */
+  private dress() {
+    const want = bodyModel(this.look);
+    if (want !== 'survivor') wantCharacter(want);
+    const name = hasCharacter(want) ? want : 'survivor';
+    const scan = character(name);
+    if (!scan) return;
+    for (const o of this.dressing) o.removeFromParent();
+    this.dressing = [];
+    this.scanned?.removeFromParent();
+    this.scanned = scan;
+    this.dressedAs = name;
+    // The modelled body draws nothing but keeps its bones, which carry the gear.
+    this.drawn.geometry.setDrawRange(0, 0);
+    for (const o of this.drawn.fitted) o.visible = false;
+    tintScan(scan, this.look, name === 'survivor');
+
+    // The scan is fitted to the skeleton in its bind pose, at the origin: stand it there for now.
+    const parent = this.root.parent;
+    const placed = [this.root.position.clone(), this.root.quaternion.clone()] as const;
+    const posed = BONES.map(([n]) => [this.bones[n].position.clone(), this.bones[n].quaternion.clone()] as const);
+    parent?.remove(this.root);
+    this.root.position.set(0, 0, 0);
+    this.root.quaternion.identity();
+    for (const [n, p] of BONES) {
+      this.bones[n].position.copy(this.bindAt.get(n)!).sub(p ? this.bindAt.get(p)! : new THREE.Vector3());
+      this.bones[n].quaternion.identity();
+    }
+    this.root.updateMatrixWorld(true);
+    this.scan = new ScanBody(this.root, scan, this.bones, this.bindAt);
+    this.fit = bodyFit(name, this.root, scan);
+    BONES.forEach(([n], i) => {
+      this.bones[n].position.copy(posed[i][0]);
+      this.bones[n].quaternion.copy(posed[i][1]);
+    });
+    this.root.position.copy(placed[0]);
+    this.root.quaternion.copy(placed[1]);
+    parent?.add(this.root);
+    this.scan.update();
+
+    // Their own pick of hat, mask and glasses, made for the survivor's head and moved to this one.
+    this.gear = { hood: [], face: [] };
+    for (const { mesh, kind } of headGear(this.look)) {
+      this.fitTo('head', mesh, false, kind === 'face');
+      this.bones.head.add(mesh);
+      this.gear[kind].push(mesh);
+      this.dressing.push(mesh);
+    }
+    // The pack they picked, tinted toward the colour chosen in the locker.
+    const pack = packOf(this.look);
+    const scannedPack = pack && model(pack.model);
+    if (pack && scannedPack) {
+      const base = soleMaterial(scannedPack);
+      const mesh = new THREE.Mesh(scannedPack.geometry, pack.color === null ? base : packMaterial(base, pack.color));
+      mesh.position.set(0, PACK_AT[1], PACK_AT[2]);
+      this.fitTo('torso', mesh, true);
+      mesh.castShadow = true;
+      this.bones.torso.add(mesh);
+      this.dressing.push(mesh);
+    }
+    // The armband, round this person's arm.
+    if (this.band && this.bandRest) this.band.scale.setScalar(this.fit.arm);
+    // Armour already on is fitted again.
+    const worn = this.worn;
+    this.worn = [null, null, null];
+    this.setWear(worn);
+  }
+
+  /** Dresses them again if a scan their look wants has arrived since they were last dressed. */
+  redress() {
+    const want = bodyModel(this.look);
+    const gearWanted = headGear(this.look).length + (packOf(this.look) && model(packOf(this.look)!.model) ? 1 : 0);
+    const gearOn = this.dressing.length;
+    if ((hasCharacter(want) && this.dressedAs !== want) || gearWanted !== gearOn || !this.scan) this.dress();
+    else {
+      // Armour scans may have arrived too.
+      const worn = this.worn;
+      this.worn = [null, null, null];
+      this.setWear(worn);
+    }
+  }
+
+  /**
+   * Moves a piece made for the survivor's body (in the avatar's space, before it is hung on its
+   * bone) onto this person's: head pieces follow the head's top, face and width, trunk pieces the
+   * chest's width and depth. `back` keeps a pack on the back rather than scaling it.
+   */
+  private fitTo(bone: BoneName, mesh: THREE.Object3D, back = false, face = false) {
+    const f = this.fit;
+    const s = SURVIVOR_FIT;
+    if (bone === 'head') {
+      // Moved with the top of the head and the face's front (for glasses and masks, the brows and
+      // cheeks they must clear); a little bigger or smaller for a wider or narrower head (hair
+      // counts: a hat sits over it).
+      mesh.position.add(f.head).sub(s.head);
+      if (face) mesh.position.z += f.eyes - s.eyes - (f.head.z - s.head.z);
+      mesh.scale.multiplyScalar(THREE.MathUtils.clamp(f.headSize / s.headSize, 0.92, 1.12));
+    } else if (bone === 'torso' || bone === 'pelvis' || bone === 'neck') {
+      // Never much tighter than on the survivor: a slimmer scan's clothes still poke through.
+      const kx = Math.max(0.94, f.chest.x / s.chest.x);
+      const kz = Math.max(0.94, f.chest.z / s.chest.z);
+      if (back) mesh.position.z += f.back - s.back;
+      else {
+        mesh.position.x *= kx;
+        mesh.position.z = f.middle + (mesh.position.z - s.middle) * kz;
+        mesh.scale.multiply(new THREE.Vector3(kx, 1, kz));
+      }
+    } else if (/^(hip|knee)/.test(bone)) {
+      // Others' scans are cut looser at the thigh than the survivor's: a little room for it.
+      const k = Math.max(0.97, f.hips / s.hips) * (this.dressedAs === 'survivor' ? 1 : 1.05);
+      mesh.position.x *= k;
+      mesh.scale.multiply(new THREE.Vector3(k, 1, k));
+    }
+    mesh.position.sub(this.bindAt.get(bone)!);
   }
 
   /** Their name above their head, in green when they are on your team, with any season title over it. */
@@ -366,9 +479,10 @@ export class Avatar {
       this.wornMeshes[i] = [];
       if (!item) continue;
       for (const { bone, mesh } of armourParts(item)) {
-        mesh.position.sub(this.boneAt.get(bone)!);
         // The scanned head is smaller than the modelled one in its hood; sit hats lower on it.
         if (this.scan && item === 'coffeeCanHelmet' && !mesh.userData.scanHead) mesh.position.y -= 0.07;
+        if (this.scan) this.fitTo(bone, mesh);
+        else mesh.position.sub(this.boneAt.get(bone)!);
         this.bones[bone].add(mesh);
         this.wornMeshes[i].push(mesh);
       }

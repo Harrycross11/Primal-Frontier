@@ -31,10 +31,12 @@ const LIMBS: [string, string][] = [
 ];
 
 /**
- * How far each finger joint bends, knuckle first, in a full grip. This rig weights all four
- * fingers to the first joint, so they fold together at the knuckles, round a handle.
+ * How far each finger joint bends, knuckle first, in a full grip. The survivor's rig weights all
+ * four fingers to the index's first joint, so they fold together at the knuckles, round a handle;
+ * other rigs have every finger's joints, which share the bend.
  */
 const CURL = [1.8, 0, 0];
+const CURL_JOINTED = [0.9, 1.3, 0.7];
 
 interface Pair {
   src: THREE.Bone;
@@ -184,23 +186,44 @@ export class ScanArm {
   readonly upper: THREE.Bone;
   readonly lower: THREE.Bone;
   readonly hand: THREE.Bone;
-  /** Finger joints from the knuckle out; the rig moves all four fingers together. */
+  /** The index finger's joints from the knuckle out (on the survivor's rig, all four fingers'). */
   private fingers: THREE.Bone[];
-  private rest: THREE.Quaternion[];
+  /** Every finger joint that bends in a grip, how far, and about which of its own axes. */
+  private bends: { bone: THREE.Bone; rest: THREE.Quaternion; axis: THREE.Vector3; bend: number }[] = [];
 
   /** `named` holds the rig's bones without their mixamorig prefix; `prefix` is Left or Right. */
   constructor(named: Map<string, THREE.Bone>, prefix: 'Left' | 'Right') {
     this.upper = named.get(`${prefix}Arm`)!;
     this.lower = named.get(`${prefix}ForeArm`)!;
     this.hand = named.get(`${prefix}Hand`)!;
-    this.fingers = [1, 2, 3].map((n) => named.get(`${prefix}HandIndex${n}`)).filter((b): b is THREE.Bone => !!b);
-    this.rest = this.fingers.map((f) => f.quaternion.clone());
+    const finger = (f: string) => [1, 2, 3].map((n) => named.get(`${prefix}Hand${f}${n}`)).filter((b): b is THREE.Bone => !!b);
+    this.fingers = finger('Index');
+    const others = ['Middle', 'Ring', 'Pinky'].map(finger).filter((f) => f.length);
+    if (!others.length) {
+      // Mixamo's finger joints bend about their x axis.
+      this.fingers.forEach((bone, i) => this.bends.push({ bone, rest: bone.quaternion.clone(), axis: X.clone(), bend: CURL[i] }));
+      return;
+    }
+    // Other rigs' joints turn every which way, so each one's bend axis is worked out: across the
+    // finger, turning it towards the palm. Hands rest palm down or towards the thighs, so the
+    // palm faces down as seen along the finger.
+    this.hand.updateMatrixWorld(true);
+    for (const f of [this.fingers, ...others]) {
+      f.forEach((bone, i) => {
+        const next = f[i + 1] ?? bone.children[0];
+        const from = bone.getWorldPosition(new THREE.Vector3());
+        const along = next ? next.getWorldPosition(new THREE.Vector3()).sub(from).normalize() : new THREE.Vector3().subVectors(from, f[i - 1].getWorldPosition(v)).normalize();
+        const palm = new THREE.Vector3(0, -1, 0).addScaledVector(along, along.y).normalize();
+        const axis = new THREE.Vector3().crossVectors(along, palm).normalize().applyQuaternion(bone.getWorldQuaternion(q2).invert());
+        this.bends.push({ bone, rest: bone.quaternion.clone(), axis, bend: CURL_JOINTED[i] ?? 0 });
+      });
+    }
   }
 
   /** Closes the fingers, from open (0) to a full grip (1). */
   curl(amount: number) {
-    // Every finger joint bends about its own x axis, towards the palm.
-    this.fingers.forEach((f, i) => f.quaternion.copy(this.rest[i]).multiply(q.setFromAxisAngle(X, CURL[i] * amount)));
+    // Every finger joint bends about its own axis, towards the palm.
+    for (const j of this.bends) j.bone.quaternion.copy(j.rest).multiply(q.setFromAxisAngle(j.axis, j.bend * amount));
     this.hand.updateMatrixWorld(true);
   }
 
@@ -215,8 +238,8 @@ export class ScanArm {
   /** Which way the palm faces, in world space. */
   private facing(): THREE.Vector3 {
     const along = this.fingers[0].getWorldPosition(new THREE.Vector3()).sub(this.hand.getWorldPosition(v));
-    // Fingers bend about their x axis, so the palm faces along (axis x fingers).
-    const axis = X.clone().applyQuaternion(this.fingers[0].getWorldQuaternion(q2));
+    // Fingers bend towards the palm, so it faces along (axis x fingers).
+    const axis = this.bends[0].axis.clone().applyQuaternion(this.fingers[0].getWorldQuaternion(q2));
     return new THREE.Vector3().crossVectors(axis, along).normalize();
   }
 
