@@ -26,6 +26,17 @@ const BODY_PAD = 0.05;
 /** Hits on the body below this height (the hips) land on the legs. */
 const LEGS_TOP = 0.92;
 
+/**
+ * How far a seated player's body is below their position: in a car or a saddle their position is
+ * the seat, and they sit on it with their hips there rather than standing on it.
+ */
+export const SEAT_DROP = 0.93;
+
+/** Where a player's hit shapes are measured up from: their feet, or as far below the seat as their hips are above their feet when they sit in a car or a saddle. */
+export function hitStand(p: { x: number; y: number; z: number; driving?: number; riding?: number }): { x: number; y: number; z: number } {
+  return p.driving !== undefined || p.riding !== undefined ? { x: p.x, y: p.y - SEAT_DROP, z: p.z } : p;
+}
+
 export function headCentre(p: { x: number; y: number; z: number }): Vec3 {
   return [p.x, p.y + HEAD_Y, p.z];
 }

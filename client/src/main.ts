@@ -21,7 +21,7 @@ import {
 import { CHARGE_KINDS, CRATE_KINDS, DEPLOYABLE_INFO, DEPLOYABLE_KINDS, WORKBENCH_LEVEL, burns, deployableBox, privilege, type Deployable, type DeployableKind } from '../../shared/deployables.ts';
 import { PLANT_RANGE, isExplosive, type ExplosiveId } from '../../shared/explosives.ts';
 import { BIOMES, biomeAt, biomeWeights } from '../../shared/biomes.ts';
-import { FIST, rayPlayer, type Vec3 } from '../../shared/combat.ts';
+import { FIST, hitStand, rayPlayer, type Vec3 } from '../../shared/combat.ts';
 import { ASHHOUND, MOUNT_RANGE, SPECIES } from '../../shared/creatures.ts';
 import { ITEMS, countItem, itemTotals, type ItemId, type Slots } from '../../shared/items.ts';
 import type { PlayerState, ServerMessage, SlotRef } from '../../shared/protocol.ts';
@@ -612,6 +612,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   }
 
   const remotes = new Map<number, Remote>();
+  /** Where a remote survivor's hit shapes stand from, as drawn (lower when they sit in a car or a saddle). */
+  const standOf = (r: Remote) => {
+    const { x, y, z } = r.avatar.root.position;
+    return hitStand({ x, y, z, driving: r.state.driving, riding: r.state.riding });
+  };
   /** Everyone on your team (you too, online or not), and who on it is online. */
   let teamIds: number[] = welcome.team;
   const mates = () => [...remotes.values()].filter((r) => teamIds.includes(r.state.id));
@@ -1348,7 +1353,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     }
     for (const r of remotes.values()) {
       if (r.state.dead) continue;
-      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, t);
+      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], standOf(r), t);
       if (hit) t = hit.t;
     }
     const hound = creatures.ray([o.x, o.y, o.z], [d.x, d.y, d.z], t);
@@ -1482,7 +1487,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     let best = aim ? camera.position.distanceTo(aim.point) : raycaster.far;
     for (const r of remotes.values()) {
       if (r.state.dead) continue;
-      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], r.avatar.root.position, best);
+      const hit = rayPlayer([o.x, o.y, o.z], [d.x, d.y, d.z], standOf(r), best);
       if (hit) {
         best = hit.t;
         aimPlayer = r;
@@ -1951,6 +1956,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   (window as unknown as { __pf: unknown }).__pf = {
     effects,
     world,
+    vehicles,
     state: () => ({
       id: welcome.id,
       others: remotes.size,
@@ -1965,6 +1971,11 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     }),
     players: () => [...remotes.values()].map((r) => ({ id: r.state.id, name: r.state.name, x: r.state.x, y: r.state.y, z: r.state.z, dead: r.state.dead })),
     walkTo: (x: number, z: number) => (controller.autoWalk = { x, z }),
+    /** Moves you (and the car you drive) to a spot facing `yaw`, for screenshots: the server only takes short hops. */
+    put: (x: number, y: number, z: number, yaw: number) => {
+      controller.teleport(x, y, z);
+      controller.yaw = yaw;
+    },
     /** How many shader programs have been built so far: each new one is a stutter while it compiles. */
     programs: (keys = false) => gfx.renderer.info.programs?.map((p) => (keys ? `${p.name} ${p.cacheKey}` : p.name)) ?? [],
     perf: (frames = 5) => {
@@ -2153,6 +2164,21 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     receive: (m: ServerMessage) => net.onMessage(m),
     /** The nearest car's state. */
     cars: () => [...vehicles.views.values()].map((v) => v.state).sort((a, b) => Math.hypot(a.x - controller.position.x, a.z - controller.position.z) - Math.hypot(b.x - controller.position.x, b.z - controller.position.z))[0],
+    /**
+     * Everyone sat in a car, you first: which way is up for them and for their car's seat, and how
+     * far they are from it (both should match whatever the car does).
+     */
+    riders: () =>
+      [
+        { name: 'me', avatar: me, car: driving },
+        ...[...remotes.values()].map((r) => ({ name: r.state.name, avatar: r.avatar, car: r.state.driving ?? null })),
+      ]
+        .filter((r) => r.car !== null)
+        .map(({ name, avatar, car }) => {
+          const seat = vehicles.seatInfo(car!);
+          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(avatar.root.quaternion);
+          return { name, kind: seat?.kind, up: up.toArray(), seatUp: seat?.up.toArray(), gap: seat ? avatar.root.position.distanceTo(seat.at) : null, room: seat?.room, crown: avatar.crown(), headTop: avatar.headTop() };
+        }),
     /** Throws what is in your hands. */
     throwHeld: () => throwHeld(),
     /** Places the camera at a fixed spot looking at a target, for scenery screenshots. */
@@ -2208,7 +2234,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     time += dt;
     if (!dead) controller.update(dt);
     me.root.position.copy(controller.position);
-    me.root.rotation.y = controller.yaw + Math.PI;
+    me.root.rotation.set(0, controller.yaw + Math.PI, 0);
     me.seated = riding !== null ? 'saddle' : driving !== null ? 'seat' : false;
     // Your own car goes where you drive it at once, rather than waiting on the server.
     const car = driving === null ? undefined : vehicles.views.get(driving);
@@ -2219,6 +2245,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const z = controller.position.z - fz * s.ahead + rz * s.left;
       car.carry(x, z, controller.yaw, controller.carSpeed, controller.car.flies ? controller.position.y - s.y : undefined);
     }
+    // Cars are drawn (turned, tilted to the ground, banked) before their drivers are sat in them.
+    vehicles.update(dt);
+    me.headroom = driving === null ? null : vehicles.seat(driving, me.root);
     // Your own mount goes where you steer it at once, rather than waiting on the server.
     const mount = riding === null ? undefined : creatures.views.get(riding);
     if (mount) mount.carry(controller.position.x, controller.position.y - (controller.mount?.seat ?? 0), controller.position.z, controller.yaw + Math.PI);
@@ -2289,15 +2318,15 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     for (const r of remotes.values()) {
       const at = r.track.sample(now, drawn);
       r.avatar.root.position.set(at.x, at.y, at.z);
-      r.avatar.root.rotation.y = at.yaw + Math.PI;
+      r.avatar.root.rotation.set(0, at.yaw + Math.PI, 0);
       r.avatar.setHeld(r.state.held, r.state.heldPaint ?? 0);
       r.avatar.setDead(r.state.dead);
       r.avatar.setWear(r.state.wear ?? []);
       r.avatar.seated = r.state.riding !== undefined ? 'saddle' : r.state.driving !== undefined ? 'seat' : false;
+      r.avatar.headroom = r.state.driving === undefined ? null : vehicles.seat(r.state.driving, r.avatar.root);
       r.avatar.update(dt, r.state.moving && !r.avatar.seated);
     }
     creatures.update(dt, camera.position);
-    vehicles.update(dt);
 
     updateAim();
     updateGhost();
