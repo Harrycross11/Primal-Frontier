@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { SEAT_DROP } from '../../shared/combat.ts';
 import { ITEMS, type ItemId } from '../../shared/items.ts';
 import { type Look, defaultLook } from '../../shared/look.ts';
 import { ARMOUR_HIDES, armourParts, type HiddenGear } from './armour.ts';
@@ -127,6 +128,11 @@ export class Avatar {
   private dead = false;
   /** Sitting: astride an animal (legs either side), or on a car or minicopter seat. */
   seated: false | 'saddle' | 'seat' = false;
+  /**
+   * In a car or minicopter seat, how far up from the seat its roof is over their head and over their
+   * shoulders: someone too tall for it sinks into the seat and leans back until they fit under.
+   */
+  headroom: { head: number; shoulders: number; floor: number } | null = null;
   private tag: THREE.Sprite | null = null;
   /** Bind-pose positions of the bones, for hanging armour on them. */
   private boneAt = new Map<BoneName, THREE.Vector3>();
@@ -716,6 +722,81 @@ export class Avatar {
   }
 
   /** Poses the game skeleton for this frame. */
+  /**
+   * How far to sink into a car seat and lean back (radians) so the head, and whatever is worn
+   * on it, and the shoulders fit under the roof given by `headroom`.
+   */
+  private ducked(): { sink: number; recline: number } {
+    const room = this.headroom;
+    if (!room) return { sink: 0, recline: 0 };
+    const at = (n: BoneName) => this.boneAt.get(n)!.y;
+    // Sitting up straight, the trunk rises from the small of the back (the torso bone) to the
+    // head, and the hat or head and the shoulders' tops are this far above each.
+    const back = at('torso') - SEAT_DROP;
+    const trunk = at('head') - at('torso');
+    const crown = this.crown() - at('head');
+    const shoulders = 0.5;
+    const clear = 0.03;
+    const over = Math.max(back + trunk + crown + clear - room.head, back + shoulders + clear - room.shoulders);
+    if (over <= 0) return { sink: 0, recline: 0 };
+    const sink = Math.min(over, 0.08);
+    // What is left is taken by leaning back from the small of the back, as far as a driver can
+    // and still reach the wheel; the head tips forward by half as much, to keep looking ahead.
+    const tooTall = (r: number) =>
+      Math.max(back - sink + trunk * Math.cos(r - 0.05) + crown * Math.cos(r / 2 - 0.05) - room.head, back - sink + shoulders * Math.cos(r - 0.05) - room.shoulders) + clear > 0;
+    let recline = 0;
+    for (let step = 0.32; step > 0.005; step /= 2) if (tooTall(recline)) recline = Math.min(0.65, recline + step);
+    return { sink, recline };
+  }
+
+  /**
+   * How far to raise the thighs and bend the knees (radians) so the feet rest on a car's floor
+   * rather than through it: thighs a little below level and shins hanging, or with a high floor
+   * the knees come up and the feet go forward under the dashboard.
+   */
+  private footwell(sink: number): { thigh: number; knee: number } {
+    const floor = (this.headroom?.floor ?? Infinity) - sink;
+    const thighLength = this.boneAt.get('hipL')!.y - this.boneAt.get('kneeL')!.y;
+    // Knee to sole.
+    const shin = this.boneAt.get('kneeL')!.y;
+    const thigh = 1.35;
+    const hang = 0.5;
+    // The hips sit level with the seat point (see the seated pose), feet this far below them.
+    const drop = (t: number, h: number) => thighLength * Math.cos(t) + shin * Math.cos(h);
+    if (floor >= drop(thigh, hang)) return { thigh, knee: thigh - hang };
+    const up = 1.75;
+    const h = Math.acos(THREE.MathUtils.clamp((floor - thighLength * Math.cos(up)) / shin, Math.cos(1.4), 1));
+    return { thigh: up, knee: Math.max(0, up - h) };
+  }
+
+  /** The top of the head, or of whatever hat or helmet is on it, above the feet when standing. */
+  crown(): number {
+    const head = this.boneAt.get('head')!;
+    let top = this.fit.head.y - head.y;
+    const box = new THREE.Box3();
+    const local = new THREE.Matrix4();
+    const visit = (o: THREE.Object3D, parent: THREE.Matrix4) => {
+      if (!o.visible) return;
+      local.multiplyMatrices(parent, o.matrix);
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        top = Math.max(top, box.copy(mesh.geometry.boundingBox!).applyMatrix4(local).max.y);
+      }
+      const here = local.clone();
+      for (const c of o.children) visit(c, here);
+    };
+    for (const c of this.bones.head.children) visit(c, new THREE.Matrix4());
+    return head.y + top;
+  }
+
+  /** For tests: how high the top of the head or hat is now, up from where they sit, in their own frame. */
+  headTop(): number {
+    this.root.updateMatrixWorld(true);
+    const top = new THREE.Vector3(0, this.crown() - this.boneAt.get('head')!.y, 0).applyMatrix4(this.bones.head.matrixWorld);
+    return this.root.worldToLocal(top).y;
+  }
+
   private animate(dt: number, moving: boolean) {
     dt = Math.min(dt, 0.1);
     this.time += dt;
@@ -776,14 +857,26 @@ export class Avatar {
       // shins hanging, sitting up straight with a gentle sway as it moves. In a car or the
       // minicopter the knees are together and the feet forward on the floor.
       const saddle = this.seated === 'saddle';
-      b.root.position.set(0, -0.93, 0);
-      b.hipL.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipL')!.x));
-      b.hipR.rotation.set(-1.35, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipR')!.x));
-      b.kneeL.rotation.x = b.kneeR.rotation.x = saddle ? 1.25 : 0.85;
-      b.torso.rotation.set(0.05 + s * 0.04 * w, 0, 0);
-      b.shoulderL.rotation.set(-0.5, 0, hang);
-      b.shoulderR.rotation.set(-0.5, 0, -hang);
-      b.elbowL.rotation.x = b.elbowR.rotation.x = -0.9;
+      const { sink, recline } = saddle ? { sink: 0, recline: 0 } : this.ducked();
+      const legs = saddle ? { thigh: 1.35, knee: 1.25 } : this.footwell(sink);
+      b.root.position.set(0, -SEAT_DROP - sink, 0);
+      b.hipL.rotation.set(-legs.thigh, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipL')!.x));
+      b.hipR.rotation.set(-legs.thigh, 0, (saddle ? 0.32 : 0.08) * Math.sign(this.boneAt.get('hipR')!.x));
+      b.kneeL.rotation.x = b.kneeR.rotation.x = legs.knee;
+      b.torso.rotation.set(0.05 + s * 0.04 * w - recline, 0, 0);
+      // Still looking ahead out of the windscreen.
+      b.head.rotation.x += recline * 0.5;
+      if (saddle) {
+        b.shoulderL.rotation.set(-0.5, 0, hang);
+        b.shoulderR.rotation.set(-0.5, 0, -hang);
+        b.elbowL.rotation.x = b.elbowR.rotation.x = -0.9;
+      } else {
+        // Both hands forward and in on the wheel or the stick (leaning back already brings them forward).
+        const reach = -0.55 + recline * 0.7;
+        b.shoulderL.rotation.set(reach, 0.4, hang);
+        b.shoulderR.rotation.set(reach, -0.4, -hang);
+        b.elbowL.rotation.x = b.elbowR.rotation.x = -0.95;
+      }
     }
 
     if (this.dead) {

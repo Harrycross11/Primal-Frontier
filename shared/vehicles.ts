@@ -28,6 +28,11 @@ export interface VehicleInfo {
   length: number;
   width: number;
   height: number;
+  /**
+   * How much taller the model is drawn than its own proportions: some are built squat inside,
+   * too low under the roof for a person to sit up in.
+   */
+  stretch?: number;
   /** Where the driver sits: height above the ground, and how far left of and ahead of the middle. */
   seat: { y: number; left: number; ahead: number };
   /** What it is good at, for the garage menu. */
@@ -52,7 +57,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 4.8,
     width: 1.95,
     height: 1.15,
-    seat: { y: 0.55, left: 0.42, ahead: -0.1 },
+    seat: { y: 0.95, left: 0.42, ahead: 0.27 },
     tank: 100,
     range: 30,
   },
@@ -67,7 +72,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 4.1,
     width: 1.62,
     height: 1.0,
-    seat: { y: 0.5, left: 0.36, ahead: -0.15 },
+    seat: { y: 0.6, left: 0.36, ahead: 0.22 },
     tank: 70,
     range: 38,
   },
@@ -82,7 +87,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 4.4,
     width: 1.85,
     height: 1.6,
-    seat: { y: 0.65, left: 0.42, ahead: 1.2 },
+    seat: { y: 0.95, left: 0.42, ahead: 1.2 },
     tank: 140,
     range: 24,
   },
@@ -97,7 +102,7 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     length: 3.6,
     width: 1.6,
     height: 0.9,
-    seat: { y: 0.9, left: 0.35, ahead: -0.3 },
+    seat: { y: 1.0, left: 0.35, ahead: 0 },
     tank: 80,
     range: 32,
   },
@@ -109,10 +114,11 @@ export const VEHICLES: Record<VehicleKind, VehicleInfo> = {
     reverse: 8,
     accel: 7,
     turn: 1.5,
-    length: 7.6,
-    width: 1.5,
-    height: 1.7,
-    seat: { y: 1.05, left: 0.12, ahead: 0.65 },
+    length: 9.5,
+    width: 1.9,
+    height: 2.2,
+    stretch: 1.2,
+    seat: { y: 1.4, left: 0.15, ahead: 1.0 },
     tank: 60,
     range: 22,
     flies: { climb: 6, ceiling: 55 },

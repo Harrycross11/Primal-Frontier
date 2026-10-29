@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Game, type Outgoing } from '../server/game.ts';
-import { MAX_HEALTH } from '../shared/combat.ts';
+import { MAX_HEALTH, hitStand, rayPlayer } from '../shared/combat.ts';
 import { ITEMS, countItem } from '../shared/items.ts';
 import { atLandmark } from '../shared/landmarks.ts';
 import { terrainHeight } from '../shared/terrain.ts';
@@ -235,4 +235,15 @@ test('flying a minicopter into the ground hurts it, a gentle landing does not', 
   t = climb(game, id, low + 6, 20, t);
   t = climb(game, id, low, 3, t);
   assert.ok(heli.hp < VEHICLES.heli.maxHp, 'dropped onto the ground');
+});
+
+test('a driver is hit where they sit in the seat, not where a standing body would be', () => {
+  const driver = { x: 0, y: 1, z: 0, driving: 3 };
+  // A shot level with a seated driver's head (about 0.7 m above the seat) hits it...
+  const low = rayPlayer([-5, 1.7, 0], [1, 0, 0], hitStand(driver), 20);
+  assert.ok(low?.head);
+  // ...and one where a standing body's head would be, 1.6 m above the seat, goes over them.
+  assert.equal(rayPlayer([-5, 2.62, 0], [1, 0, 0], hitStand(driver), 20), null);
+  // Standing, the same shot is a headshot.
+  assert.ok(rayPlayer([-5, 2.62, 0], [1, 0, 0], hitStand({ x: 0, y: 1, z: 0 }), 20)?.head);
 });

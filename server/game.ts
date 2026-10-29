@@ -92,6 +92,7 @@ import {
   rayBox,
   rayPlayer,
   rayTerrain,
+  hitStand,
   spreadDir,
   type Vec3,
 } from '../shared/combat.ts';
@@ -1795,7 +1796,7 @@ export class Game {
     }
     for (const other of this.players.values()) {
       if (other === shooter || other.dead) continue;
-      const hit = rayPlayer(o, d, other, best.t);
+      const hit = rayPlayer(o, d, hitStand(other), best.t);
       if (hit) best = { t: hit.t, player: other, head: hit.head, zone: hit.zone };
     }
     for (const h of this.hounds.values()) {

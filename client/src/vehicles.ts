@@ -4,13 +4,15 @@
 import * as THREE from 'three';
 import type { Vec3 } from '../../shared/combat.ts';
 import { terrainHeight } from '../../shared/terrain.ts';
-import { VEHICLES, axes, rayVehicle, type VehicleKind, type VehicleState } from '../../shared/vehicles.ts';
+import { VEHICLES, axes, rayVehicle, type VehicleInfo, type VehicleKind, type VehicleState } from '../../shared/vehicles.ts';
 import type { Effects } from './effects.ts';
 import { character } from './models.ts';
 import { painted, type PaintMode } from './paint.ts';
 import { Track } from './track.ts';
 
 const drawn = { x: 0, y: 0, z: 0, yaw: 0 };
+/** Where a seat's scale goes, which is always 1: a rider keeps their own. */
+const unscaled = new THREE.Vector3();
 
 /** Which parts of a mesh take paint: the whole surface, only its coloured parts, or none. */
 type PaintRule = (mesh: THREE.Mesh, material: THREE.Material) => PaintMode | null;
@@ -25,11 +27,87 @@ const MODELS: Record<VehicleKind, { file: string; paint: PaintRule }> = {
   heli: { file: 'vehicle-heli', paint: (_, m) => (m.name === 'Body' ? 'all' : null) },
 };
 
+/** How much room each model has over its driver (see `measureRoom`), worked out once per model. */
+const ROOMS = new Map<VehicleKind, Room>();
+
+/**
+ * Room round a driver, in metres from the seat: up to the roof or canopy right over their head
+ * and over their shoulders (Infinity where nothing is overhead, as in an open jeep), and down to
+ * the floor where their feet go.
+ */
+export interface Room {
+  head: number;
+  shoulders: number;
+  floor: number;
+  /** How far below the seat point the cushion is (negative: above it), for checking seat spots. */
+  cushion: number;
+}
+
+/**
+ * Measures the room round the seat of a model sat on `body`: rays come straight down from above
+ * the car through where the driver's head and shoulders go, and the first part of the model they
+ * meet is the roof or canopy (less the thickness of its panel). Anything met lower than a seated
+ * driver's chest is the seat, a door or the floor, so there is nothing overhead there. More rays
+ * go down from the seat's height where the feet go, to the floor. `skip` holds parts that are not
+ * cover or floor, such as rotors.
+ */
+function measureRoom(body: THREE.Object3D, info: VehicleInfo, skip: (o: THREE.Object3D) => boolean): Room {
+  body.updateWorldMatrix(true, true);
+  const toBody = new THREE.Matrix4().copy(body.matrixWorld).invert();
+  const { y, left, ahead } = info.seat;
+  // In the body's frame the driver faces -z (their left is -x), with their head a touch ahead of
+  // the seat as they lean forward a little.
+  const ray = (dx: number, dz: number, from = 4) => new THREE.Ray(new THREE.Vector3(-left + dx, y + from, -ahead - 0.03 + dz), new THREE.Vector3(0, -1, 0));
+  const heads = [ray(0, 0), ray(0.07, 0), ray(-0.07, 0), ray(0, 0.08), ray(0, -0.08)];
+  const shoulders = [ray(0.19, 0.02), ray(-0.19, 0.02)];
+  const feet = [ray(0.1, -0.5, 0.05), ray(-0.1, -0.5, 0.05)];
+  const hips = [ray(0.08, 0.1, 0.3), ray(-0.08, 0.1, 0.3)];
+  // The first thing each ray meets: its highest hit.
+  const first = new Map<THREE.Ray, number>();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const hit = new THREE.Vector3();
+  const m = new THREE.Matrix4();
+  const meshes: THREE.Mesh[] = [];
+  body.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && !skip(o)) meshes.push(o as THREE.Mesh);
+  });
+  for (const mesh of meshes) {
+    m.multiplyMatrices(toBody, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    const index = mesh.geometry.index;
+    const count = index ? index.count : pos.count;
+    for (let i = 0; i + 2 < count; i += 3) {
+      a.fromBufferAttribute(pos, index ? index.getX(i) : i).applyMatrix4(m);
+      b.fromBufferAttribute(pos, index ? index.getX(i + 1) : i + 1).applyMatrix4(m);
+      c.fromBufferAttribute(pos, index ? index.getX(i + 2) : i + 2).applyMatrix4(m);
+      for (const r of [...heads, ...shoulders, ...feet, ...hips]) {
+        // Quick skip: the face must straddle the ray.
+        if (Math.max(a.x, b.x, c.x) < r.origin.x || Math.min(a.x, b.x, c.x) > r.origin.x) continue;
+        if (Math.max(a.z, b.z, c.z) < r.origin.z || Math.min(a.z, b.z, c.z) > r.origin.z) continue;
+        if (r.intersectTriangle(a, b, c, false, hit)) first.set(r, Math.max(first.get(r) ?? -Infinity, hit.y - y));
+      }
+    }
+  }
+  // The tightest roof over each part (a roof panel is a few centimetres thick).
+  const under = (rays: THREE.Ray[], low: number) => Math.min(...rays.map((r) => first.get(r) ?? -Infinity).map((h) => (h > low ? h - 0.04 : Infinity)));
+  // The highest floor under either foot.
+  const floor = Math.min(...feet.map((r) => -(first.get(r) ?? -Infinity)));
+  const cushion = Math.min(...hips.map((r) => -(first.get(r) ?? -Infinity)));
+  return { head: under(heads, 0.45), shoulders: under(shoulders, 0.4), floor, cushion };
+}
+
 class VehicleView {
   readonly root = new THREE.Group();
   /** Tilted to the ground under it. */
   private body = new THREE.Group();
-  private wheels: { pivot: THREE.Object3D; radius: number }[] = [];
+  /** The driver's seat, on the body, facing the way the driver sits: whoever drives sits here. */
+  private seat = new THREE.Object3D();
+  /** The room over the driver: how far up from the seat the roof is. */
+  room: Room = { head: Infinity, shoulders: Infinity, floor: Infinity, cushion: Infinity };
+  /** Each wheel's pivot at its middle, its axle in the pivot's own frame, and how far round it has turned. */
+  private wheels: { pivot: THREE.Object3D; radius: number; axle: THREE.Vector3; turned: number }[] = [];
   /** A minicopter's rotors, turning about their hubs: the main one flat, the tail one on its side. */
   private rotors: { pivot: THREE.Object3D; axis: 'x' | 'y' }[] = [];
   /** How fast the rotors turn, 0 to 1: they wind up when someone climbs in and down after. */
@@ -63,6 +141,10 @@ class VehicleView {
   /** The scanned truck turned to face along -z (its heading), sat on the ground, wheels free to spin. */
   private build() {
     this.body.clear();
+    const at = VEHICLES[this.state.kind].seat;
+    this.seat.position.set(-at.left, at.y, -at.ahead);
+    this.seat.rotation.y = Math.PI;
+    this.body.add(this.seat);
     this.wheels = [];
     this.rotors = [];
     this.surfaces = [];
@@ -74,6 +156,7 @@ class VehicleView {
       box.castShadow = true;
       this.body.add(box);
       this.surfaces.push({ mesh: box, base: box.material });
+      this.room = { head: Infinity, shoulders: Infinity, floor: Infinity, cushion: Infinity };
       return;
     }
     scene.updateMatrixWorld(true);
@@ -84,7 +167,7 @@ class VehicleView {
     const holder = new THREE.Group();
     holder.add(scene);
     scene.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
-    holder.scale.setScalar(scale);
+    holder.scale.set(scale, scale * (info.stretch ?? 1), scale);
     holder.rotation.y = Math.PI;
     this.body.add(holder);
     // Each tyre spins round its own middle.
@@ -113,15 +196,33 @@ class VehicleView {
       pivot.attach(rotor);
       this.rotors.push({ pivot, axis });
     }
+    // Measured in metres, and placed and turned in the frame of whatever the tyre hangs from:
+    // some files nest them under scaled and turned parts, where the model's own frame is wrong.
+    this.root.updateMatrixWorld(true);
+    const across = new THREE.Vector3(1, 0, 0).applyQuaternion(this.body.getWorldQuaternion(new THREE.Quaternion()));
     for (const tyre of tyres) {
       const b = new THREE.Box3().setFromObject(tyre);
-      const centre = scene.worldToLocal(b.getCenter(new THREE.Vector3()));
       const pivot = new THREE.Group();
-      pivot.position.copy(centre);
+      pivot.position.copy(tyre.parent!.worldToLocal(b.getCenter(new THREE.Vector3())));
       tyre.parent!.add(pivot);
       pivot.attach(tyre);
-      this.wheels.push({ pivot, radius: (b.max.y - b.min.y) / 2 });
+      const axle = across.clone().applyQuaternion(tyre.parent!.getWorldQuaternion(new THREE.Quaternion()).invert());
+      this.wheels.push({ pivot, radius: (b.max.y - b.min.y) / 2, axle, turned: 0 });
     }
+    // The rotors turn over the cabin rather than roofing it.
+    const turning = (o: THREE.Object3D): boolean => this.rotors.some((r) => r.pivot === o) || (!!o.parent && turning(o.parent));
+    let room = ROOMS.get(this.state.kind);
+    if (!room) ROOMS.set(this.state.kind, (room = measureRoom(this.body, info, turning)));
+    this.room = room;
+  }
+
+  /**
+   * Sits `rider` (an avatar's root) in the driver's seat as the car is drawn this frame: turned
+   * with it, and tilted with it on a slope, over bumps and as a minicopter banks.
+   */
+  seatRider(rider: THREE.Object3D) {
+    this.seat.updateWorldMatrix(true, false);
+    this.seat.matrixWorld.decompose(rider.position, rider.quaternion, unscaled);
   }
 
   sync(state: VehicleState) {
@@ -165,6 +266,12 @@ class VehicleView {
     this.root.rotation.y = this.yaw;
     const info = VEHICLES[this.state.kind];
     const p = this.root.position;
+    // Lean with the ground: nose up a hill, side down a slope.
+    const { fx, fz, rx, rz } = axes(this.yaw);
+    const h = (along: number, side: number) => terrainHeight(this.seed, p.x + fx * along + rx * side, p.z + fz * along + rz * side);
+    const half = info.length / 2 - 0.5;
+    const pitch = Math.atan2(h(half, 0) - h(-half, 0), half * 2);
+    const roll = Math.atan2(h(0, info.width / 2) - h(0, -info.width / 2), info.width);
     if (info.flies) {
       // Rotors wind up while someone is at the controls with fuel in the tank.
       const running = this.state.driver !== undefined && this.state.fuel > 0;
@@ -177,24 +284,24 @@ class VehicleView {
       turn = Math.atan2(Math.sin(turn), Math.cos(turn));
       const rate = dt > 0 ? turn / dt : 0;
       const ground = terrainHeight(this.seed, p.x, p.z);
-      const airborne = p.y - ground > 0.3 ? 1 : 0;
-      l.pitch += (THREE.MathUtils.clamp(-accel * 0.04 - this.speed * 0.008, -0.35, 0.25) * airborne - l.pitch) * Math.min(1, dt * 3);
-      l.roll += (THREE.MathUtils.clamp(rate * this.speed * 0.02, -0.45, 0.45) * airborne - l.roll) * Math.min(1, dt * 3);
+      const airborne = p.y - ground > 0.3;
+      // Down on its skids it sits on the slope like a car.
+      const wantPitch = airborne ? THREE.MathUtils.clamp(-accel * 0.04 - this.speed * 0.008, -0.35, 0.25) : pitch;
+      const wantRoll = airborne ? THREE.MathUtils.clamp(rate * this.speed * 0.02, -0.45, 0.45) : -roll;
+      l.pitch += (wantPitch - l.pitch) * Math.min(1, dt * 3);
+      l.roll += (wantRoll - l.roll) * Math.min(1, dt * 3);
       l.lastSpeed = this.speed;
       l.lastYaw = this.yaw;
       this.body.rotation.set(l.pitch, 0, l.roll, 'YXZ');
       p.y = Math.max(p.y, ground);
       return;
     }
-    // Lean with the ground: nose up a hill, side down a slope.
-    const { fx, fz, rx, rz } = axes(this.yaw);
-    const h = (along: number, side: number) => terrainHeight(this.seed, p.x + fx * along + rx * side, p.z + fz * along + rz * side);
-    const half = info.length / 2 - 0.5;
-    const pitch = Math.atan2(h(half, 0) - h(-half, 0), half * 2);
-    const roll = Math.atan2(h(0, info.width / 2) - h(0, -info.width / 2), info.width);
     this.body.rotation.set(pitch, 0, -roll, 'YXZ');
     this.root.position.y = Math.max(p.y, (h(half, 0) + h(-half, 0)) / 2);
-    for (const w of this.wheels) w.pivot.rotation.x += (this.speed * dt) / Math.max(0.1, w.radius * this.body.children[0].scale.x);
+    for (const w of this.wheels) {
+      w.turned = (w.turned + (this.speed * dt) / Math.max(0.1, w.radius)) % (Math.PI * 2);
+      w.pivot.quaternion.setFromAxisAngle(w.axle, w.turned);
+    }
   }
 }
 
@@ -245,6 +352,26 @@ export class Vehicles {
       const at = view.root.position.clone().add(new THREE.Vector3(fx * info.length * 0.35, 1.1, fz * info.length * 0.35));
       this.effects.puff(at, 0.5);
     }
+  }
+
+  /**
+   * Sits the driver of car `id` in its seat as drawn (call after update), and says how much room
+   * they have over their head. Null if that car is not in view, to leave the driver where they are.
+   */
+  seat(id: number, rider: THREE.Object3D): Room | null {
+    const view = this.views.get(id);
+    if (!view) return null;
+    view.seatRider(rider);
+    return view.room;
+  }
+
+  /** Where car `id`'s seat is drawn and which way is up for it, for tests. */
+  seatInfo(id: number): { kind: VehicleKind; at: THREE.Vector3; up: THREE.Vector3; room: Room } | null {
+    const view = this.views.get(id);
+    if (!view) return null;
+    const o = new THREE.Object3D();
+    view.seatRider(o);
+    return { kind: view.state.kind, at: o.position, up: new THREE.Vector3(0, 1, 0).applyQuaternion(o.quaternion), room: view.room };
   }
 
   /** The nearest car along a ray, if any, within `max`. */
