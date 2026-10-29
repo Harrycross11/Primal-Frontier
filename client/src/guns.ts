@@ -433,7 +433,7 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
     }
     case 'bottledWater': {
       // A clear plastic bottle, mostly full, with a blue cap and label.
-      const plastic = mat('bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeef5, roughness: 0.08, transmission: 0.5, transparent: true, opacity: 0.45, thickness: 0.01 }));
+      const plastic = mat('bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeef5, roughness: 0.08, transparent: true, opacity: 0.45 }));
       const shape = [[0.001, 0], [0.032, 0], [0.034, 0.01], [0.034, 0.15], [0.026, 0.18], [0.013, 0.2], [0.013, 0.215]].map(([r, y]) => new THREE.Vector2(r, y));
       part(g, new THREE.LatheGeometry(shape, 20), plastic, 0, 0, 0);
       part(g, new THREE.CylinderGeometry(0.031, 0.031, 0.13, 20), mat('bottle-water', () => new THREE.MeshStandardMaterial({ color: 0x8ec4dc, roughness: 0.05, transparent: true, opacity: 0.55 })), 0, 0.075, 0);
@@ -443,7 +443,7 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
     }
     case 'antiRadPills': {
       // An orange pill bottle with a white cap and a yellow warning label.
-      part(g, new THREE.CylinderGeometry(0.024, 0.024, 0.075, 18), mat('pill-bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xd8742a, roughness: 0.2, transmission: 0.25, transparent: true, opacity: 0.85 })), 0, 0.0375, 0);
+      part(g, new THREE.CylinderGeometry(0.024, 0.024, 0.075, 18), mat('pill-bottle', () => new THREE.MeshPhysicalMaterial({ color: 0xd8742a, roughness: 0.2, transparent: true, opacity: 0.85 })), 0, 0.0375, 0);
       part(g, new THREE.CylinderGeometry(0.0245, 0.0245, 0.035, 18, 1, true), mat('pill-label', () => new THREE.MeshStandardMaterial({ color: 0xe0c040, roughness: 0.7 })), 0, 0.035, 0);
       part(g, new THREE.CylinderGeometry(0.027, 0.027, 0.018, 18), mat('pill-cap', () => new THREE.MeshStandardMaterial({ color: 0xece8e0, roughness: 0.6 })), 0, 0.084, 0);
       return g;
@@ -534,7 +534,7 @@ export function buildOtherWeapon(item: ItemId): THREE.Group | null {
       return g;
     }
     case 'syringe': {
-      const glass = mat('syringe-glass', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeaf0, roughness: 0.05, transmission: 0.6, transparent: true, opacity: 0.55, thickness: 0.01 }));
+      const glass = mat('syringe-glass', () => new THREE.MeshPhysicalMaterial({ color: 0xdfeaf0, roughness: 0.05, transparent: true, opacity: 0.55 }));
       part(g, tube(0.012, 0.12, 14), glass, 0, 0.02, 0.05);
       part(g, tube(0.009, 0.08, 12), mat('serum', () => new THREE.MeshStandardMaterial({ color: 0xb03a2e, roughness: 0.3, emissive: 0x300805 })), 0, 0.02, 0.06);
       part(g, tube(0.0012, 0.05, 6), finishMat('steel'), 0, 0.02, 0.135);

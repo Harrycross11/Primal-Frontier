@@ -21,6 +21,8 @@ export interface BodyFit {
   back: number;
   /** Width at the hips. */
   hips: number;
+  /** Width (x) and depth (z) of a thigh, trousers and all, halfway down it. */
+  thigh: { x: number; z: number };
   /** How much thicker the arms are than the survivor's. */
   arm: number;
   /** What was measured, where it is not used as is (the survivor's). */
@@ -36,6 +38,7 @@ export const SURVIVOR_FIT: BodyFit = {
   middle: -0.029,
   back: -0.18,
   hips: 0.369,
+  thigh: { x: 0.165, z: 0.189 },
   arm: 1,
 };
 
@@ -50,6 +53,7 @@ export function bodyFit(name: string, root: THREE.Object3D, scan: THREE.Object3D
   const points: THREE.Vector3[] = [];
   const chest = new THREE.Box3();
   const hips = new THREE.Box3();
+  const thigh = new THREE.Box3();
   root.updateMatrixWorld(true);
   const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const p = new THREE.Vector3();
@@ -69,9 +73,10 @@ export function bodyFit(name: string, root: THREE.Object3D, scan: THREE.Object3D
       if (/Head/.test(bone)) head.expandByPoint(p);
       else if (/Spine|Neck|Shoulder/.test(bone) && p.y > 1.15 && p.y < 1.35) chest.expandByPoint(p);
       else if (/Hips|UpLeg/.test(bone) && p.y > 0.85 && p.y < 1.0) hips.expandByPoint(p);
+      if (/UpLeg/.test(bone) && p.x > 0.02 && p.y > 0.62 && p.y < 0.78) thigh.expandByPoint(p);
     }
   });
-  if (head.isEmpty() || chest.isEmpty() || hips.isEmpty()) return SURVIVOR_FIT;
+  if (head.isEmpty() || chest.isEmpty() || hips.isEmpty() || thigh.isEmpty()) return SURVIVOR_FIT;
   const size = head.getSize(new THREE.Vector3());
   // The face's front: the nose, not an ear or a lock of hair, so only the middle of the head
   // between the brow and the chin.
@@ -86,6 +91,7 @@ export function bodyFit(name: string, root: THREE.Object3D, scan: THREE.Object3D
     middle: (chest.min.z + chest.max.z) / 2,
     back: chest.min.z,
     hips: hips.max.x - hips.min.x,
+    thigh: { x: thigh.max.x - thigh.min.x, z: thigh.max.z - thigh.min.z },
     arm: 1,
   };
   fit.arm = THREE.MathUtils.clamp(fit.chest.x / SURVIVOR_FIT.chest.x, 0.8, 1.1);

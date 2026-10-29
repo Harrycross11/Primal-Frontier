@@ -53,7 +53,7 @@ import { Net } from './net.ts';
 import { buildCharge, buildDeployable, buildPlane, buildSignal } from './props.ts';
 import { WorldMap } from './map.ts';
 import { World, buildPieceMesh } from './world.ts';
-import { forgetIcons, itemIconUrl } from './itemIcons.ts';
+import { drawIconsSoon, forgetIcons, renderIcon } from './itemIcons.ts';
 import { Compass, type CompassMark } from './compass.ts';
 import { Guide } from './guide.ts';
 import { EventBanner } from './eventBanner.ts';
@@ -523,7 +523,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     return out;
   };
 
-  const effects = new Effects(world.scene);
+  const effects = new Effects(world.scene, world.flash);
   effects.listener = camera;
   effects.startAmbience();
   const creatures = new Creatures(world.scene, effects);
@@ -748,6 +748,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   ui.wear = welcome.wear;
   ui.learned = new Set(welcome.learned ?? []);
   ui.render();
+  // Item pictures are drawn in the background as menus ask for them; show them as they come.
+  drawIconsSoon([], () => ui.render());
   // Swap the stand-ins for the scanned guns, tools and crops once they arrive (the world swaps its own).
   // Shaders for the whole world and every model, unless the menu already built them.
   if (!ready) warmShaders(gfx.renderer, camera, world.scene);
@@ -2217,7 +2219,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     storey: STOREY,
     /** The live event going on now, if any. */
     liveEvent: () => liveEvent,
-    iconUrl: (item: ItemId) => itemIconUrl(item),
+    iconUrl: (item: ItemId) => renderIcon(item),
   };
 
   // Game loop.

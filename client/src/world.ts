@@ -72,9 +72,14 @@ const VIEW_SMALL = 90;
 const VIEW_MEDIUM = 170;
 const GRASS_CELL = 24;
 const GRASS_VIEW = 95;
+/** The map's photo from above: a high sun from the top left, over dark earth past the land's edge. */
+const AERIAL_SUN = new THREE.Vector3(-0.55, 1, -0.35).normalize();
+const AERIAL_GROUND = new THREE.Color(0x3a332b);
 
 export class World {
   readonly scene = new THREE.Scene();
+  /** The light of muzzle flashes and blasts, dark until something goes off (see Effects). */
+  readonly flash = new THREE.PointLight(0xffa860, 0, 7, 1.6);
   readonly sun: THREE.DirectionalLight;
   readonly hemi: THREE.HemisphereLight;
   readonly fires: THREE.PointLight[] = [];
@@ -147,6 +152,10 @@ export class World {
       this.fires.push(light);
       this.scene.add(light);
     }
+    // And one for muzzle flashes and blasts. It is part of the world, not added when the game
+    // starts, because every material's shader is built for a set number of lights: one more at
+    // Play would make all of them rebuild, just as the game began.
+    this.scene.add(this.flash);
     this.sun = new THREE.DirectionalLight(0xffe0b8, 2.8);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
@@ -1333,20 +1342,37 @@ export class World {
   /**
    * The whole world photographed from straight above in daylight, as a square canvas `size`
    * pixels across with +x to the right and +z down: the picture the map is drawn on. Rendered
-   * in tiles through the game's own canvas, so it gets the same lighting and tone mapping.
+   * through the game's own canvas, so it gets the same lighting and tone mapping, one tile per
+   * call of `next` (true while tiles are left) so it never holds up a frame for long.
    */
-  aerial(renderer: THREE.WebGLRenderer, hide: THREE.Object3D[] = [], size = 1000): HTMLCanvasElement {
-    const tiles = 4;
+  aerial(renderer: THREE.WebGLRenderer, hide: THREE.Object3D[] = [], size = 1000): { canvas: HTMLCanvasElement; next: () => boolean } {
+    const tiles = 8;
     const px = Math.ceil(size / tiles);
-    const out = document.createElement('canvas');
-    out.width = out.height = px * tiles;
-    const ctx = out.getContext('2d')!;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = px * tiles;
+    const ctx = canvas.getContext('2d')!;
+    let n = 0;
+    return {
+      canvas,
+      next: () => {
+        if (n < tiles * tiles) this.aerialTile(renderer, hide, n % tiles, Math.floor(n / tiles), tiles, px, ctx);
+        n++;
+        return n < tiles * tiles;
+      },
+    };
+  }
+
+  private aerialTile(renderer: THREE.WebGLRenderer, hide: THREE.Object3D[], tx: number, ty: number, tiles: number, px: number, ctx: CanvasRenderingContext2D) {
     const canvas = renderer.domElement;
     const ratio = renderer.getPixelRatio();
-    // Everything shown, nothing in the air, no haze, and a high, even sun with no shadow map.
+    // Everything shown, nothing in the air, no haze, and a high, even sun with no shadows. The
+    // haze is thinned to nothing, the sun moved rather than swapped and its shadows faded rather
+    // than switched off: the same lights and haze as the game, so every material draws with the
+    // game's own shaders and none has to be built just for the map.
     const hidden: THREE.Object3D[] = [];
     this.scene.traverse((o) => {
-      const loose = (o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite;
+      // Nor the copies of things shaders are being built for, which stand behind the camera a moment.
+      const loose = (o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite || o.userData.warmUp;
       if (loose && o.visible) {
         o.visible = false;
         hidden.push(o);
@@ -1367,50 +1393,56 @@ export class World {
       }
     }
     const background = this.scene.background;
-    this.scene.background = new THREE.Color(0x3a332b);
-    const fog = this.scene.fog;
-    this.scene.fog = null;
-    const sunWas = this.sun.visible;
-    this.sun.visible = false;
+    this.scene.background = AERIAL_GROUND;
+    const fog = this.scene.fog as THREE.FogExp2 | null;
+    const density = fog?.density ?? 0;
+    if (fog) fog.density = 0;
+    const sun = this.sun;
+    const sunWas = { position: sun.position.clone(), colour: sun.color.clone(), intensity: sun.intensity };
+    sun.position.copy(sun.target.position).addScaledVector(AERIAL_SUN, 100);
+    sun.color.set(0xfff0dc);
+    sun.intensity = 2.7;
+    // Its shadow map is the one made for the game's last frame, so its shadows are faded out.
+    const shadows = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
+    const shade = sun.shadow.intensity;
+    sun.shadow.intensity = 0;
     const hemiWas = this.hemi.intensity;
     this.hemi.intensity = 0.9;
     const fires = this.fires.map((f) => f.intensity);
     for (const f of this.fires) f.intensity = 0;
     const exposure = renderer.toneMappingExposure;
     renderer.toneMappingExposure = 1.05;
-    const light = new THREE.DirectionalLight(0xfff0dc, 2.7);
-    light.position.set(-0.55, 1, -0.35);
-    this.scene.add(light);
     const tile = WORLD_SIZE / tiles;
     const cam = new THREE.OrthographicCamera(-tile / 2, tile / 2, tile / 2, -tile / 2, 1, 900);
     cam.up.set(0, 0, -1);
     renderer.setScissorTest(true);
     renderer.setViewport(0, 0, px, px);
     renderer.setScissor(0, 0, px, px);
-    for (let ty = 0; ty < tiles; ty++) {
-      for (let tx = 0; tx < tiles; tx++) {
-        const cx = -WORLD_SIZE / 2 + (tx + 0.5) * tile;
-        const cz = -WORLD_SIZE / 2 + (ty + 0.5) * tile;
-        cam.position.set(cx, 400, cz);
-        cam.lookAt(cx, 0, cz);
-        cam.updateMatrixWorld();
-        renderer.render(this.scene, cam);
-        ctx.drawImage(canvas, 0, canvas.height - px * ratio, px * ratio, px * ratio, tx * px, ty * px, px, px);
-      }
+    const cx = -WORLD_SIZE / 2 + (tx + 0.5) * tile;
+    const cz = -WORLD_SIZE / 2 + (ty + 0.5) * tile;
+    cam.position.set(cx, 400, cz);
+    cam.lookAt(cx, 0, cz);
+    cam.updateMatrixWorld();
+    try {
+      renderer.render(this.scene, cam);
+      ctx.drawImage(canvas, 0, canvas.height - px * ratio, px * ratio, px * ratio, tx * px, ty * px, px, px);
+    } finally {
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, Math.floor(canvas.width / ratio), Math.floor(canvas.height / ratio));
+      renderer.toneMappingExposure = exposure;
+      this.fires.forEach((f, k) => (f.intensity = fires[k]));
+      this.hemi.intensity = hemiWas;
+      renderer.shadowMap.autoUpdate = shadows;
+      sun.shadow.intensity = shade;
+      sun.position.copy(sunWas.position);
+      sun.color.copy(sunWas.colour);
+      sun.intensity = sunWas.intensity;
+      if (fog) fog.density = density;
+      this.scene.background = background;
+      for (const o of shown) o.visible = false;
+      for (const o of hidden) o.visible = true;
     }
-    renderer.setScissorTest(false);
-    renderer.setViewport(0, 0, Math.floor(canvas.width / ratio), Math.floor(canvas.height / ratio));
-    this.scene.remove(light);
-    light.dispose();
-    renderer.toneMappingExposure = exposure;
-    this.fires.forEach((f, n) => (f.intensity = fires[n]));
-    this.hemi.intensity = hemiWas;
-    this.sun.visible = sunWas;
-    this.scene.fog = fog;
-    this.scene.background = background;
-    for (const o of shown) o.visible = false;
-    for (const o of hidden) o.visible = true;
-    return out;
   }
 
   update(dt: number, focus: THREE.Vector3, time: number) {

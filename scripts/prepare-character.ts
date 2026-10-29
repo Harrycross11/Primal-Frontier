@@ -65,8 +65,37 @@ const LIMB: Record<string, string> = {
 const MIDDLE: Record<string, string> = { hip: 'Hips', pelvis: 'Hips', spine_01: 'Spine', spine_02: 'Spine1', spine_03: 'Spine2', neck: 'Neck', neck_01: 'Neck', head: 'Head', head_end: 'HeadTop_End' };
 
 /** The Mixamo name for a bone of another rig, or null to leave it be. */
+// Character Creator rigs (CC_Base_L_Upperarm and so on).
+const CC_MIDDLE: Record<string, string> = { Hip: 'Hips', Waist: 'Spine', Spine01: 'Spine1', Spine02: 'Spine2', NeckTwist01: 'Neck', Head: 'Head' };
+const CC_LIMB: Record<string, string> = {
+  Clavicle: 'Shoulder',
+  Upperarm: 'Arm',
+  Forearm: 'ForeArm',
+  Hand: 'Hand',
+  Thigh: 'UpLeg',
+  Calf: 'Leg',
+  Foot: 'Foot',
+  ToeBase: 'ToeBase',
+  UpperarmTwist01: 'ArmTwist',
+  ForearmTwist01: 'ForeArmTwist',
+  ThighTwist01: 'UpLegTwist',
+  CalfTwist01: 'LegTwist',
+};
+const CC_FINGER: Record<string, string> = { Thumb: 'Thumb', Index: 'Index', Mid: 'Middle', Ring: 'Ring', Pinky: 'Pinky' };
+
+function ccName(raw: string): string | null {
+  const name = raw.replace(/^CC_Base_/, '').replace(/_\d+$/, '');
+  if (CC_MIDDLE[name]) return CC_MIDDLE[name];
+  let m = name.match(/^([LR])_(Thumb|Index|Mid|Ring|Pinky)(\d)$/);
+  if (m) return `${SIDE[m[1].toLowerCase()]}Hand${CC_FINGER[m[2]]}${m[3]}`;
+  m = name.match(/^([LR])_(\w+)$/);
+  if (m && CC_LIMB[m[2]]) return `${SIDE[m[1].toLowerCase()]}${CC_LIMB[m[2]]}`;
+  return null;
+}
+
 function mixamoName(raw: string): string | null {
   if (/mixamorig/.test(raw)) return null;
+  if (/^CC_Base_/.test(raw)) return ccName(raw);
   // Renderpeople prefix every bone with the model's name; exports add a node number.
   const name = raw.replace(/^rp_.*?_(?=(root|hip|spine|neck|head|jaw|eye|mouth|shoulder|upperarm|lowerarm|hand|thumb|index|middle|ring|pinky|thigh|calf|upperleg|lowerleg|foot|ball|toe))/, '').replace(/_\d+$/, '').toLowerCase();
   if (MIDDLE[name]) return MIDDLE[name];
@@ -261,7 +290,13 @@ for t in job['tiles']:
             bands = [b.point(lambda v, k=k: v * k) for b, k in zip(im.split(), t['factor'][:3])]
             im = Image.merge('RGB', bands)
         rx, ry = t['repeat']
-        if rx > 1 or ry > 1:
+        if rx * ry > 256:
+            # UVs strewn over hundreds of tiles: only its average colour can be kept.
+            im = im.resize((1, 1), Image.BOX).resize((8, 8))
+        elif rx > 1 or ry > 1:
+            # Each repeat only as big as it will be drawn, or a fine pattern tiled many times
+            # over grows past any memory.
+            im = im.resize((max(4, -(-2 * (x1 - x0) // rx)), max(4, -(-2 * (y1 - y0) // ry))), Image.LANCZOS)
             tiled = Image.new('RGB', (im.width * rx, im.height * ry))
             for i in range(rx):
                 for j in range(ry):
@@ -319,7 +354,7 @@ const tiles = parts.map((p, i) => {
 const atlasFile = join(tmp, 'atlas.jpg');
 writeFileSync(join(tmp, 'job.json'), JSON.stringify({ size, tiles, out: atlasFile }));
 const paint = spawnSync('python3', ['-c', PAINT, join(tmp, 'job.json')], { stdio: 'inherit' });
-if (paint.status) throw new Error('painting the atlas failed');
+if (paint.status !== 0) throw new Error(`painting the atlas failed (${paint.signal ?? paint.status ?? paint.error})`);
 
 // ---- One mesh: every part's vertices in one buffer, UVs moved onto the atlas.
 
@@ -388,7 +423,7 @@ for (const g of groups) {
   const target = Math.min(g.idx.length, Math.floor((budget * g.weight) / totalWeight) * 3);
   // Seams between the head and body, and between parts, are borders and stay where they are.
   const [out] = MeshoptSimplifier.simplify(new Uint32Array(g.idx), positions, 3, target, 0.2, []);
-  kept.push(...out);
+  for (const t of out) kept.push(t);
 }
 
 // Only the vertices still used, renumbered.
@@ -427,6 +462,11 @@ for (const node of meshNodes.slice(1)) node.dispose();
 for (const mesh of old) {
   for (const p of mesh.listPrimitives()) {
     for (const a of [...p.listAttributes(), p.getIndices()]) a?.dispose();
+    // Face shapes (Character Creator people carry hundreds): the game never plays them.
+    for (const target of p.listTargets()) {
+      for (const a of target.listAttributes()) a.dispose();
+      target.dispose();
+    }
     p.dispose();
   }
   mesh.dispose();

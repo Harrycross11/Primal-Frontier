@@ -15,7 +15,7 @@ import { buildHeldItem } from './props.ts';
 import { paintModel } from './paint.ts';
 import { ScanBody } from './scanBody.ts';
 import { type BodyFit, SURVIVOR_FIT, bodyFit } from './bodyFit.ts';
-import { bodyModel, headGear, packOf, tintScan } from './survivorLook.ts';
+import { bodyModel, hatShift, headGear, packOf, tintScan } from './survivorLook.ts';
 import { ARM_REST, BONES, type BoneName, HAND, Region, survivorGeometry } from './survivorMesh.ts';
 import { clothSurface, leatherSurface } from './textures.ts';
 
@@ -334,7 +334,7 @@ export class Avatar {
     // The modelled body draws nothing but keeps its bones, which carry the gear.
     this.drawn.geometry.setDrawRange(0, 0);
     for (const o of this.drawn.fitted) o.visible = false;
-    tintScan(scan, this.look, name === 'survivor');
+    tintScan(scan, this.look, name);
 
     // The scan is fitted to the skeleton in its bind pose, at the origin: stand it there for now.
     const parent = this.root.parent;
@@ -363,6 +363,12 @@ export class Avatar {
     this.gear = { hood: [], face: [] };
     for (const { mesh, kind } of headGear(this.look)) {
       this.fitTo('head', mesh, false, kind === 'face');
+      if (kind === 'hood') {
+        const shift = hatShift(this.look);
+        mesh.position.y -= shift.down;
+        mesh.position.z -= shift.back;
+        mesh.scale.multiplyScalar(shift.scale);
+      }
       this.bones.head.add(mesh);
       this.gear[kind].push(mesh);
       this.dressing.push(mesh);
@@ -428,9 +434,13 @@ export class Avatar {
       }
     } else if (/^(hip|knee)/.test(bone)) {
       // Others' scans are cut looser at the thigh than the survivor's: a little room for it.
-      const k = Math.max(0.97, f.hips / s.hips) * (this.dressedAs === 'survivor' ? 1 : 1.05);
-      mesh.position.x *= k;
-      mesh.scale.multiply(new THREE.Vector3(k, 1, k));
+      const room = this.dressedAs === 'survivor' ? 1 : 1.05;
+      mesh.position.x *= Math.max(0.97, f.hips / s.hips) * room;
+      // As wide and deep as their thigh (a vest hanging over it does not count for much).
+      const kx = THREE.MathUtils.clamp(f.thigh.x / s.thigh.x, 0.97, 1.25) * room;
+      const kz = THREE.MathUtils.clamp(f.thigh.z / s.thigh.z, 0.97, 1.25) * room;
+      mesh.position.z *= kz;
+      mesh.scale.multiply(new THREE.Vector3(kx, 1, kz));
     }
     mesh.position.sub(this.bindAt.get(bone)!);
   }
