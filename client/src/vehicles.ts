@@ -106,7 +106,8 @@ class VehicleView {
   private seat = new THREE.Object3D();
   /** The room over the driver: how far up from the seat the roof is. */
   room: Room = { head: Infinity, shoulders: Infinity, floor: Infinity, cushion: Infinity };
-  private wheels: { pivot: THREE.Object3D; radius: number }[] = [];
+  /** Each wheel's pivot at its middle, its axle in the pivot's own frame, and how far round it has turned. */
+  private wheels: { pivot: THREE.Object3D; radius: number; axle: THREE.Vector3; turned: number }[] = [];
   /** A minicopter's rotors, turning about their hubs: the main one flat, the tail one on its side. */
   private rotors: { pivot: THREE.Object3D; axis: 'x' | 'y' }[] = [];
   /** How fast the rotors turn, 0 to 1: they wind up when someone climbs in and down after. */
@@ -195,14 +196,18 @@ class VehicleView {
       pivot.attach(rotor);
       this.rotors.push({ pivot, axis });
     }
+    // Measured in metres, and placed and turned in the frame of whatever the tyre hangs from:
+    // some files nest them under scaled and turned parts, where the model's own frame is wrong.
+    this.root.updateMatrixWorld(true);
+    const across = new THREE.Vector3(1, 0, 0).applyQuaternion(this.body.getWorldQuaternion(new THREE.Quaternion()));
     for (const tyre of tyres) {
       const b = new THREE.Box3().setFromObject(tyre);
-      const centre = scene.worldToLocal(b.getCenter(new THREE.Vector3()));
       const pivot = new THREE.Group();
-      pivot.position.copy(centre);
+      pivot.position.copy(tyre.parent!.worldToLocal(b.getCenter(new THREE.Vector3())));
       tyre.parent!.add(pivot);
       pivot.attach(tyre);
-      this.wheels.push({ pivot, radius: (b.max.y - b.min.y) / 2 });
+      const axle = across.clone().applyQuaternion(tyre.parent!.getWorldQuaternion(new THREE.Quaternion()).invert());
+      this.wheels.push({ pivot, radius: (b.max.y - b.min.y) / 2, axle, turned: 0 });
     }
     // The rotors turn over the cabin rather than roofing it.
     const turning = (o: THREE.Object3D): boolean => this.rotors.some((r) => r.pivot === o) || (!!o.parent && turning(o.parent));
@@ -293,7 +298,10 @@ class VehicleView {
     }
     this.body.rotation.set(pitch, 0, -roll, 'YXZ');
     this.root.position.y = Math.max(p.y, (h(half, 0) + h(-half, 0)) / 2);
-    for (const w of this.wheels) w.pivot.rotation.x += (this.speed * dt) / Math.max(0.1, w.radius * this.body.children[0].scale.x);
+    for (const w of this.wheels) {
+      w.turned = (w.turned + (this.speed * dt) / Math.max(0.1, w.radius)) % (Math.PI * 2);
+      w.pivot.quaternion.setFromAxisAngle(w.axle, w.turned);
+    }
   }
 }
 
