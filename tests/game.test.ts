@@ -856,3 +856,20 @@ test('what a survivor has learned comes back with them after a restart', () => {
   const welcome = again.out.find((o) => o.msg.t === 'welcome')!.msg;
   assert.ok(welcome.t === 'welcome' && welcome.learned.includes('salvagedAxe'), 'and the client is told');
 });
+
+test('a piece over where you stand is refused with a message saying so, but a dead body never blocks', () => {
+  const { game, id } = setup();
+  standAt(game, id, 1.5, 4.5);
+  holdPlan(game, id);
+  give(game, id, 'scrap', 100);
+  const top = foundationTop(SEED, 0, 1);
+  const out = game.place(id, 'foundation', 0, top, 1, 0, 'scrap');
+  assert.equal(game.pieces.size, 0);
+  assert.match(JSON.stringify(out), /You are standing where it goes/);
+
+  const other = game.join('Body', 0)!.id;
+  standAt(game, other, 4.5, 4.5);
+  game.players.get(other)!.dead = true;
+  game.place(id, 'foundation', 1, foundationTop(SEED, 1, 1), 1, 0, 'scrap');
+  assert.equal(game.pieces.size, 1, 'built over the dead');
+});

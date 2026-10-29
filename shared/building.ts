@@ -3,7 +3,7 @@
 // Walls can be edited into windows, doors and half walls. Shared by client and server so
 // both agree on where pieces sit, what they cost and what space they take up.
 
-import { HALF_WORLD } from './constants.ts';
+import { HALF_WORLD, PLAYER_HEIGHT, PLAYER_RADIUS } from './constants.ts';
 import { terrainHeight } from './terrain.ts';
 import type { Material } from './world.ts';
 
@@ -192,6 +192,17 @@ export function boxesTouch(a: Box, b: Box, pad = 0.05): boolean {
     if (a.min[i] > b.max[i] + pad || b.min[i] > a.max[i] + pad) return false;
   }
   return true;
+}
+
+/** The room a survivor takes up, standing with their feet here. */
+export function standBox(x: number, y: number, z: number): Box {
+  return box(x - PLAYER_RADIUS, y, z - PLAYER_RADIUS, x + PLAYER_RADIUS, y + PLAYER_HEIGHT, z + PLAYER_RADIUS);
+}
+
+/** True when a piece's solid parts would close over a survivor standing here. */
+export function pieceOnStand(p: Piece, x: number, y: number, z: number): boolean {
+  const me = standBox(x, y, z);
+  return pieceBoxes(p).some((b) => boxesTouch(b, me, -0.02));
 }
 
 export function validPieceShape(p: Piece): boolean {
