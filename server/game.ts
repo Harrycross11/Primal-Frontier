@@ -922,9 +922,9 @@ export class Game {
     if (!p) return [];
     if (p.slots[p.active]?.item !== 'buildingPlan') return [notice(id, 'Hold a building plan to build')];
     const piece: Piece = { kind, i, y, k, dir: kind === 'wall' || isSlope({ kind }) ? dir : 0, material, edit: 'solid', hp: MAX_HP[material] };
-    if (!validPieceShape(piece)) return [];
+    if (!validPieceShape(piece)) return [notice(id, "Can't build there")];
     const key = pieceKey(piece);
-    if (this.pieces.has(key)) return [];
+    if (this.pieces.has(key)) return [notice(id, 'Something is already built there')];
     const bounds = pieceBounds(piece);
     if (!this.inReach(p, bounds)) return [notice(id, 'Too far away')];
     if (this.landmarkAt(bounds)) return [notice(id, this.landmarkAt(bounds)!)];

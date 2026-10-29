@@ -1203,7 +1203,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     if (e.code === 'KeyM') map.toggle(mapMarks());
     const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
     if (n >= 0) selectSlot(n);
-    if (e.code === 'KeyR' && held() === 'buildingPlan') material = MATERIALS[(MATERIALS.indexOf(material) + 1) % MATERIALS.length];
+    if (e.code === 'KeyR' && held() === 'buildingPlan') material = nextMaterial();
     if (e.code === 'KeyR' && heldGun()) reload();
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyG') editTarget();
@@ -1579,8 +1579,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     }
     if ((aimPlayer || aimHound || aimVehicle) && item !== 'buildingPlan' && !DEPLOYABLE_KINDS.includes(item as DeployableKind)) return melee();
     if (item === 'buildingPlan') {
-      if (!proposal) return;
-      if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}`);
+      if (!proposal) return hud.notice("Can't build there: aim at the ground or your base, a little closer");
+      if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()} to build with ${ITEMS[material].name.toLowerCase()}`);
+      if (blockedAt(pieceBounds(proposal))) return hud.notice("Building blocked: someone else's tool cupboard is near");
+      if (!pieceSupported(world.seed, proposal, world.pieces.values())) return hud.notice('Must connect to the ground or another piece');
       net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material, ...(buildPaint && { paint: buildPaint }) });
       me.swing();
       return;
@@ -1768,9 +1770,30 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const ghostEdgeMat = new THREE.LineBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.9, depthWrite: false });
   let ghost: THREE.Group | null = null;
   let ghostKey = '';
+  /** Enough of a material for one piece. */
+  const affords = (m: Material) => countItem(slots, m) >= PIECE_COST;
+  /** R steps on to the next material you have enough of (or simply the next, if you have none). */
+  function nextMaterial(): Material {
+    const any = MATERIALS.some(affords);
+    for (let n = 1; n < MATERIALS.length; n++) {
+      const m = MATERIALS[(MATERIALS.indexOf(material) + n) % MATERIALS.length];
+      if (!any || affords(m)) return m;
+    }
+    return material;
+  }
+  /** Out of the chosen material, the plan moves on to one you have enough of, and says so. */
+  function keepAffordable() {
+    if (affords(material)) return;
+    const next = MATERIALS.find(affords);
+    if (!next) return;
+    hud.notice(pad.words(`Not enough ${ITEMS[material].name.toLowerCase()}: building with ${ITEMS[next].name.toLowerCase()}. R to change`), 4);
+    material = next;
+  }
+
   function updateGhost() {
     proposal = null;
     if (held() === 'buildingPlan') {
+      keepAffordable();
       const look = new THREE.Vector3();
       camera.getWorldDirection(look);
       proposal = proposePiece(world, pieceKind, material, aim, controller.eye, look, controller.position.y);
