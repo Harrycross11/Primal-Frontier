@@ -12,6 +12,7 @@ import {
   isSlope,
   pieceBounds,
   pieceKey,
+  pieceOnStand,
   type Box,
   type Piece,
   type PieceKind,
@@ -114,6 +115,12 @@ export function proposePiece(
     else if (kind === 'roof') return null;
     else piece = make(i + STEPS[dir][0], baseY + STOREY, k + STEPS[dir][1]);
     if (world.pieces.has(pieceKey(piece))) return null;
+  }
+  // Never on top of yourself: aimed at the square you stand on, it goes one square further on.
+  if (kind !== 'roof' && pieceOnStand(piece, eye.x, feetY, eye.z)) {
+    const next = make(piece.i + (alongX ? sign : 0), piece.y, piece.k + (alongX ? 0 : sign));
+    if (kind === 'foundation' && aim?.piece?.kind !== 'foundation') next.y = foundationTop(world.seed, next.i, next.k);
+    if (!world.pieces.has(pieceKey(next)) && !pieceOnStand(next, eye.x, feetY, eye.z)) piece = next;
   }
   return inReach(eye, piece) ? piece : null;
 }

@@ -30,6 +30,8 @@ import {
   doorBox,
   pieceBounds,
   pieceBoxes,
+  pieceOnStand,
+  standBox,
   pieceKey,
   pieceSupported,
   validPieceShape,
@@ -935,8 +937,8 @@ export class Game {
     }
     const solid = pieceBoxes(piece);
     for (const other of this.players.values()) {
-      const pb = playerBox(other);
-      if (solid.some((b) => boxesTouch(b, pb, -0.02))) return [notice(id, 'Someone is standing there')];
+      if (other.dead || !pieceOnStand(piece, other.x, other.y, other.z)) continue;
+      return [notice(id, other === p ? 'You are standing where it goes: step back a little' : 'Someone is standing there')];
     }
     for (const d of this.deployables.values()) {
       const db = deployableBox(d);
@@ -2842,9 +2844,6 @@ function cleanName(name: unknown): string {
 }
 
 export function playerBox(p: Pick<PlayerState, 'x' | 'y' | 'z'>): Box {
-  return {
-    min: [p.x - PLAYER_RADIUS, p.y, p.z - PLAYER_RADIUS],
-    max: [p.x + PLAYER_RADIUS, p.y + PLAYER_HEIGHT, p.z + PLAYER_RADIUS],
-  };
+  return standBox(p.x, p.y, p.z);
 }
 

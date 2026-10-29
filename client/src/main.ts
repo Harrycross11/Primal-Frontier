@@ -12,6 +12,7 @@ import {
   WALL_EDITS,
   pieceBounds,
   pieceKey,
+  pieceOnStand,
   pieceSupported,
   type DoorKind,
   type Piece,
@@ -1583,6 +1584,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       if (countItem(slots, material) < PIECE_COST) return hud.notice(`Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()} to build with ${ITEMS[material].name.toLowerCase()}`);
       if (blockedAt(pieceBounds(proposal))) return hud.notice("Building blocked: someone else's tool cupboard is near");
       if (!pieceSupported(world.seed, proposal, world.pieces.values())) return hud.notice('Must connect to the ground or another piece');
+      if (onMe(proposal)) return hud.notice('You are standing where it goes: step back a little');
       net.send({ t: 'place', kind: proposal.kind, i: proposal.i, y: proposal.y, k: proposal.k, dir: proposal.dir, material, ...(buildPaint && { paint: buildPaint }) });
       me.swing();
       return;
@@ -1770,6 +1772,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   const ghostEdgeMat = new THREE.LineBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.9, depthWrite: false });
   let ghost: THREE.Group | null = null;
   let ghostKey = '';
+  /** A piece that would close over you where you stand. */
+  const onMe = (p: Piece) => pieceOnStand(p, controller.position.x, controller.position.y, controller.position.z);
   /** Enough of a material for one piece. */
   const affords = (m: Material) => countItem(slots, m) >= PIECE_COST;
   /** R steps on to the next material you have enough of (or simply the next, if you have none). */
@@ -1811,7 +1815,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       ghostKey = key;
     }
     if (proposal) {
-      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values()) && !blockedAt(pieceBounds(proposal));
+      const ok = countItem(slots, material) >= PIECE_COST && pieceSupported(world.seed, proposal, world.pieces.values()) && !blockedAt(pieceBounds(proposal)) && !onMe(proposal);
       ghostMat.color.set(ok ? 0x4fb3ff : 0xff5a4a);
       ghostEdgeMat.color.set(ok ? 0xbfe6ff : 0xffb0a0);
       // A slow pulse, so the preview reads as a preview and not a built piece.
