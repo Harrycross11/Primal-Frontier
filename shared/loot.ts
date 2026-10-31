@@ -3,7 +3,7 @@
 // adds a share of what it is known for. Shared so tests and the client agree on the tables.
 
 import type { BiomeId } from './biomes.ts';
-import { newStack, type ItemId, type Stack } from './items.ts';
+import { ITEMS, newStack, type ItemId, type Stack } from './items.ts';
 import { rollBlueprint } from './techTree.ts';
 
 export type LootKind = 'crate' | 'militaryCrate' | 'supplyDrop' | 'lockedCrate';
@@ -170,7 +170,15 @@ export function rollLoot(kind: LootKind, land: BiomeId | null, rand: () => numbe
   const left = [...table];
   const out: Stack[] = [];
   const count = rolls[0] + Math.floor(rand() * (rolls[1] - rolls[0] + 1));
-  const take = (roll: Roll) => out.push(newStack(roll.item, roll.min + Math.floor(rand() * (roll.max - roll.min + 1))));
+  // A roll bigger than one stack holds (five syringes, 180 rifle rounds) comes as several stacks.
+  const take = (roll: Roll) => {
+    let n = roll.min + Math.floor(rand() * (roll.max - roll.min + 1));
+    while (n > 0) {
+      const c = Math.min(n, ITEMS[roll.item].stack);
+      out.push(newStack(roll.item, c));
+      n -= c;
+    }
+  };
   for (let n = 0; n < count && left.length; n++) {
     let pick = rand() * left.reduce((s, x) => s + x.weight, 0);
     const i = left.findIndex((x) => (pick -= x.weight) < 0);
