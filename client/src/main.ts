@@ -10,10 +10,14 @@ import {
   PIECE_COST,
   STOREY,
   WALL_EDITS,
+  boxesTouch,
   pieceBounds,
+  pieceBoxes,
   pieceKey,
   pieceOnStand,
   pieceSupported,
+  standBox,
+  type Box,
   type DoorKind,
   type Piece,
   type PieceKind,
@@ -1454,6 +1458,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   /** The face the crosshair is on (world space), and whether it is a door rather than its wall. */
   let aimNormal: THREE.Vector3 | null = null;
   let aimDoor = false;
+  /** A wall whose window or doorway the crosshair looks through (see updateAim). */
+  let aimOpening: Piece | null = null;
   let proposal: Piece | null = null;
 
   function updateAim() {
@@ -1513,6 +1519,27 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       aimDeployable = null;
       aim = null;
     }
+    // A wall with a hole in it (window, doorway, half wall) whose hole the crosshair goes
+    // through: G and a door in your hands still mean that wall, though the ray misses its frame.
+    aimOpening = null;
+    if (!aimVehicle && !aimPlayer && !aimHound && aim?.piece?.kind !== 'wall') {
+      const reach = aim ? camera.position.distanceTo(aim.point) : raycaster.far;
+      let nearest = reach;
+      const hit = new THREE.Vector3();
+      const slab = new THREE.Box3();
+      for (const p of world.pieces.values()) {
+        if (p.kind !== 'wall' || p.edit === 'solid' || !inReach(controller.eye, p)) continue;
+        const b = pieceBounds(p);
+        slab.min.fromArray(b.min);
+        slab.max.fromArray(b.max);
+        if (!raycaster.ray.intersectBox(slab, hit)) continue;
+        const t = hit.distanceTo(raycaster.ray.origin);
+        if (t < nearest && t >= camera.position.distanceTo(controller.eye) - 0.5) {
+          nearest = t;
+          aimOpening = p;
+        }
+      }
+    }
   }
 
   function isVisible(o: THREE.Object3D): boolean {
@@ -1560,7 +1587,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       return me.swing();
     }
     if (item && DOOR_KINDS.includes(item as DoorKind)) {
-      const p = aim?.piece;
+      const p = aim?.piece?.kind === 'wall' ? aim.piece : aimOpening;
       if (p?.kind !== 'wall' || p.edit !== 'door') return hud.notice('Aim at a doorway: press G on a wall to make one');
       if (p.door) return hud.notice('There is already a door here');
       if (!inReach(controller.eye, p)) return hud.notice('Too far away');
@@ -1591,6 +1618,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
     }
     if (item && DEPLOYABLE_KINDS.includes(item as DeployableKind)) {
       if (!deployGhost.visible) return hud.notice('Aim at open ground or a floor nearby');
+      if (deployProblem) return hud.notice(deployProblem);
       const p = deployGhost.position;
       net.send({ t: 'deploy', slot: ui.active, x: p.x, y: p.y, z: p.z, rot: deployGhost.rotation.y });
       return;
@@ -1708,7 +1736,7 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       if (!deployableInRange(aimDeployable, OPEN_RANGE)) return hud.notice('Get closer to the tool cupboard');
       return net.send({ t: 'clearAuth', id: aimDeployable.id });
     }
-    const piece = aim?.piece;
+    const piece = aim?.piece?.kind === 'wall' ? aim.piece : aimOpening;
     if (!piece || piece.kind !== 'wall') return hud.notice('Look at a wall to edit it');
     if (!inReach(controller.eye, piece)) return hud.notice('Too far away');
     const next = WALL_EDITS[(WALL_EDITS.indexOf(piece.edit) + 1) % WALL_EDITS.length];
@@ -1828,6 +1856,8 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
   deployGhost.visible = false;
   world.scene.add(deployGhost);
   let deployGhostKind: DeployableKind | null = null;
+  /** Why the deployable in your hands can't go where the preview is, if it can't. */
+  let deployProblem: string | null = null;
   function updateDeployGhost() {
     const item = held();
     const kind = item && DEPLOYABLE_KINDS.includes(item as DeployableKind) ? (item as DeployableKind) : null;
@@ -1847,13 +1877,29 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       deployGhostKind = kind;
     }
     deployGhost.visible = false;
+    deployProblem = null;
     if (!kind || !aimSurface) return;
     const box = deployableBox({ kind, x: aimSurface.point.x, y: aimSurface.y, z: aimSurface.point.z, rot: controller.yaw });
     if (distanceToBox(controller.eye, box) > BUILD_RANGE) return;
     deployGhost.position.set(aimSurface.point.x, aimSurface.y, aimSurface.point.z);
     deployGhost.rotation.y = controller.yaw;
     deployGhost.visible = true;
-    ghostMat.color.set(blockedAt(box) ? 0xff5a4a : 0x4fb3ff);
+    deployProblem = whyNotDeploy(box);
+    ghostMat.color.set(deployProblem ? 0xff5a4a : 0x4fb3ff);
+  }
+
+  /**
+   * Why the server would turn down a workbench, furnace or box here, the same checks it makes:
+   * so the preview goes red and a click says why, rather than a blue preview that won't place.
+   */
+  function whyNotDeploy(box: Box): string | null {
+    if (blockedAt(box)) return atLandmark(world.seed, (box.min[0] + box.max[0]) / 2, (box.min[2] + box.max[2]) / 2, 4) ? "You can't build at a landmark" : "Building blocked: someone else's tool cupboard is near";
+    const p = controller.position;
+    if (boxesTouch(box, standBox(p.x, p.y, p.z), -0.02)) return 'You are standing where it goes: step back a little';
+    for (const piece of world.pieces.values()) if (pieceBoxes(piece).some((b) => boxesTouch(box, b, -0.02))) return 'Something is in the way';
+    for (const d of world.deployables.values()) if (boxesTouch(box, deployableBox(d), -0.02)) return 'Something is in the way';
+    for (const r of remotes.values()) if (!r.state.dead && boxesTouch(box, standBox(r.state.x, r.state.y, r.state.z), -0.02)) return 'Someone is standing there';
+    return null;
   }
 
   /** True inside the range of a tool cupboard that doesn't trust you, or on a landmark's ground. */
@@ -1950,8 +1996,9 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const hints = [item === 'codeLock' && !door.locked ? 'Left click to fit the lock' : `E to ${door.open ? 'close' : 'open'}`, 'Left click to hit'];
       return { text: [name, ...hints].join('  ·  '), health: door.hp / DOOR_HP[door.kind] };
     }
-    if (item && DOOR_KINDS.includes(item as DoorKind) && aim?.piece?.kind === 'wall') {
-      const p = aim.piece;
+    const wallAimed = aim?.piece?.kind === 'wall' ? aim.piece : aimOpening;
+    if (item && DOOR_KINDS.includes(item as DoorKind) && wallAimed) {
+      const p = wallAimed;
       return { text: p.edit !== 'door' ? 'Make a doorway first: press G on the wall' : p.door ? 'There is already a door here' : 'Doorway  ·  Left click to hang the door' };
     }
     if (item === 'buildingPlan' && proposal && blockedAt(pieceBounds(proposal))) return { text: "Building blocked: someone else's tool cupboard is near" };
@@ -1960,6 +2007,10 @@ function startGame(net: Net, welcome: Extract<ServerMessage, { t: 'welcome' }>, 
       const name = `${ITEMS[p.material].name} ${p.kind === 'wall' && p.edit !== 'solid' ? `${p.edit === 'half' ? 'half wall' : p.edit}` : PIECE_NAMES[p.kind].toLowerCase()}`;
       const hints = [item !== 'buildingPlan' ? 'Left click to hit' : '', p.kind === 'wall' ? 'G to edit' : '', p.door ? `E to ${p.door.open ? 'close' : 'open'} the door` : ''].filter(Boolean);
       return { text: [name, ...hints].join('  ·  '), health: p.hp / MAX_HP[p.material] };
+    }
+    if (aimOpening && item !== 'buildingPlan') {
+      const p = aimOpening;
+      return { text: `${ITEMS[p.material].name} ${p.edit === 'half' ? 'half wall' : p.edit === 'door' ? 'doorway' : p.edit}  ·  G to edit`, health: p.hp / MAX_HP[p.material] };
     }
     if (item === 'buildingPlan' && proposal && countItem(slots, material) < PIECE_COST) return { text: `Need ${PIECE_COST} ${ITEMS[material].name.toLowerCase()}` };
     return { text: '' };

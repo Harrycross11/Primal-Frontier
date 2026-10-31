@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { CRATE_RESPAWN, DROP_FALL, FIRST_DROP, Game, SIGNAL_DELAY, type Outgoing } from '../server/game.ts';
 import { BIOME_IDS, biomeAt } from '../shared/biomes.ts';
 import { CRATE_KINDS, type Deployable } from '../shared/deployables.ts';
-import { countItem, type ItemId } from '../shared/items.ts';
+import { ITEMS, countItem, type ItemId } from '../shared/items.ts';
 import { LANDMARKS, crateSpots, landmarks } from '../shared/landmarks.ts';
 import { BLUEPRINTS, LOOT, rollLoot } from '../shared/loot.ts';
 import { TECH } from '../shared/techTree.ts';
@@ -215,4 +215,15 @@ test('every landmark has a recycler that breaks salvage down into resources', ()
   assert.equal(r.on, false, 'switches off when the top row is empty');
   assert.ok(!r.slots.slice(0, 6).some(Boolean));
   assert.equal(recycleYield('wood'), null, 'raw resources are not taken');
+});
+
+test('no crate hands out a stack bigger than the item stacks to', () => {
+  const rand = mulberry32(11);
+  for (const kind of Object.keys(LOOT) as (keyof typeof LOOT)[]) {
+    for (let n = 0; n < 400; n++) {
+      for (const s of rollLoot(kind, BIOME_IDS[n % BIOME_IDS.length], rand)) {
+        assert.ok(s.count >= 1 && s.count <= ITEMS[s.item].stack, `${kind}: ${s.count} ${s.item} (stacks to ${ITEMS[s.item].stack})`);
+      }
+    }
+  }
 });

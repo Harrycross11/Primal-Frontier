@@ -1203,7 +1203,7 @@ export class Game {
     const blockers: Box[] = [
       ...[...this.pieces.values()].flatMap((piece) => pieceBoxes(piece)),
       ...[...this.deployables.values()].map(deployableBox),
-      ...[...this.players.values()].map(playerBox),
+      ...[...this.players.values()].filter((o) => !o.dead).map(playerBox),
     ];
     if (blockers.some((b) => boxesTouch(box, b, -0.02))) return [notice(id, 'Something is in the way')];
     stack.count -= 1;
@@ -1375,7 +1375,7 @@ export class Game {
     const lock = this.locks.get(key);
     if (!p || !piece?.door || !lock) return [];
     if (!this.inReach(p, doorBox(piece))) return [notice(id, 'Too far away')];
-    if (now < (this.nextCodeAt.get(id) ?? 0)) return [];
+    if (now < (this.nextCodeAt.get(id) ?? 0)) return [notice(id, 'The lock is still buzzing: wait a moment, then try again')];
     this.nextCodeAt.set(id, now + CODE_DELAY * 1000);
     if (code !== lock.code) {
       p.hp = Math.max(1, p.hp - CODE_SHOCK);
